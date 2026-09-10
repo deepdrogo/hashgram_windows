@@ -90,3 +90,7 @@ node_modules/
 apps/desktop/dist/
 apps/desktop/src-tauri/gen/
 
+
+# Sidecar binaries copied in by apps/desktop/release.ps1.
+apps/desktop/src-tauri/binaries/
+

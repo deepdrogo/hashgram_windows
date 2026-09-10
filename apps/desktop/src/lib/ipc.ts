@@ -222,6 +222,157 @@ export interface SpanRecord {
   origin: "rust" | "ui";
 }
 
+// ---- Stage 2: messages, social, calls ------------------------------------
+
+export interface ConversationMeta {
+  group_id: string;
+  name: string;
+  direct: boolean;
+  members: string[];
+  last_preview: string;
+  last_ts: number;
+  disappear_secs: number;
+  unread: number;
+}
+
+export interface AttachmentView {
+  cid: string;
+  key: string;
+  nonce: string;
+  mime: string;
+  size: number;
+  name: string;
+  kind: string;
+  width: number;
+  height: number;
+  duration_ms: number;
+  plaintext_hash: string;
+}
+
+export interface CallSignalView {
+  kind: string;
+  call_id: string;
+  sdp: string;
+  candidate: string;
+  sdp_mid: string;
+  sdp_mline_index: number;
+  video: boolean;
+}
+
+export interface MessageView {
+  id: string;
+  group_id: string;
+  kind: string;
+  sender: string;
+  sender_device: string;
+  outgoing: boolean;
+  this_device: boolean;
+  timestamp_ms: number;
+  text: string;
+  reply_to: string;
+  target: string;
+  reaction: string;
+  attachments: AttachmentView[];
+  disappear_after_secs: number;
+  state: string;
+  expires: number;
+  call_kind: string;
+  call: CallSignalView | null;
+  reactions: Record<string, string[]>;
+  group_name: string;
+}
+
+export interface ChatInfo {
+  members: [string, string, string][];
+  store_nodes: string[];
+  disappear_secs: number;
+  last_sync_secs: number | null;
+}
+
+export interface MediaView {
+  cid: string;
+  mime: string;
+  size: number;
+  kind: string;
+  width: number;
+  height: number;
+  duration_ms: number;
+  content_hash: string;
+}
+
+export interface EventView {
+  id: string;
+  kind: string;
+  author: string;
+  username: string | null;
+  display_name: string | null;
+  sequence: number;
+  timestamp: number;
+  payload: Record<string, unknown>;
+  media: MediaView[];
+  device: string;
+  reactions: Record<string, number>;
+  comments: number;
+  reposts: number;
+  my_reaction: string | null;
+}
+
+export interface FeedPage {
+  events: EventView[];
+  hidden: number;
+  authors: string[];
+}
+
+export interface ProfileView {
+  address: string;
+  profile: Record<string, unknown> | null;
+  following: boolean;
+  block_mode: string | null;
+  events: number;
+}
+
+export interface NodeSetup {
+  roles: string[];
+  storage_gib: number;
+  bandwidth_mbps: number;
+  reward_address: string;
+  moniker: string;
+  auto_register: boolean;
+}
+
+export interface NodeOverview {
+  bundled: boolean;
+  configured: boolean;
+  setup: NodeSetup | null;
+  registration: "none" | "scheduled_task" | "service";
+  running: boolean;
+  operator: string | null;
+  operator_balance_uhash: string | null;
+  status: Record<string, unknown> | null;
+  rewards: Record<string, unknown> | null;
+  provider: Record<string, unknown> | null;
+  assignments: Record<string, unknown> | null;
+  challenges: Record<string, unknown> | null;
+  fraud: Record<string, unknown> | null;
+  chain_rewards: Record<string, unknown> | null;
+  reachability: string;
+  elevated: boolean;
+  chain_gateway: string;
+  binary: string | null;
+}
+
+export interface CallInfra {
+  nodes: Record<string, unknown>[];
+  sfu_available: boolean;
+}
+
+export interface IceServer {
+  urls: string[];
+  username: string;
+  credential: string;
+  expires_at: number;
+}
+
 const call = <T,>(cmd: string, args?: Record<string, unknown>) => invoke<T>(cmd, args);
 
 export const ipc = {
@@ -273,6 +424,70 @@ export const ipc = {
   perfMemory: () => call<number>("perf_memory"),
   openDataDir: () => call<void>("open_data_dir"),
   saveTextFile: (path: string, contents: string) => call<void>("save_text_file", { path, contents }),
+
+  // Messages
+  chatList: () => call<ConversationMeta[]>("chat_list"),
+  chatHistory: (groupId: string, beforeTs?: number, limit?: number) => call<MessageView[]>("chat_history", { groupId, beforeTs, limit }),
+  chatStartDirect: (address: string) => call<string>("chat_start_direct", { address }),
+  chatCreateGroup: (name: string, members: string[]) => call<string>("chat_create_group", { name, members }),
+  chatAddMember: (groupId: string, address: string) => call<void>("chat_add_member", { groupId, address }),
+  chatRemoveMember: (groupId: string, address: string) => call<number>("chat_remove_member", { groupId, address }),
+  chatSendText: (groupId: string, text: string, replyTo?: string) => call<MessageView>("chat_send_text", { groupId, text, replyTo }),
+  chatSendFile: (groupId: string, path: string, caption?: string) => call<MessageView>("chat_send_file", { groupId, path, caption }),
+  chatSendVoice: (groupId: string, audioBase64: string, durationMs: number) => call<MessageView>("chat_send_voice", { groupId, audioBase64, durationMs }),
+  chatAttachment: (attachment: AttachmentView) => call<string>("chat_attachment", { attachment }),
+  chatReact: (groupId: string, target: string, reaction: string) => call<void>("chat_react", { groupId, target, reaction }),
+  chatEdit: (groupId: string, target: string, text: string) => call<void>("chat_edit", { groupId, target, text }),
+  chatDelete: (groupId: string, target: string) => call<void>("chat_delete", { groupId, target }),
+  chatMarkRead: (groupId: string) => call<void>("chat_mark_read", { groupId }),
+  chatTyping: (groupId: string) => call<void>("chat_typing", { groupId }),
+  chatTypingIn: (groupId: string) => call<string[]>("chat_typing_in", { groupId }),
+  chatSetDisappear: (groupId: string, secs: number) => call<void>("chat_set_disappear", { groupId, secs }),
+  chatInfo: (groupId: string) => call<ChatInfo>("chat_info", { groupId }),
+  chatSearch: (query: string) => call<MessageView[]>("chat_search", { query }),
+  chatSyncNow: () => call<number>("chat_sync_now"),
+  chatPublishKeyPackages: () => call<number>("chat_publish_key_packages"),
+
+  // Social
+  feed: (kinds?: string[], tag?: string, beforeTs?: number, limit?: number) => call<FeedPage>("feed", { kinds, tag, beforeTs, limit }),
+  feedRefresh: () => call<number>("feed_refresh"),
+  postCreate: (text: string, hashtags: string[], channel?: string, replyTo?: string, media?: MediaView[]) =>
+    call<EventView>("post_create", { text, hashtags, channel, replyTo, media }),
+  commentCreate: (post: string, text: string) => call<EventView>("comment_create", { post, text }),
+  socialReact: (target: string, reaction: string) => call<void>("social_react", { target, reaction }),
+  repost: (post: string, comment?: string) => call<void>("repost", { post, comment }),
+  follow: (address: string, on: boolean) => call<void>("follow", { address, on }),
+  follows: () => call<string[]>("follows"),
+  socialBlock: (address: string, mode: string | null) => call<void>("social_block", { address, mode }),
+  socialBlocks: () => call<[string, string][]>("social_blocks"),
+  profileGet: (address: string, refresh: boolean) => call<ProfileView>("profile_get", { address, refresh }),
+  profileUpdate: (displayName: string, bio: string, avatar?: MediaView) => call<EventView>("profile_update", { displayName, bio, avatar }),
+  postThread: (id: string) => call<[EventView | null, EventView[]]>("post_thread", { id }),
+  mediaUpload: (path: string, durationMs?: number) => call<MediaView>("media_upload", { path, durationMs }),
+  mediaFetch: (media: MediaView) => call<string>("media_fetch", { media }),
+  reelPublish: (media: MediaView, caption: string, hashtags: string[]) => call<EventView>("reel_publish", { media, caption, hashtags }),
+  storyPublish: (media: MediaView, caption: string) => call<EventView>("story_publish", { media, caption }),
+  channelCreate: (name: string, description: string, openPosting: boolean) => call<EventView>("channel_create", { name, description, openPosting }),
+  channels: () => call<EventView[]>("channels"),
+  channelPosts: (channelId: string) => call<EventView[]>("channel_posts", { channelId }),
+  safetyVerdict: (subject: string) => call<unknown>("safety_verdict", { subject }),
+
+  // Node (Earn)
+  nodeOverview: () => call<NodeOverview>("node_overview"),
+  nodeConfigure: (setup: NodeSetup) => call<string>("node_configure", { setup }),
+  nodeInstall: () => call<string>("node_install"),
+  nodeStart: () => call<void>("node_start"),
+  nodeStop: () => call<void>("node_stop"),
+  nodeUninstall: () => call<void>("node_uninstall"),
+  nodeGenerateColdAddress: () => call<{ words: string[]; address: string }>("node_generate_cold_address"),
+  nodeLogTail: (lines?: number) => call<string>("node_log_tail", { lines }),
+
+  // Calls
+  callsDiscover: () => call<CallInfra>("calls_discover"),
+  callsTurn: () => call<IceServer>("calls_turn"),
+  callsSignal: (groupId: string, kind: string, callId: string, opts: { sdp?: string; candidate?: string; sdpMid?: string; sdpMlineIndex?: number; video?: boolean } = {}) =>
+    call<void>("calls_signal", { groupId, kind, callId, sdp: opts.sdp, candidate: opts.candidate, sdpMid: opts.sdpMid, sdpMlineIndex: opts.sdpMlineIndex, video: opts.video ?? false }),
+  callsSignals: (groupId: string, sinceMs: number) => call<MessageView[]>("calls_signals", { groupId, sinceMs }),
 };
 
 export type Events = {
@@ -281,6 +496,9 @@ export type Events = {
   "settings:changed": void;
   "tx:update": { hash: string; state: string; height?: number; raw_log?: string };
   "deep-link": { url: string };
+  "chat:changed": { group_id?: string; new?: number; expired?: number };
+  "chat:unread": number;
+  "feed:changed": number;
 };
 
 export function on<K extends keyof Events>(

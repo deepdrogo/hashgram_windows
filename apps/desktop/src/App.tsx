@@ -8,7 +8,7 @@ import { Onboarding } from "./routes/Onboarding";
 import { Lock } from "./routes/Lock";
 import { Home } from "./routes/Home";
 import { Wallet } from "./routes/wallet/Wallet";
-import { Stage2 } from "./routes/Stage2";
+import { Messages } from "./routes/Messages";
 
 const Founder = lazy(() => import("./routes/Founder").then((m) => ({ default: m.Founder })));
 const Supply = lazy(() => import("./routes/Supply").then((m) => ({ default: m.Supply })));
@@ -17,6 +17,10 @@ const Settings = lazy(() => import("./routes/Settings").then((m) => ({ default: 
 const Help = lazy(() => import("./routes/Help").then((m) => ({ default: m.Help })));
 const Earn = lazy(() => import("./routes/Earn").then((m) => ({ default: m.Earn })));
 const Profile = lazy(() => import("./routes/Profile").then((m) => ({ default: m.Profile })));
+const Feed = lazy(() => import("./routes/Feed").then((m) => ({ default: m.Feed })));
+const Reels = lazy(() => import("./routes/Reels").then((m) => ({ default: m.Reels })));
+const Channels = lazy(() => import("./routes/Channels").then((m) => ({ default: m.Channels })));
+const Calls = lazy(() => import("./routes/Calls").then((m) => ({ default: m.Calls })));
 
 type Phase = "boot" | "splash" | "onboarding" | "locked" | "app" | "failed";
 
@@ -116,11 +120,11 @@ export function App() {
       <Match when={phase() === "app"}>
         <HashRouter root={(p) => <Shell>{p.children}<DeepLinks /></Shell>}>
           <Route path="/" component={Home} />
-          <Route path="/messages" component={() => <Stage2 title="Messages" />} />
-          <Route path="/feed" component={() => <Stage2 title="Feed" />} />
-          <Route path="/reels" component={() => <Stage2 title="Reels" />} />
-          <Route path="/channels/*" component={() => <Stage2 title="Channels" />} />
-          <Route path="/calls" component={() => <Stage2 title="Calls" />} />
+          <Route path="/messages/:group?" component={Messages} />
+          <Route path="/feed" component={Feed} />
+          <Route path="/reels" component={Reels} />
+          <Route path="/channels/:id?" component={Channels} />
+          <Route path="/calls" component={Calls} />
           <Route path="/wallet/*" component={Wallet} />
           <Route path="/earn" component={Earn} />
           <Route path="/founder" component={Founder} />

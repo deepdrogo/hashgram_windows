@@ -1,8 +1,9 @@
 // Earn — the network view everyone sees. There is no mining: nodes earn
 // for storing and serving real bytes; the budget is a ceiling, not a
 // guarantee. "Run a node on this PC" is Stage 3.
-import { For, Show } from "solid-js";
-import { Card, Notice, Skeleton, Stat } from "~/components/ui";
+import { For, Show, createSignal, type Resource } from "solid-js";
+import { Card, Notice, Skeleton, Stat, Button } from "~/components/ui";
+import { RunNode } from "./RunNode";
 import { VerifiedBy, Mono } from "~/components/identity";
 import { useChain, readOf, errorOf, valueOf } from "~/lib/chain";
 import { pick, str, arr, coin, num } from "~/lib/ipc";
@@ -41,6 +42,7 @@ export function Earn() {
   const providerList = () => arr(pick(valueOf(providers()), "providers"));
   const scheduleRows = () => arr(pick(valueOf(schedule()), "projections"));
   const w = () => valueOf(welcome());
+  const [showNode, setShowNode] = createSignal(false);
 
   return (
     <div class="page flex flex-col gap-4">

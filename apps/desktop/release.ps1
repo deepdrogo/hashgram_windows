@@ -69,6 +69,16 @@ if ($env:TAURI_SIGNING_PRIVATE_KEY) {
     Write-Host "updater artefacts: no TAURI_SIGNING_PRIVATE_KEY; unsigned builds cannot be published as updates"
 }
 
+Step "sidecars: hashgram-node and the service wrapper (release)"
+Push-Location (Join-Path $root "node")
+cargo build --release -p hashgram-node -p hashgram-node-service
+if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "sidecar build failed" }
+Pop-Location
+$bin = Join-Path $here "src-tauri\binaries"
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+Copy-Item (Join-Path $root "node\target\release\hashgram-node.exe") (Join-Path $bin "hashgram-node-x86_64-pc-windows-msvc.exe") -Force
+Copy-Item (Join-Path $root "node\target\release\hashgram-node-service.exe") (Join-Path $bin "hashgram-node-service-x86_64-pc-windows-msvc.exe") -Force
+
 Step "tauri build (nsis, msi)"
 # PowerShell mangles quoted JSON on the command line; hand Tauri a file.
 $cfgFile = Join-Path $env:TEMP "hashgram-tauri-override.json"

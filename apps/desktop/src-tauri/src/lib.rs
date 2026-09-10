@@ -9,13 +9,16 @@
 #![forbid(clippy::unwrap_used)]
 
 pub mod chain_access;
+pub mod chain_proxy;
 pub mod chat;
 pub mod commands;
+pub mod commands_node;
 pub mod commands_social;
 pub mod crypto;
 pub mod db;
 pub mod help;
 pub mod net;
+pub mod node_manager;
 pub mod paths;
 pub mod perf;
 pub mod settings;
@@ -115,7 +118,12 @@ fn spawn_background(app: tauri::AppHandle, state: Arc<AppState>) {
             }
         });
     }
-    // 3. Messaging: mailbox sync every 4 s while unlocked, feed refresh
+    // 3. Loopback chain gateway for a node on this PC (and hashgram-client).
+    {
+        let st = state.clone();
+        tauri::async_runtime::spawn(chain_proxy::serve(st));
+    }
+    // 4. Messaging: mailbox sync every 4 s while unlocked, feed refresh
     //    every 60 s, expired (disappearing) messages swept every 30 s.
     {
         let st = state.clone();
@@ -350,6 +358,14 @@ pub fn run() {
             commands_social::calls_turn,
             commands_social::calls_signal,
             commands_social::calls_signals,
+            commands_node::node_overview,
+            commands_node::node_configure,
+            commands_node::node_install,
+            commands_node::node_start,
+            commands_node::node_stop,
+            commands_node::node_uninstall,
+            commands_node::node_generate_cold_address,
+            commands_node::node_log_tail,
         ])
         .setup(move |app| {
             #[cfg(desktop)]
