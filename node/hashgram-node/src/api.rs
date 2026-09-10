@@ -979,14 +979,9 @@ async fn chain_passthrough(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
     let chain = s.chain.as_ref().ok_or_else(|| unsupported("chain"))?;
     // Only read paths of the Hashgram and Cosmos modules are forwarded; this
-    // is a convenience for same-host clients, not a proxy.
-    if !(path.starts_with("hashgram/")
-        || path.starts_with("cosmos/bank/")
-        || path.starts_with("cosmos/auth/")
-        || path.starts_with("cosmos/base/"))
-    {
-        return Err(bad("only read queries under hashgram/, cosmos/bank/, cosmos/auth/ and cosmos/base/ are forwarded"));
-    }
+    // is a convenience for same-host clients, not a proxy. The rule is the
+    // one the P2P chain relay enforces, defined once in `chain_relay`.
+    let path = crate::chain_relay::allowed_read_path(&path).map_err(|why| bad(why.message()))?;
     chain.get_json(&path).await.map(Json).map_err(|e| {
         (
             StatusCode::BAD_GATEWAY,

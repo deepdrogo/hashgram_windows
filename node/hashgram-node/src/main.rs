@@ -29,6 +29,7 @@ mod app;
 mod blob;
 mod calls;
 mod chain;
+mod chain_relay;
 mod keys;
 mod mailbox;
 mod rewards;
@@ -362,6 +363,24 @@ async fn run(home: PathBuf, config: PathBuf, insecure_no_chain: bool) -> anyhow:
     {
         let db = store::open(&home, "safety")?;
         services.safety = Some(safety::SafetyService::open(db, &cfg.trusted_attestors)?);
+    }
+    // Chain relay: relay/bootstrap nodes forward allow-listed chain reads
+    // and broadcasts for wallets that have no gateway of their own. It is
+    // a public good, not a rewarded role, and needs the chain to be there.
+    match (&chain, cfg.serves_relay()) {
+        (Some(c), true) => {
+            services.chain_relay = Some(Arc::new(chain_relay::ChainRelayService::new(
+                c.clone(),
+                &mut registry,
+            )));
+            info!("chain relay enabled (allow-listed reads and broadcast over /hashgram/rpc/1)");
+        }
+        (Some(_), false) => {
+            info!("chain relay off: this node does not serve the relay or bootstrap role");
+        }
+        (None, _) => {
+            info!("chain relay off: no chain node configured");
+        }
     }
 
     let turn_secret = if cfg.has_role("call") && !cfg.turn_secret_file.is_empty() {
