@@ -333,14 +333,118 @@ impl Client {
         msgs: Vec<Any>,
         memo: &str,
     ) -> Result<TxResult, ClientError> {
+        let signed = self.prepare(wallet, msgs, memo).await?;
+        let r = self.broadcast_signed(&signed.bytes).await?;
+        // Wait for inclusion.
+        for _ in 0..30 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if let Some(t) = self.tx(&r.txhash).await? {
+                if t.code != 0 {
+                    return Err(ClientError::Rejected {
+                        code: t.code,
+                        log: t.raw_log,
+                    });
+                }
+                return Ok(t);
+            }
+        }
+        Ok(r)
+    }
+
+    /// Signs and broadcasts (sync mode) and returns as soon as the node has
+    /// accepted the transaction into its mempool. The caller tracks
+    /// inclusion with [`Self::tx`]; an application shows "pending" meanwhile.
+    pub async fn sign_and_broadcast_nowait(
+        &self,
+        wallet: &Wallet,
+        msgs: Vec<Any>,
+        memo: &str,
+    ) -> Result<TxResult, ClientError> {
+        let signed = self.prepare(wallet, msgs, memo).await?;
+        self.broadcast_signed(&signed.bytes).await
+    }
+
+    /// Gas and fee for `msgs` as the client would submit them, without
+    /// signing or broadcasting. Refetches the sequence like a real submit.
+    pub async fn fee_preview(
+        &self,
+        wallet: &Wallet,
+        msgs: Vec<Any>,
+        memo: &str,
+    ) -> Result<FeePreview, ClientError> {
         let address = wallet.address().to_string();
+        let (_, sequence) = self.account(&address).await?;
+        let body = tx::Body::new(msgs, memo, 0u32);
+        let (gas_limit, simulated) = self.gas_for(wallet, sequence, &body).await?;
+        let fee_uhash = ((gas_limit as f64) * self.gas_price_uhash).ceil() as u128;
+        Ok(FeePreview {
+            gas_limit,
+            fee_uhash,
+            simulated,
+        })
+    }
+
+    /// Broadcasts already-signed bytes in sync mode.
+    pub async fn broadcast_signed(&self, bytes: &[u8]) -> Result<TxResult, ClientError> {
+        let resp: BroadcastResponse = Self::decode(self.transport.broadcast(bytes).await?)?;
+        let r = resp
+            .tx_response
+            .ok_or_else(|| ClientError::Shape("no tx_response".into()))?;
+        if r.code != 0 {
+            return Err(ClientError::Rejected {
+                code: r.code,
+                log: r.raw_log,
+            });
+        }
+        Ok(to_result(r))
+    }
+
+    /// Builds and signs a transaction: sequence refetched, gas simulated or
+    /// estimated, fee computed, `SIGN_MODE_DIRECT` over this client's chain
+    /// id.
+    pub async fn prepare(
+        &self,
+        wallet: &Wallet,
+        msgs: Vec<Any>,
+        memo: &str,
+    ) -> Result<SignedTx, ClientError> {
+        let address = wallet.address().to_string();
+        // Refetched before every transaction: never a cached sequence.
         let (account_number, sequence) = self.account(&address).await?;
         let chain_id: cosmrs::tendermint::chain::Id = self
             .chain_id
             .parse()
             .map_err(|e| ClientError::Tx(format!("chain id: {e}")))?;
         let body = tx::Body::new(msgs, memo, 0u32);
+        let (gas_limit, simulated) = self.gas_for(wallet, sequence, &body).await?;
+        let fee_amount = ((gas_limit as f64) * self.gas_price_uhash).ceil() as u128;
 
+        let fee = Fee::from_amount_and_gas(coin(fee_amount)?, gas_limit);
+        let auth_info =
+            SignerInfo::single_direct(Some(wallet.public_key()), sequence).auth_info(fee);
+        let sign_doc = SignDoc::new(&body, &auth_info, &chain_id, account_number)
+            .map_err(|e| ClientError::Tx(e.to_string()))?;
+        let raw = sign_doc
+            .sign(wallet.signing_key())
+            .map_err(|e| ClientError::Tx(e.to_string()))?;
+        let bytes = raw.to_bytes().map_err(|e| ClientError::Tx(e.to_string()))?;
+        Ok(SignedTx {
+            bytes,
+            gas_limit,
+            fee_uhash: fee_amount,
+            sequence,
+            simulated,
+        })
+    }
+
+    /// Gas limit for `body`: simulated when the transport can, estimated
+    /// otherwise. Returns `(gas_limit, simulated)`.
+    async fn gas_for(
+        &self,
+        wallet: &Wallet,
+        sequence: u64,
+        body: &tx::Body,
+    ) -> Result<(u64, bool), ClientError> {
         // Simulate with an empty signature to learn gas, when the transport
         // can; the P2P relay does not forward `simulate`, so estimate.
         let gas_limit = if self.transport.can_simulate() {
@@ -365,47 +469,38 @@ impl Client {
                 .gas_info
                 .and_then(|g| g.gas_used.parse().ok())
                 .unwrap_or(200_000);
-            ((gas_used as f64) * self.gas_adjustment).ceil() as u64 + 20_000
+            (((gas_used as f64) * self.gas_adjustment).ceil() as u64 + 20_000, true)
         } else {
-            estimate_gas(&body.messages)
+            (estimate_gas(&body.messages), false)
         };
-        let fee_amount = ((gas_limit as f64) * self.gas_price_uhash).ceil() as u128;
-
-        let fee = Fee::from_amount_and_gas(coin(fee_amount)?, gas_limit);
-        let auth_info =
-            SignerInfo::single_direct(Some(wallet.public_key()), sequence).auth_info(fee);
-        let sign_doc = SignDoc::new(&body, &auth_info, &chain_id, account_number)
-            .map_err(|e| ClientError::Tx(e.to_string()))?;
-        let raw = sign_doc
-            .sign(wallet.signing_key())
-            .map_err(|e| ClientError::Tx(e.to_string()))?;
-        let bytes = raw.to_bytes().map_err(|e| ClientError::Tx(e.to_string()))?;
-
-        let resp: BroadcastResponse = Self::decode(self.transport.broadcast(&bytes).await?)?;
-        let r = resp
-            .tx_response
-            .ok_or_else(|| ClientError::Shape("no tx_response".into()))?;
-        if r.code != 0 {
-            return Err(ClientError::Rejected {
-                code: r.code,
-                log: r.raw_log,
-            });
-        }
-        // Wait for inclusion.
-        for _ in 0..30 {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            if let Some(t) = self.tx(&r.txhash).await? {
-                if t.code != 0 {
-                    return Err(ClientError::Rejected {
-                        code: t.code,
-                        log: t.raw_log,
-                    });
-                }
-                return Ok(t);
-            }
-        }
-        Ok(to_result(r))
+        Ok(gas_limit)
     }
+}
+
+/// A signed transaction ready to broadcast.
+#[derive(Debug, Clone)]
+pub struct SignedTx {
+    /// `TxRaw` bytes.
+    pub bytes: Vec<u8>,
+    /// Gas limit used.
+    pub gas_limit: u64,
+    /// Fee in uhash.
+    pub fee_uhash: u128,
+    /// Account sequence signed with.
+    pub sequence: u64,
+    /// Whether gas came from a simulation (true) or an estimate (false).
+    pub simulated: bool,
+}
+
+/// What a transaction will cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeePreview {
+    /// Gas limit.
+    pub gas_limit: u64,
+    /// Fee in uhash.
+    pub fee_uhash: u128,
+    /// Whether gas came from a simulation.
+    pub simulated: bool,
 }
 
 fn to_result(r: TxResponseJson) -> TxResult {

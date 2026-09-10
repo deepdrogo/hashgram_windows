@@ -84,3 +84,9 @@ target/
 # Chain relay devnet harness state (scripts/testnet/chain-relay-devnet.ps1).
 /devnet-relay/
 
+
+# Frontend dependencies (apps/desktop).
+node_modules/
+apps/desktop/dist/
+apps/desktop/src-tauri/gen/
+

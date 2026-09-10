@@ -1,0 +1,6 @@
+# Hoisted layout: the repository may live on a file system without symlink
+# support (exFAT, some virtual drives). Only esbuild may run a build script.
+nodeLinker: hoisted
+allowBuilds:
+  esbuild: true
+

@@ -75,7 +75,7 @@ pub mod msgs;
 pub mod transport;
 pub mod wallet;
 
-pub use client::{Client, ClientError, TxResult};
+pub use client::{Client, ClientError, FeePreview, SignedTx, TxResult};
 pub use transport::{ChainTransport, HttpTransport, SharedTransport, TransportResponse, Verification};
 pub use wallet::{Wallet, WalletError, BECH32_PREFIX, DENOM};
 

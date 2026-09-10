@@ -63,13 +63,34 @@ struct PeerInfo {
     operator: String,
 }
 
+/// A peer that failed the Hashgram handshake, and why. Kept so a UI can
+/// list "wrong network" nodes greyed out with the reason instead of
+/// retrying them silently.
+#[derive(Debug, Clone)]
+pub struct RejectedPeer {
+    /// Peer id.
+    pub peer: PeerId,
+    /// The swarm's reason string (e.g. genesis mismatch).
+    pub reason: String,
+    /// Seconds since the Unix epoch when it was rejected.
+    pub at: u64,
+}
+
 /// The link.
 pub struct Link {
     handle: NodeHandle,
     peers: Arc<RwLock<HashMap<PeerId, PeerInfo>>>,
+    rejected: Arc<RwLock<Vec<RejectedPeer>>>,
     peerstore_path: Option<std::path::PathBuf>,
     _task: tokio::task::JoinHandle<()>,
     _events: tokio::task::JoinHandle<()>,
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 impl Link {
@@ -112,8 +133,10 @@ impl Link {
                 .map_err(|e| LinkError::Start(e.to_string()))?;
 
         let peers: Arc<RwLock<HashMap<PeerId, PeerInfo>>> = Arc::default();
+        let rejected: Arc<RwLock<Vec<RejectedPeer>>> = Arc::default();
         let (first_tx, mut first_rx) = mpsc::channel::<()>(64);
         let peers_for_task = peers.clone();
+        let rejected_for_task = rejected.clone();
         let inner = handle.clone();
         let events_task = tokio::spawn(async move {
             while let Some(ev) = events.recv().await {
@@ -135,6 +158,17 @@ impl Link {
                     }
                     Event::PeerRejected { peer, reason } => {
                         info!(%peer, reason, "peer rejected");
+                        let mut r = rejected_for_task.write().await;
+                        r.retain(|x| x.peer != peer);
+                        r.push(RejectedPeer {
+                            peer,
+                            reason,
+                            at: unix_now(),
+                        });
+                        // Bounded: a flood of strangers cannot grow this.
+                        if r.len() > 64 {
+                            r.remove(0);
+                        }
                     }
                     Event::InboundRequest { channel, .. } => {
                         // A client serves nothing.
@@ -187,10 +221,17 @@ impl Link {
         Ok(Self {
             handle,
             peers,
+            rejected,
             peerstore_path: peerstore_path.map(Path::to_path_buf),
             _task: task,
             _events: events_task,
         })
+    }
+
+    /// Peers that failed the handshake (wrong network, wrong protocol,
+    /// malformed), most recent last.
+    pub async fn rejected(&self) -> Vec<RejectedPeer> {
+        self.rejected.read().await.clone()
     }
 
     /// The swarm handle.
