@@ -243,6 +243,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hello_support_check_returns_promptly_from_a_worker_thread() {
+        // The app calls this from a blocking pool thread at every start; it
+        // must answer in well under a second, whatever the answer is.
+        let t = std::time::Instant::now();
+        let supported = std::thread::spawn(hello_supported).join().unwrap_or(false);
+        let elapsed = t.elapsed();
+        eprintln!("hello_supported = {supported} in {elapsed:?}");
+        assert!(elapsed < std::time::Duration::from_secs(5), "took {elapsed:?}");
+    }
+
+    #[test]
     fn dpapi_round_trips_and_binds_entropy() {
         let sealed = dpapi_protect(b"passphrase", b"entropy-a").unwrap();
         assert!(!sealed.windows(10).any(|w| w == b"passphrase"));

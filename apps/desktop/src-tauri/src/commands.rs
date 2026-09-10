@@ -1350,6 +1350,35 @@ pub fn open_data_dir(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// A frontend log line (uncaught errors, boot failures) into the Rust log.
+/// Truncated and never containing secrets: the UI only reports messages it
+/// composes itself.
+#[tauri::command]
+pub fn ui_log(level: String, message: String) {
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => tracing::error!(target: "ui", "{msg}"),
+        "warn" => tracing::warn!(target: "ui", "{msg}"),
+        _ => tracing::info!(target: "ui", "{msg}"),
+    }
+}
+
+/// Writes text to a path the user chose in a save dialog (CSV export,
+/// diagnostics). Refuses paths inside the app's own data directory so an
+/// export can never overwrite the vault or database.
+#[tauri::command]
+pub fn save_text_file(path: String, contents: String) -> Result<(), String> {
+    let p = std::path::PathBuf::from(&path);
+    let data = paths::data_dir();
+    if p.starts_with(&data) {
+        return Err("choose a location outside the Hashgram data folder".into());
+    }
+    if contents.len() > 64 * 1024 * 1024 {
+        return Err("export too large".into());
+    }
+    std::fs::write(&p, contents.as_bytes()).map_err(|e| e.to_string())
+}
+
 /// Deep-link payload delivered to the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeepLink {

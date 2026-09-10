@@ -249,6 +249,8 @@ pub fn run() {
             commands::perf_mark,
             commands::perf_memory,
             commands::open_data_dir,
+            commands::save_text_file,
+            commands::ui_log,
         ])
         .setup(move |app| {
             #[cfg(desktop)]
@@ -271,6 +273,12 @@ pub fn run() {
             }
             setup_tray(app)?;
             spawn_background(app.handle().clone(), state.clone());
+            #[cfg(debug_assertions)]
+            if std::env::var("HASHGRAM_DEVTOOLS").map(|v| v == "1").unwrap_or(false) {
+                if let Some(w) = app.get_webview_window("main") {
+                    w.open_devtools();
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
