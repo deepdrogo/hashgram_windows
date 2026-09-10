@@ -11,6 +11,7 @@ members = [
     "hashgram-client",
     "hashgram-devtools",
     "../sdk/rust/hashgram-sdk",
+    "../apps/desktop/src-tauri",
 ]
 
 [workspace.package]

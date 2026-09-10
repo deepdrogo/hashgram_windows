@@ -42,7 +42,7 @@ impl TransportResponse {
 
 /// Who answered a read and whether they agreed. Produced by the P2P relay;
 /// what the UI turns into "verified by 2 nodes".
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Verification {
     /// Peer ids that served the answer that was returned.
     pub peers: Vec<String>,
