@@ -32,12 +32,14 @@ pub fn derive_root_seed(wallet_secret: &[u8]) -> [u8; 32] {
 pub struct Account {
     /// The vault file.
     pub vault: Vault,
-    /// Passphrase, kept to re-encrypt on save.
+    /// Passphrase, kept to re-encrypt on save when no session key is held.
     passphrase: String,
     /// Decrypted contents.
     pub contents: VaultContents,
     /// KDF cost used when writing.
     pub kdf: KdfCost,
+    /// Derived vault key for this session: saves skip the KDF.
+    key: Option<hashgram_identity::vault::VaultKey>,
 }
 
 impl Account {
@@ -63,12 +65,15 @@ impl Account {
         };
         let vault = Vault::at(vault_path);
         vault.create(passphrase, &contents, kdf)?;
+        // One more KDF now buys KDF-free saves for the rest of the session.
+        let key = vault.open_with_key(passphrase).ok().map(|(_, k)| k);
         Ok((
             Self {
                 vault,
                 passphrase: passphrase.to_owned(),
                 contents,
                 kdf,
+                key,
             },
             mnemonic,
         ))
@@ -130,11 +135,14 @@ impl Account {
         };
         let vault = Vault::at(vault_path);
         vault.create(passphrase, &contents, kdf)?;
+        // One more KDF now buys KDF-free saves for the rest of the session.
+        let key = vault.open_with_key(passphrase).ok().map(|(_, k)| k);
         Ok(Self {
             vault,
             passphrase: passphrase.to_owned(),
             contents,
             kdf,
+            key,
         })
     }
 
@@ -159,30 +167,41 @@ impl Account {
         };
         let vault = Vault::at(vault_path);
         vault.create(passphrase, &contents, kdf)?;
+        // One more KDF now buys KDF-free saves for the rest of the session.
+        let key = vault.open_with_key(passphrase).ok().map(|(_, k)| k);
         Ok(Self {
             vault,
             passphrase: passphrase.to_owned(),
             contents,
             kdf,
+            key,
         })
     }
 
-    /// Opens an existing vault.
+    /// Opens an existing vault. The derived key is kept for the session so
+    /// [`Self::save`] does not repeat the KDF.
     pub fn open(vault_path: &Path, passphrase: &str, kdf: KdfCost) -> Result<Self, SdkError> {
         let vault = Vault::at(vault_path);
-        let contents = vault.open(passphrase)?;
+        let (contents, key) = vault.open_with_key(passphrase)?;
         Ok(Self {
             vault,
             passphrase: passphrase.to_owned(),
             contents,
             kdf,
+            key: Some(key),
         })
     }
 
-    /// Re-encrypts the vault with the current contents.
+    /// Re-encrypts the vault with the current contents. Uses the session
+    /// key when one is held (an opened vault), the passphrase otherwise (a
+    /// vault just created: one more KDF, once).
     pub fn save(&self) -> Result<(), SdkError> {
-        self.vault
-            .write(&self.passphrase, &self.contents, self.kdf)?;
+        match &self.key {
+            Some(k) => self.vault.write_with_key(k, &self.contents)?,
+            None => self
+                .vault
+                .write(&self.passphrase, &self.contents, self.kdf)?,
+        }
         Ok(())
     }
 

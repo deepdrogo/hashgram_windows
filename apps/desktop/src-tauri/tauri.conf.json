@@ -26,7 +26,8 @@
         "visible": true,
         "focus": true,
         "zoomHotkeysEnabled": false,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,msEdgeCrashReporting --disable-breakpad --disable-background-networking --disable-component-update --disable-domain-reliability --disable-sync --no-first-run --no-default-browser-check --renderer-process-limit=1 --autoplay-policy=no-user-gesture-required"
       }
     ],
     "security": {

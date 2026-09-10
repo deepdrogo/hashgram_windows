@@ -99,7 +99,7 @@ pub async fn app_status(state: S<'_>, app: AppHandle) -> Result<AppStatus, Strin
     Ok(AppStatus {
         vault_exists: paths::vault_path().exists(),
         unlocked: session.is_some(),
-        address: session.as_ref().map(|s| s.account.address().to_owned()),
+        address: session.as_ref().map(|s| s.address.clone()),
         network: match settings.network.kind {
             NetworkKind::Mainnet => "mainnet".into(),
             NetworkKind::Devnet => "devnet".into(),
@@ -167,8 +167,18 @@ fn db_key_of(account: &mut Account) -> Result<crate::crypto::DbKey, String> {
 async fn open_session(state: &AppState, mut account: Account) -> Result<AccountInfo, String> {
     let db_key = db_key_of(&mut account)?;
     let info = info_of(&account);
+    // Messaging and social state live in the vault; open them now so the
+    // background sync can start, and so a failure is visible at unlock.
+    if let Err(e) = state.chat.open(&account).await {
+        tracing::warn!(error = %e, "messaging state could not be opened");
+    }
+    if let Err(e) = state.social.open(&account).await {
+        tracing::warn!(error = %e, "social state could not be opened");
+    }
+    let address = account.address().to_owned();
     *state.session.write().await = Some(Session {
-        account,
+        account: Arc::new(tokio::sync::Mutex::new(account)),
+        address,
         db_key,
         unlocked_at: Instant::now(),
         last_activity: Instant::now(),
@@ -756,7 +766,7 @@ pub async fn wallet_overview(state: S<'_>) -> Result<WalletOverview, String> {
         .read()
         .await
         .as_ref()
-        .map(|s| s.account.address().to_owned())
+        .map(|s| s.address.clone())
         .ok_or_else(|| "locked".to_owned())?;
     let bal = chain_read(
         &state,
@@ -849,8 +859,8 @@ pub struct TxPreview {
     pub source: Source,
 }
 
-fn wallet_of(session: &Session) -> Result<Wallet, String> {
-    session.account.wallet().map_err(|_| {
+async fn wallet_of(session: &Session) -> Result<Wallet, String> {
+    session.account.lock().await.wallet().map_err(|_| {
         "this device does not hold the wallet key (restore from the 24 words to send)".to_owned()
     })
 }
@@ -861,7 +871,7 @@ pub async fn tx_preview(state: S<'_>, spec: MsgSpec) -> Result<TxPreview, String
     let (wallet, address) = {
         let s = state.session.read().await;
         let s = s.as_ref().ok_or_else(|| "locked".to_owned())?;
-        (wallet_of(s)?, s.account.address().to_owned())
+        (wallet_of(s).await?, s.address.clone())
     };
     let built = spec.build(&address)?;
     let (source, client) = chain_client(&state).await?;
@@ -896,7 +906,7 @@ pub async fn tx_submit(state: S<'_>, app: AppHandle, spec: MsgSpec, memo: String
     let (wallet, address) = {
         let s = state.session.read().await;
         let s = s.as_ref().ok_or_else(|| "locked".to_owned())?;
-        (wallet_of(s)?, s.account.address().to_owned())
+        (wallet_of(s).await?, s.address.clone())
     };
     if memo.len() > 256 {
         return Err("memo is too long".into());
@@ -1011,14 +1021,10 @@ pub struct DeviceInfo {
 #[tauri::command]
 pub async fn identity_status(state: S<'_>) -> Result<IdentityStatus, String> {
     let (address, did, dpk) = {
-        let s = state.session.read().await;
-        let s = s.as_ref().ok_or_else(|| "locked".to_owned())?;
-        let dev = s.account.device().map_err(|e| e.to_string())?;
-        (
-            s.account.address().to_owned(),
-            s.account.contents.device_id.clone(),
-            hex::encode(dev.public_key()),
-        )
+        let (account, _, address) = state.session_handles().await?;
+        let a = account.lock().await;
+        let dev = a.device().map_err(|e| e.to_string())?;
+        (address, a.contents.device_id.clone(), hex::encode(dev.public_key()))
     };
     let (_, client) = chain_client(&state).await?;
     let rotation = account::rotation_count_on_chain(&client, &address)
@@ -1076,25 +1082,24 @@ pub async fn identity_register(state: S<'_>, app: AppHandle, label: String) -> R
         .identity()
         .await
         .ok_or_else(|| "network not started".to_owned())?;
-    let session = state.session.read().await;
-    let s = session.as_ref().ok_or_else(|| "locked".to_owned())?;
-    let address = s.account.address().to_owned();
+    let (account, _, address) = state.session_handles().await?;
     let existing = account::rotation_count_on_chain(&client, &address)
         .await
         .map_err(|e| e.to_string())?;
+    let a = account.lock().await;
     let (r, summary) = if existing.is_none() {
-        let r = account::create_identity_on_chain(&s.account, &identity, &client, &label, "windows")
+        let r = account::create_identity_on_chain(&a, &identity, &client, &label, "windows")
             .await
             .map_err(|e| e.to_string())?;
         (r, format!("Create identity with device \"{label}\""))
     } else {
         let rotation = existing.unwrap_or(0);
-        let device = s.account.device().map_err(|e| e.to_string())?;
+        let device = a.device().map_err(|e| e.to_string())?;
         let r = account::add_device_on_chain(
-            &s.account,
+            &a,
             &identity,
             &client,
-            &s.account.contents.device_id,
+            &a.contents.device_id,
             &device.public_key(),
             rotation,
             &label,
@@ -1104,7 +1109,7 @@ pub async fn identity_register(state: S<'_>, app: AppHandle, label: String) -> R
         .map_err(|e| e.to_string())?;
         (r, format!("Add device \"{label}\""))
     };
-    drop(session);
+    drop(a);
     let st = if r.height > 0 { "committed" } else { "pending" };
     state.db.pending_put(&r.txhash, &summary, st)?;
     if st == "pending" {

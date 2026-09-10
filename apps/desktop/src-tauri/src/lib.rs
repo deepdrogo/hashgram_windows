@@ -9,7 +9,9 @@
 #![forbid(clippy::unwrap_used)]
 
 pub mod chain_access;
+pub mod chat;
 pub mod commands;
+pub mod commands_social;
 pub mod crypto;
 pub mod db;
 pub mod help;
@@ -17,6 +19,7 @@ pub mod net;
 pub mod paths;
 pub mod perf;
 pub mod settings;
+pub mod social_hub;
 pub mod state;
 pub mod tx;
 pub mod winsec;
@@ -65,6 +68,8 @@ fn build_state() -> Result<Arc<AppState>, String> {
         db,
         perf,
         pending: tokio::sync::Mutex::new(Vec::new()),
+        chat: Arc::new(chat::ChatHub::default()),
+        social: Arc::new(social_hub::SocialHub::default()),
     }))
 }
 
@@ -106,6 +111,54 @@ fn spawn_background(app: tauri::AppHandle, state: Arc<AppState>) {
                 }
                 if n % 5 == 0 {
                     let _ = app.emit("net:changed", ());
+                }
+            }
+        });
+    }
+    // 3. Messaging: mailbox sync every 4 s while unlocked, feed refresh
+    //    every 60 s, expired (disappearing) messages swept every 30 s.
+    {
+        let st = state.clone();
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(4));
+            let mut n: u64 = 0;
+            let mut published_keys = false;
+            loop {
+                tick.tick().await;
+                n += 1;
+                if !st.chat.is_open().await {
+                    published_keys = false;
+                    continue;
+                }
+                if !published_keys {
+                    if let Ok((account, _, _)) = st.session_handles().await {
+                        if let (Some(link), Some(identity)) = (st.net.link().await, st.net.identity().await) {
+                            match st.chat.publish_key_packages(&account, &link, &identity).await {
+                                Ok(n) if n > 0 => {
+                                    tracing::info!(stores = n, "key packages published");
+                                    published_keys = true;
+                                }
+                                Ok(_) => {}
+                                Err(e) => tracing::debug!(error = %e, "key packages not published yet"),
+                            }
+                        }
+                    }
+                }
+                if let Err(e) = commands_social::sync_once(&st, &app).await {
+                    tracing::debug!(error = %e, "mailbox sync");
+                }
+                if n % 8 == 0 {
+                    if let Ok(k) = chat::sweep_expired(&st.db) {
+                        if k > 0 {
+                            let _ = app.emit("chat:changed", serde_json::json!({ "expired": k }));
+                        }
+                    }
+                }
+                if n % 15 == 1 {
+                    if let Err(e) = commands_social::refresh_feed(&st, &app).await {
+                        tracing::debug!(error = %e, "feed refresh");
+                    }
                 }
             }
         });
@@ -251,6 +304,52 @@ pub fn run() {
             commands::open_data_dir,
             commands::save_text_file,
             commands::ui_log,
+            commands_social::chat_list,
+            commands_social::chat_history,
+            commands_social::chat_start_direct,
+            commands_social::chat_create_group,
+            commands_social::chat_add_member,
+            commands_social::chat_remove_member,
+            commands_social::chat_send_text,
+            commands_social::chat_send_file,
+            commands_social::chat_send_voice,
+            commands_social::chat_attachment,
+            commands_social::chat_react,
+            commands_social::chat_edit,
+            commands_social::chat_delete,
+            commands_social::chat_mark_read,
+            commands_social::chat_typing,
+            commands_social::chat_typing_in,
+            commands_social::chat_set_disappear,
+            commands_social::chat_info,
+            commands_social::chat_search,
+            commands_social::chat_sync_now,
+            commands_social::chat_publish_key_packages,
+            commands_social::feed,
+            commands_social::feed_refresh,
+            commands_social::post_create,
+            commands_social::comment_create,
+            commands_social::social_react,
+            commands_social::repost,
+            commands_social::follow,
+            commands_social::follows,
+            commands_social::social_block,
+            commands_social::social_blocks,
+            commands_social::profile_get,
+            commands_social::profile_update,
+            commands_social::post_thread,
+            commands_social::media_upload,
+            commands_social::media_fetch,
+            commands_social::reel_publish,
+            commands_social::story_publish,
+            commands_social::channel_create,
+            commands_social::channels,
+            commands_social::channel_posts,
+            commands_social::safety_verdict,
+            commands_social::calls_discover,
+            commands_social::calls_turn,
+            commands_social::calls_signal,
+            commands_social::calls_signals,
         ])
         .setup(move |app| {
             #[cfg(desktop)]

@@ -83,6 +83,10 @@ pub struct Received {
     pub sender_device: String,
     /// The message.
     pub message: ChatView,
+    /// The message as decoded, with everything the view drops (attachment
+    /// keys and nonces, reply target, disappearing timer) for applications
+    /// that store and open attachments.
+    pub raw: chat::ChatMessage,
 }
 
 /// A chat message for display.
@@ -776,7 +780,8 @@ impl Messaging {
                         group_id: hex::encode(group_id),
                         sender: addr,
                         sender_device: hex::encode(sender_key),
-                        message: msg.into(),
+                        message: msg.clone().into(),
+                        raw: msg,
                     }))
                 }
                 Inbound::Commit { .. } | Inbound::Proposal { .. } | Inbound::Joined { .. } => {

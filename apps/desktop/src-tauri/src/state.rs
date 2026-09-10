@@ -14,10 +14,17 @@ use crate::net::NetManager;
 use crate::perf::PerfStore;
 use crate::settings::Settings;
 
+/// The unlocked account, shared between the session and the messaging and
+/// social hubs (which persist their state into the vault). Locked only
+/// around reads of keys and around saves, never across network calls.
+pub type SharedAccount = Arc<Mutex<Account>>;
+
 /// An unlocked vault.
 pub struct Session {
     /// The account (wallet, root, device keys).
-    pub account: Account,
+    pub account: SharedAccount,
+    /// Address (cached so reads need no lock).
+    pub address: String,
     /// The database column key from the vault.
     pub db_key: DbKey,
     /// When it was unlocked.
@@ -48,6 +55,10 @@ pub struct AppState {
     pub perf: Arc<PerfStore>,
     /// Transactions still pending (hashes), watched by a background task.
     pub pending: Mutex<Vec<String>>,
+    /// Messaging.
+    pub chat: Arc<crate::chat::ChatHub>,
+    /// Social.
+    pub social: Arc<crate::social_hub::SocialHub>,
 }
 
 impl AppState {
@@ -86,9 +97,19 @@ impl AppState {
         due
     }
 
-    /// Locks the vault: drops the account and the database key.
+    /// Locks the vault: drops the account and the database key, and the
+    /// messaging and social state derived from them.
     pub async fn lock(&self) {
+        self.chat.close().await;
+        self.social.close().await;
         *self.session.write().await = None;
         self.pending_mnemonic.lock().await.take();
+    }
+
+    /// The unlocked account and database key, or "locked".
+    pub async fn session_handles(&self) -> Result<(SharedAccount, crate::crypto::DbKey, String), String> {
+        let s = self.session.read().await;
+        let s = s.as_ref().ok_or_else(|| "locked".to_owned())?;
+        Ok((s.account.clone(), s.db_key.clone(), s.address.clone()))
     }
 }
