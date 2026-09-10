@@ -40,11 +40,25 @@
 pub mod account;
 pub mod blob;
 pub mod calls;
+pub mod chain_relay;
 pub mod link;
 pub mod messaging;
 pub mod social;
 
-pub use hashgram_chain::{self as chain, Client as ChainClient, Wallet};
+pub use hashgram_chain::{
+    self as chain, ChainTransport, Client as ChainClient, Verification, Wallet,
+};
+
+/// A chain client that reads and broadcasts through the P2P relay of the
+/// nodes `link` is connected to, cross-checking every read across two
+/// operators (see [`chain_relay`]). No HTTP endpoint is involved.
+#[must_use]
+pub fn chain_client_over_link(link: std::sync::Arc<link::Link>, chain_id: &str) -> ChainClient {
+    ChainClient::over(
+        std::sync::Arc::new(chain_relay::P2pChainTransport::new(link)),
+        chain_id,
+    )
+}
 pub use hashgram_identity::{self as identity, vault::KdfCost, Vault, VaultContents};
 pub use hashgram_mls::{self as mls, GroupMeta};
 pub use hashgram_net::{self as net, NetworkIdentity};

@@ -9,6 +9,7 @@ members = [
     "hashgram-p2p",
     "hashgram-node",
     "hashgram-client",
+    "hashgram-devtools",
     "../sdk/rust/hashgram-sdk",
 ]
 

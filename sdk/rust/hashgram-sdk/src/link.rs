@@ -162,10 +162,12 @@ impl Link {
 
         // Wait for every bootstrap peer to verify (or the deadline), so the
         // first operation sees the whole set of roles rather than whichever
-        // node answered first.
+        // node answered first. Several addresses of one peer (QUIC and TCP
+        // of the same node) count once, or a single-node network would
+        // always wait out the full deadline.
         if !bootstrap.is_empty() {
             let deadline = tokio::time::Instant::now() + wait;
-            let want = bootstrap.len();
+            let want = distinct_peer_ids(bootstrap);
             loop {
                 if peers.read().await.len() >= want {
                     break;
@@ -389,14 +391,106 @@ impl Link {
         }
     }
 
+    /// Verified peers that relay chain queries (`relay` or `bootstrap`
+    /// role), with their operator addresses.
+    pub async fn chain_relays(&self) -> Vec<KnownPeer> {
+        self.peers()
+            .await
+            .into_iter()
+            .filter(|p| p.roles.iter().any(|r| r == "relay" || r == "bootstrap"))
+            .collect()
+    }
+
+    /// One allow-listed chain read through `peer`. `path` has no leading
+    /// slash and no query string; `query` has no `?`. Returns the gateway's
+    /// answer verbatim (status, body, height).
+    pub async fn chain_get(
+        &self,
+        peer: PeerId,
+        path: &str,
+        query: &str,
+    ) -> Result<ChainAnswer, LinkError> {
+        match self
+            .request(
+                peer,
+                pb::request::Body::ChainQuery(pb::ChainQuery {
+                    path: path.to_owned(),
+                    query: query.to_owned(),
+                }),
+            )
+            .await?
+        {
+            pb::response::Body::ChainQuery(r) => Ok(ChainAnswer {
+                status: u16::try_from(r.status).unwrap_or(u16::MAX),
+                body: r.body,
+                height: r.height,
+            }),
+            _ => Err(LinkError::Unexpected),
+        }
+    }
+
+    /// Hands a signed transaction to `peer` for `POST /cosmos/tx/v1beta1/txs`
+    /// (sync mode). The peer never sees a key.
+    pub async fn chain_broadcast(
+        &self,
+        peer: PeerId,
+        tx_bytes: Vec<u8>,
+    ) -> Result<ChainAnswer, LinkError> {
+        match self
+            .request(
+                peer,
+                pb::request::Body::ChainBroadcast(pb::ChainBroadcast { tx_bytes }),
+            )
+            .await?
+        {
+            pb::response::Body::ChainBroadcast(r) => Ok(ChainAnswer {
+                status: u16::try_from(r.status).unwrap_or(u16::MAX),
+                body: r.body,
+                height: r.height,
+            }),
+            _ => Err(LinkError::Unexpected),
+        }
+    }
+
     /// Stops the swarm, flushing the peerstore.
-    pub async fn shutdown(self) {
+    pub async fn shutdown(&self) {
         self.handle.shutdown().await;
-        let _ = self.peerstore_path;
+        let _ = &self.peerstore_path;
     }
 }
 
+/// A chain gateway answer relayed by a node, verbatim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChainAnswer {
+    /// HTTP status the gateway returned.
+    pub status: u16,
+    /// Body bytes as served.
+    pub body: Vec<u8>,
+    /// Block height the gateway reported, 0 when absent.
+    pub height: u64,
+}
+
 use std::path::Path;
+
+/// Counts distinct `/p2p/<id>` components among bootstrap addresses;
+/// addresses without one count individually.
+fn distinct_peer_ids(addrs: &[Multiaddr]) -> usize {
+    let mut ids = std::collections::HashSet::new();
+    let mut anonymous = 0usize;
+    for a in addrs {
+        let id = a.iter().find_map(|p| match p {
+            hashgram_p2p::Protocol::P2p(id) => Some(id),
+            _ => None,
+        });
+        match id {
+            Some(id) => {
+                ids.insert(id);
+            }
+            None => anonymous += 1,
+        }
+    }
+    ids.len() + anonymous
+}
 
 fn free_port() -> u16 {
     std::net::TcpListener::bind("0.0.0.0:0")
