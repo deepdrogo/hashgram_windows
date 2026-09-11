@@ -61,7 +61,7 @@ for the current user. Unsigned or foreign manifests are refused.
 
 Publishing a new version:
 
-1. bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`;
+1. bump `version` in `src-tauri/tauri.conf.json` and `package.json`;
 2. commit and `git tag vX.Y.Z && git push origin main vX.Y.Z`;
 3. `.github/workflows/desktop-release.yml` builds with `release.ps1`, signs
    with the `TAURI_SIGNING_PRIVATE_KEY` repository secret and uploads
@@ -86,6 +86,6 @@ cannot verify future updates, so keep an offline copy.
 
 ## Data
 
-`%LOCALAPPDATA%\Hashgram`: `vault.json` (encrypted), `hashgram.db`
+`%LOCALAPPDATA%\Hashgram\data` (the program itself sits one level up): `vault.json` (encrypted), `hashgram.db`
 (sealed columns), `peers.json`, `settings.json`, `media-cache\`,
 `node\` (when a node is run from this PC). Uninstall keeps it by default.

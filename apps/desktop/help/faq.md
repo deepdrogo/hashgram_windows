@@ -7,7 +7,7 @@ phone number or password database anywhere in Hashgram.
 
 **Who can reset my passphrase?** Nobody. Restore from the 24 words.
 
-**Where is my data?** On this PC under `%LOCALAPPDATA%\Hashgram`: an
+**Where is my data?** On this PC under `%LOCALAPPDATA%\Hashgram\data`: an
 encrypted vault, an encrypted database and a list of peers. Nothing is
 uploaded anywhere except what you publish to the network.
 

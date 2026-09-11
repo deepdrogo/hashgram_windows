@@ -1,7 +1,7 @@
 //! Earn → Run a node on this PC.
 //!
 //! The app ships `hashgram-node.exe` as a sidecar and manages it: writes
-//! its configuration under `%LOCALAPPDATA%\Hashgram\node`, keeps the
+//! its configuration under `%LOCALAPPDATA%\Hashgram\data\node`, keeps the
 //! node's operator key in the vault (and in the node's key file, which the
 //! node needs to sign receipts — the file is the working copy), registers a
 //! background task so the node runs at logon, and reads its local API for

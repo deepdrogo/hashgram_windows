@@ -6,7 +6,7 @@ name: Desktop release (Windows)
 # self-updates from <repo>/releases/latest/download/latest.json.
 #
 # Release procedure (owner):
-#   1. bump "version" in apps/desktop/src-tauri/tauri.conf.json (and Cargo.toml)
+#   1. bump "version" in apps/desktop/src-tauri/tauri.conf.json and apps/desktop/package.json
 #   2. commit, then:  git tag vX.Y.Z && git push origin main vX.Y.Z
 #   3. this workflow builds, signs and uploads; installed apps pick it up.
 #

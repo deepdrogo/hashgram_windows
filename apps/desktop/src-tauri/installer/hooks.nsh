@@ -17,9 +17,9 @@
   ; but messages stored only on this PC do not come back.
   ${IfNot} ${Silent}
     MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON1 \
-      "Keep your Hashgram vault and messages on this PC?$\r$\n$\r$\nYes keeps them in %LOCALAPPDATA%\Hashgram for a later reinstall (recommended).$\r$\nNo deletes them. You would need your 24 words to get the account back, and messages stored only here would be lost." \
+      "Keep your Hashgram vault and messages on this PC?$\r$\n$\r$\nYes keeps them in %LOCALAPPDATA%\Hashgram\data for a later reinstall (recommended).$\r$\nNo deletes them. You would need your 24 words to get the account back, and messages stored only here would be lost." \
       IDYES +2
-    RMDir /r "$LOCALAPPDATA\Hashgram"
+    RMDir /r "$LOCALAPPDATA\Hashgram\data"
   ${EndIf}
   nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Hashgram" program="$INSTDIR\${MAINBINARYNAME}.exe"'
 !macroend
