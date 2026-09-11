@@ -94,12 +94,15 @@ pnpm tauri build --config $cfgFile
 if ($LASTEXITCODE -ne 0) { Fail "tauri build failed" }
 
 $bundle = Join-Path $root "node\target\release\bundle"
+# Only this version's files: the bundle directory keeps older builds around.
+$version = (Get-Content (Join-Path $here "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json).version
+$mine = "*_${version}_*"
 $artefacts = @()
-$artefacts += Get-ChildItem (Join-Path $bundle "nsis") -Filter *.exe -ErrorAction SilentlyContinue
-$artefacts += Get-ChildItem (Join-Path $bundle "msi") -Filter *.msi -ErrorAction SilentlyContinue
-$artefacts += Get-ChildItem (Join-Path $bundle "nsis") -Filter *.sig -ErrorAction SilentlyContinue
-$artefacts += Get-ChildItem (Join-Path $bundle "msi") -Filter *.sig -ErrorAction SilentlyContinue
-if (-not $artefacts) { Fail "no artefacts found under $bundle" }
+$artefacts += Get-ChildItem (Join-Path $bundle "nsis") -Filter *.exe -ErrorAction SilentlyContinue | Where-Object { $_.Name -like $mine }
+$artefacts += Get-ChildItem (Join-Path $bundle "msi") -Filter *.msi -ErrorAction SilentlyContinue | Where-Object { $_.Name -like $mine }
+$artefacts += Get-ChildItem (Join-Path $bundle "nsis") -Filter *.sig -ErrorAction SilentlyContinue | Where-Object { $_.Name -like $mine }
+$artefacts += Get-ChildItem (Join-Path $bundle "msi") -Filter *.sig -ErrorAction SilentlyContinue | Where-Object { $_.Name -like $mine }
+if (-not $artefacts) { Fail "no artefacts for version $version found under $bundle" }
 
 if ($env:HASHGRAM_CODESIGN_THUMBPRINT) {
     Step "code signing"
@@ -128,7 +131,6 @@ foreach ($a in $artefacts) {
 
 # Updater manifest: the app fetches <release>/latest/download/latest.json and
 # follows `url` only when `signature` verifies against the compiled-in key.
-$version = (Get-Content (Join-Path $here "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json).version
 if ($updater) {
     Step "updater manifest (latest.json)"
     $setup = $artefacts | Where-Object { $_.Extension -eq ".exe" } | Select-Object -First 1
