@@ -361,7 +361,7 @@ mod tests {
         assert!(toml.contains(&format!("chain_api = \"{}\"", crate::chain_proxy::url())));
         assert!(toml.contains(hashgram_sdk::net::MAINNET_GENESIS_HASH));
         assert!(toml.contains("reward_address = \"hash13t8v5"));
-        assert!(!toml.contains("186.241"), "no hardcoded server");
+        assert!(!toml.contains("/ip4/") && !toml.contains("bootstrap_peers"), "no hardcoded server: discovery is the compiled-in list plus the peerstore");
         assert_eq!(std::fs::read_to_string(d.join("operator.key")).unwrap(), "aa".repeat(32));
         let saved: NodeSetup = serde_json::from_slice(&std::fs::read(d.join("setup.json")).unwrap()).unwrap();
         assert_eq!(saved.roles, vec!["store".to_owned(), "bogus".to_owned()]);
