@@ -6,7 +6,18 @@
 //! deep links, single instance). The frontend (SolidJS in WebView2) calls
 //! the commands in [`commands`] and listens for a handful of events.
 
-#![forbid(clippy::unwrap_used)]
+#![cfg_attr(not(test), forbid(clippy::unwrap_used))]
+// Tests may unwrap and index: a panic there is a failed test, not a crash.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::integer_division
+    )
+)]
 
 pub mod chain_access;
 pub mod chain_proxy;
@@ -105,14 +116,14 @@ fn spawn_background(app: tauri::AppHandle, state: Arc<AppState>) {
                 tick.tick().await;
                 n += 1;
                 commands::poll_pending(&st, &app).await;
-                if n % 15 == 0 {
+                if n.is_multiple_of(15) {
                     st.net.measure_latency().await;
                     let _ = app.emit("net:changed", ());
                 }
                 if n % 15 == 7 && st.auto_lock_if_due().await {
                     let _ = app.emit("session:locked", ());
                 }
-                if n % 5 == 0 {
+                if n.is_multiple_of(5) {
                     let _ = app.emit("net:changed", ());
                 }
             }
@@ -141,14 +152,22 @@ fn spawn_background(app: tauri::AppHandle, state: Arc<AppState>) {
                 }
                 if !published_keys {
                     if let Ok((account, _, _)) = st.session_handles().await {
-                        if let (Some(link), Some(identity)) = (st.net.link().await, st.net.identity().await) {
-                            match st.chat.publish_key_packages(&account, &link, &identity).await {
+                        if let (Some(link), Some(identity)) =
+                            (st.net.link().await, st.net.identity().await)
+                        {
+                            match st
+                                .chat
+                                .publish_key_packages(&account, &link, &identity)
+                                .await
+                            {
                                 Ok(n) if n > 0 => {
                                     tracing::info!(stores = n, "key packages published");
                                     published_keys = true;
                                 }
                                 Ok(_) => {}
-                                Err(e) => tracing::debug!(error = %e, "key packages not published yet"),
+                                Err(e) => {
+                                    tracing::debug!(error = %e, "key packages not published yet")
+                                }
                             }
                         }
                     }
@@ -156,7 +175,7 @@ fn spawn_background(app: tauri::AppHandle, state: Arc<AppState>) {
                 if let Err(e) = commands_social::sync_once(&st, &app).await {
                     tracing::debug!(error = %e, "mailbox sync");
                 }
-                if n % 8 == 0 {
+                if n.is_multiple_of(8) {
                     if let Ok(k) = chat::sweep_expired(&st.db) {
                         if k > 0 {
                             let _ = app.emit("chat:changed", serde_json::json!({ "expired": k }));
@@ -389,7 +408,10 @@ pub fn run() {
             setup_tray(app)?;
             spawn_background(app.handle().clone(), state.clone());
             #[cfg(debug_assertions)]
-            if std::env::var("HASHGRAM_DEVTOOLS").map(|v| v == "1").unwrap_or(false) {
+            if std::env::var("HASHGRAM_DEVTOOLS")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+            {
                 if let Some(w) = app.get_webview_window("main") {
                     w.open_devtools();
                 }

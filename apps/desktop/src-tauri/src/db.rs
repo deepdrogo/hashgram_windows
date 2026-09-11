@@ -127,7 +127,10 @@ impl Db {
 
     /// Runs `f` with the connection.
     pub fn with<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T, String> {
-        let conn = self.conn.lock().map_err(|_| "database lock poisoned".to_owned())?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "database lock poisoned".to_owned())?;
         f(&conn).map_err(|e| e.to_string())
     }
 
@@ -195,7 +198,13 @@ impl Db {
     }
 
     /// Updates a transaction's state.
-    pub fn pending_update(&self, hash: &str, state: &str, height: u64, raw_log: &str) -> Result<(), String> {
+    pub fn pending_update(
+        &self,
+        hash: &str,
+        state: &str,
+        height: u64,
+        raw_log: &str,
+    ) -> Result<(), String> {
         self.with(|c| {
             c.execute(
                 "UPDATE pending_tx SET state = ?2, height = ?3, raw_log = ?4 WHERE hash = ?1",
@@ -328,7 +337,8 @@ mod tests {
             .unwrap();
         assert_eq!(mode.to_lowercase(), "wal");
         let key = crate::crypto::generate_key().unwrap();
-        db.contact_put(&key, "hash1abc", br#"{"name":"Very Secret Friend"}"#).unwrap();
+        db.contact_put(&key, "hash1abc", br#"{"name":"Very Secret Friend"}"#)
+            .unwrap();
         assert_eq!(
             db.contact_get(&key, "hash1abc").unwrap().unwrap(),
             br#"{"name":"Very Secret Friend"}"#

@@ -117,7 +117,10 @@ mod imp {
             .unwrap_or(false)
     }
 
-    fn sign_with(cred: &windows::Security::Credentials::KeyCredential, challenge: &[u8]) -> Result<Vec<u8>, String> {
+    fn sign_with(
+        cred: &windows::Security::Credentials::KeyCredential,
+        challenge: &[u8],
+    ) -> Result<Vec<u8>, String> {
         let writer = DataWriter::new().map_err(|e| e.to_string())?;
         writer.WriteBytes(challenge).map_err(|e| e.to_string())?;
         let buf = writer.DetachBuffer().map_err(|e| e.to_string())?;
@@ -141,8 +144,12 @@ mod imp {
         match s {
             KeyCredentialStatus::UserCanceled => "Windows Hello was cancelled".into(),
             KeyCredentialStatus::NotFound => "no Windows Hello key for Hashgram on this PC".into(),
-            KeyCredentialStatus::UserPrefersPassword => "Windows Hello: user prefers a password".into(),
-            KeyCredentialStatus::CredentialAlreadyExists => "Windows Hello key already exists".into(),
+            KeyCredentialStatus::UserPrefersPassword => {
+                "Windows Hello: user prefers a password".into()
+            }
+            KeyCredentialStatus::CredentialAlreadyExists => {
+                "Windows Hello key already exists".into()
+            }
             KeyCredentialStatus::SecurityDeviceLocked => "the security device is locked".into(),
             _ => "Windows Hello failed".into(),
         }
@@ -190,15 +197,18 @@ mod imp {
 
     /// Working set of this process in bytes.
     pub fn working_set_bytes() -> u64 {
-        use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+        use windows::Win32::System::ProcessStatus::{
+            K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        };
         use windows::Win32::System::Threading::GetCurrentProcess;
-        let mut counters = PROCESS_MEMORY_COUNTERS::default();
-        counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        let mut counters = PROCESS_MEMORY_COUNTERS {
+            cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+            ..Default::default()
+        };
         // SAFETY: `counters` is a properly sized, writable struct; the
         // pseudo-handle from GetCurrentProcess needs no closing.
-        let ok = unsafe {
-            K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb)
-        };
+        let ok =
+            unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) };
         if ok.as_bool() {
             counters.WorkingSetSize as u64
         } else {
@@ -250,14 +260,20 @@ mod tests {
         let supported = std::thread::spawn(hello_supported).join().unwrap_or(false);
         let elapsed = t.elapsed();
         eprintln!("hello_supported = {supported} in {elapsed:?}");
-        assert!(elapsed < std::time::Duration::from_secs(5), "took {elapsed:?}");
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "took {elapsed:?}"
+        );
     }
 
     #[test]
     fn dpapi_round_trips_and_binds_entropy() {
         let sealed = dpapi_protect(b"passphrase", b"entropy-a").unwrap();
         assert!(!sealed.windows(10).any(|w| w == b"passphrase"));
-        assert_eq!(dpapi_unprotect(&sealed, b"entropy-a").unwrap(), b"passphrase");
+        assert_eq!(
+            dpapi_unprotect(&sealed, b"entropy-a").unwrap(),
+            b"passphrase"
+        );
         assert!(dpapi_unprotect(&sealed, b"entropy-b").is_err());
     }
 }

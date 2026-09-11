@@ -207,7 +207,10 @@ mod tests {
             split_path("/cosmos/bank/v1beta1/supply/by_denom?denom=uhash"),
             ("cosmos/bank/v1beta1/supply/by_denom", "denom=uhash")
         );
-        assert_eq!(split_path("hashgram/founder/v1/params"), ("hashgram/founder/v1/params", ""));
+        assert_eq!(
+            split_path("hashgram/founder/v1/params"),
+            ("hashgram/founder/v1/params", "")
+        );
         assert_eq!(split_path("a?b=1?c"), ("a", "b=1?c"));
     }
 

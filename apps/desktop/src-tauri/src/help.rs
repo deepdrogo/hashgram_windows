@@ -29,16 +29,61 @@ macro_rules! pages {
 }
 
 pages![
-    ("quick-start", "Quick start", "docs/CLIENT_CONNECTIVITY_SPEC.md", "quick-start.md"),
-    ("keys", "Your keys and what they control", "docs/SECURITY.md", "keys.md"),
-    ("sending", "Sending and fees", "docs/TOKENOMICS.md", "sending.md"),
-    ("messages", "Messages and devices", "docs/MESSAGING.md", "messages.md"),
-    ("social", "Feed, reels, channels", "docs/SOCIAL_PROTOCOL.md", "social.md"),
+    (
+        "quick-start",
+        "Quick start",
+        "docs/CLIENT_CONNECTIVITY_SPEC.md",
+        "quick-start.md"
+    ),
+    (
+        "keys",
+        "Your keys and what they control",
+        "docs/SECURITY.md",
+        "keys.md"
+    ),
+    (
+        "sending",
+        "Sending and fees",
+        "docs/TOKENOMICS.md",
+        "sending.md"
+    ),
+    (
+        "messages",
+        "Messages and devices",
+        "docs/MESSAGING.md",
+        "messages.md"
+    ),
+    (
+        "social",
+        "Feed, reels, channels",
+        "docs/SOCIAL_PROTOCOL.md",
+        "social.md"
+    ),
     ("calls", "Calls", "docs/CALLS.md", "calls.md"),
-    ("earn", "Earn by running a node", "docs/SERVICE_REWARDS.md", "earn.md"),
-    ("staking", "Staking and governance", "docs/TOKENOMICS.md", "staking.md"),
-    ("network", "Network and nodes", "docs/PROTOCOL.md", "network.md"),
-    ("troubleshooting", "Troubleshooting", "docs/OPERATIONS.md", "troubleshooting.md"),
+    (
+        "earn",
+        "Earn by running a node",
+        "docs/SERVICE_REWARDS.md",
+        "earn.md"
+    ),
+    (
+        "staking",
+        "Staking and governance",
+        "docs/TOKENOMICS.md",
+        "staking.md"
+    ),
+    (
+        "network",
+        "Network and nodes",
+        "docs/PROTOCOL.md",
+        "network.md"
+    ),
+    (
+        "troubleshooting",
+        "Troubleshooting",
+        "docs/OPERATIONS.md",
+        "troubleshooting.md"
+    ),
     ("faq", "FAQ", "docs/ARCHITECTURE.md", "faq.md"),
     ("privacy", "Privacy", "docs/THREAT_MODEL.md", "privacy.md"),
 ];
@@ -69,11 +114,21 @@ mod tests {
     fn every_page_renders_and_none_says_mining() {
         for p in PAGES {
             let html = render(p.slug, "abc1234").unwrap();
-            assert!(html.contains("<h1") || html.contains("<h2"), "{} has no heading", p.slug);
+            assert!(
+                html.contains("<h1") || html.contains("<h2"),
+                "{} has no heading",
+                p.slug
+            );
             let lower = html.to_ascii_lowercase();
             // "no mining" is the one allowed phrasing; "mine"/"mining" as a
             // feature is not.
-            for word in ["start mining", "mining rewards", "mine hash", "gpu", "cpu earning"] {
+            for word in [
+                "start mining",
+                "mining rewards",
+                "mine hash",
+                "gpu",
+                "cpu earning",
+            ] {
                 assert!(!lower.contains(word), "{} mentions {word:?}", p.slug);
             }
         }

@@ -127,7 +127,9 @@ impl Default for NetManager {
 }
 
 fn peer_id_of(addr: &str) -> Option<String> {
-    addr.split("/p2p/").nth(1).map(|s| s.split('/').next().unwrap_or(s).to_owned())
+    addr.split("/p2p/")
+        .nth(1)
+        .map(|s| s.split('/').next().unwrap_or(s).to_owned())
 }
 
 /// The network identity for the current settings.
@@ -137,9 +139,15 @@ pub fn identity_for(settings: &Settings) -> Result<NetworkIdentity, String> {
             hashgram_sdk::net::MAINNET_GENESIS_HASH,
         )),
         NetworkKind::Devnet => {
-            let g = settings.network.devnet_genesis_hash.trim().to_ascii_lowercase();
+            let g = settings
+                .network
+                .devnet_genesis_hash
+                .trim()
+                .to_ascii_lowercase();
             if !NetworkIdentity::is_well_formed_genesis_hash(&g) {
-                return Err("DEVNET profile needs a 64-hex genesis hash (Settings → Network)".into());
+                return Err(
+                    "DEVNET profile needs a 64-hex genesis hash (Settings → Network)".into(),
+                );
             }
             Ok(NetworkIdentity::devnet(&g))
         }
@@ -161,10 +169,7 @@ impl NetManager {
         if bootstrap.is_empty() {
             return Err("no bootstrap peers for this network profile".into());
         }
-        let addrs: Vec<Multiaddr> = bootstrap
-            .iter()
-            .filter_map(|a| a.parse().ok())
-            .collect();
+        let addrs: Vec<Multiaddr> = bootstrap.iter().filter_map(|a| a.parse().ok()).collect();
         {
             let ids: HashSet<String> = bootstrap.iter().filter_map(|a| peer_id_of(a)).collect();
             if configured {
@@ -325,11 +330,11 @@ impl NetManager {
             }
             let served = last_read
                 .as_ref()
-                .map(|v| v.peers.iter().any(|p| *p == s.peer_id))
+                .map(|v| v.peers.contains(&s.peer_id))
                 .unwrap_or(false);
             let disputed = last_read
                 .as_ref()
-                .map(|v| v.disputed.iter().any(|p| *p == s.peer_id))
+                .map(|v| v.disputed.contains(&s.peer_id))
                 .unwrap_or(false);
             peers.push(PeerView {
                 relays_chain: s.roles.iter().any(|r| r == "relay" || r == "bootstrap"),
@@ -364,9 +369,10 @@ impl NetManager {
                 at: r.at,
             })
             .collect();
-        let peerstore_size = hashgram_p2p::peerstore::Peerstore::load(&crate::paths::peerstore_path())
-            .map(|p| p.len())
-            .unwrap_or(0);
+        let peerstore_size =
+            hashgram_p2p::peerstore::Peerstore::load(&crate::paths::peerstore_path())
+                .map(|p| p.len())
+                .unwrap_or(0);
         let uptime_secs = self
             .started
             .lock()
@@ -391,8 +397,14 @@ impl NetManager {
             kad_peers: stats.as_ref().map(|s| s.kad_peers).unwrap_or(0),
             last_read,
             uptime_secs,
-            listen_addrs: stats.as_ref().map(|s| s.listen_addrs.clone()).unwrap_or_default(),
-            external_addrs: stats.as_ref().map(|s| s.external_addrs.clone()).unwrap_or_default(),
+            listen_addrs: stats
+                .as_ref()
+                .map(|s| s.listen_addrs.clone())
+                .unwrap_or_default(),
+            external_addrs: stats
+                .as_ref()
+                .map(|s| s.external_addrs.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -415,7 +427,8 @@ impl NetManager {
 #[must_use]
 pub fn label_for_reason(reason: &str) -> String {
     let r = reason.to_ascii_lowercase();
-    if r.contains("genesis") || r.contains("chain") || r.contains("network") || r.contains("magic") {
+    if r.contains("genesis") || r.contains("chain") || r.contains("network") || r.contains("magic")
+    {
         "wrong network".into()
     } else if r.contains("protocol") {
         "incompatible protocol version".into()
@@ -445,7 +458,10 @@ mod tests {
     fn genesis_mismatch_is_labelled_wrong_network() {
         assert_eq!(label_for_reason("genesis hash mismatch"), "wrong network");
         assert_eq!(label_for_reason("chain id mismatch"), "wrong network");
-        assert_eq!(label_for_reason("protocol major version 2"), "incompatible protocol version");
+        assert_eq!(
+            label_for_reason("protocol major version 2"),
+            "incompatible protocol version"
+        );
         assert_eq!(label_for_reason("handshake timeout"), "handshake timed out");
     }
 
@@ -477,8 +493,17 @@ mod tests {
             peer_id_from_multiaddr("/ip4/1.2.3.4/udp/26670/quic-v1/p2p/12D3KooWabc").unwrap(),
             "12D3KooWabc"
         );
-        assert_eq!(NetManager::transport_of("/ip4/1.2.3.4/udp/26670/quic-v1/p2p/x"), "QUIC");
-        assert_eq!(NetManager::transport_of("/ip4/1.2.3.4/tcp/26670/p2p/x"), "TCP");
-        assert_eq!(NetManager::transport_of("/ip4/1.2.3.4/tcp/26670/p2p/r/p2p-circuit/p2p/x"), "relayed");
+        assert_eq!(
+            NetManager::transport_of("/ip4/1.2.3.4/udp/26670/quic-v1/p2p/x"),
+            "QUIC"
+        );
+        assert_eq!(
+            NetManager::transport_of("/ip4/1.2.3.4/tcp/26670/p2p/x"),
+            "TCP"
+        );
+        assert_eq!(
+            NetManager::transport_of("/ip4/1.2.3.4/tcp/26670/p2p/r/p2p-circuit/p2p/x"),
+            "relayed"
+        );
     }
 }

@@ -30,7 +30,11 @@ pub fn url() -> String {
     format!("http://127.0.0.1:{PORT}")
 }
 
-async fn read(State(st): State<Arc<AppState>>, Path(path): Path<String>, RawQuery(q): RawQuery) -> Response {
+async fn read(
+    State(st): State<Arc<AppState>>,
+    Path(path): Path<String>,
+    RawQuery(q): RawQuery,
+) -> Response {
     let full = match q {
         Some(q) if !q.is_empty() => format!("{path}?{q}"),
         _ => path,
@@ -62,7 +66,13 @@ async fn read(State(st): State<Arc<AppState>>, Path(path): Path<String>, RawQuer
                 if let Ok(h) = HeaderValue::from_str(&format!(
                     "{}:{}",
                     v.peers.len(),
-                    if v.agreed { "agreed" } else if v.single_operator { "single-operator" } else { "unverified" }
+                    if v.agreed {
+                        "agreed"
+                    } else if v.single_operator {
+                        "single-operator"
+                    } else {
+                        "unverified"
+                    }
                 )) {
                     resp.headers_mut().insert("x-hashgram-verified", h);
                 }
@@ -117,7 +127,7 @@ async fn unsupported() -> Response {
 
 pub(crate) fn base64_decode(s: &str) -> Option<Vec<u8>> {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let mut out = Vec::with_capacity((s.len() * 3).div_euclid(4));
     let mut buf = 0u32;
     let mut bits = 0;
     for c in s.bytes() {
@@ -140,13 +150,21 @@ pub(crate) fn base64_decode(s: &str) -> Option<Vec<u8>> {
 pub async fn serve(state: Arc<AppState>) {
     let router = Router::new()
         .route("/cosmos/tx/v1beta1/simulate", post(unsupported))
-        .route("/cosmos/tx/v1beta1/txs", post(broadcast).get(|s, q| async move { read(s, Path("cosmos/tx/v1beta1/txs".to_owned()), q).await }))
+        .route(
+            "/cosmos/tx/v1beta1/txs",
+            post(broadcast).get(|s, q| async move {
+                read(s, Path("cosmos/tx/v1beta1/txs".to_owned()), q).await
+            }),
+        )
         .route("/{*path}", get(read))
         .with_state(state);
     let addr = format!("127.0.0.1:{PORT}");
     match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => {
-            tracing::info!(addr, "loopback chain gateway listening (for a node on this PC)");
+            tracing::info!(
+                addr,
+                "loopback chain gateway listening (for a node on this PC)"
+            );
             if let Err(e) = axum::serve(l, router).await {
                 tracing::warn!(error = %e, "loopback chain gateway stopped");
             }

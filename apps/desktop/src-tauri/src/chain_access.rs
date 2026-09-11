@@ -222,7 +222,10 @@ impl ChainAccess {
                 Some(l) => {
                     let relays = l.chain_relays().await;
                     if relays.is_empty() {
-                        (false, "no connected node relays chain queries yet".to_owned())
+                        (
+                            false,
+                            "no connected node relays chain queries yet".to_owned(),
+                        )
                     } else {
                         // One probe read proves the relay answers on this network.
                         let client = hashgram_sdk::chain_client_over_link(l.clone(), &chain_id);
@@ -250,7 +253,11 @@ impl ChainAccess {
                                     }
                                     (
                                         true,
-                                        format!("{} relay node(s), {} operator(s)", relays.len(), ops),
+                                        format!(
+                                            "{} relay node(s), {} operator(s)",
+                                            relays.len(),
+                                            ops
+                                        ),
                                     )
                                 } else {
                                     (false, format!("wrong network: {network}"))
@@ -350,8 +357,8 @@ impl ChainAccess {
                 String::from_utf8_lossy(&resp.body)
             ));
         }
-        let value: serde_json::Value = serde_json::from_slice(&resp.body)
-            .map_err(|e| format!("not JSON: {e}"))?;
+        let value: serde_json::Value =
+            serde_json::from_slice(&resp.body).map_err(|e| format!("not JSON: {e}"))?;
         let read = ChainRead {
             value,
             verification: client.verification(),

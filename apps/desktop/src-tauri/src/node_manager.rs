@@ -53,7 +53,9 @@ impl Default for NodeSetup {
             storage_gib: 20,
             bandwidth_mbps: 0,
             reward_address: String::new(),
-            moniker: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "home-pc".into()).to_ascii_lowercase(),
+            moniker: std::env::var("COMPUTERNAME")
+                .unwrap_or_else(|_| "home-pc".into())
+                .to_ascii_lowercase(),
             auto_register: true,
         }
     }
@@ -86,7 +88,8 @@ pub fn node_binary() -> Option<PathBuf> {
     let candidates = [
         dir.join("hashgram-node.exe"),
         dir.join("hashgram-node-x86_64-pc-windows-msvc.exe"),
-        dir.join("binaries").join("hashgram-node-x86_64-pc-windows-msvc.exe"),
+        dir.join("binaries")
+            .join("hashgram-node-x86_64-pc-windows-msvc.exe"),
         dir.join("hashgram-node"),
     ];
     let real = |p: &PathBuf| std::fs::metadata(p).map(|m| m.len() > 0).unwrap_or(false);
@@ -114,12 +117,21 @@ pub fn node_binary() -> Option<PathBuf> {
 }
 
 /// Writes node.toml, network.json (mainnet pin) and roles.json.
-pub fn write_config(setup: &NodeSetup, network: &hashgram_sdk::NetworkIdentity, operator_secret_hex: &str) -> Result<(), String> {
+pub fn write_config(
+    setup: &NodeSetup,
+    network: &hashgram_sdk::NetworkIdentity,
+    operator_secret_hex: &str,
+) -> Result<(), String> {
     write_config_at(&node_home(), setup, network, operator_secret_hex)
 }
 
 /// Writes the node files under an explicit directory.
-pub fn write_config_at(home: &std::path::Path, setup: &NodeSetup, network: &hashgram_sdk::NetworkIdentity, operator_secret_hex: &str) -> Result<(), String> {
+pub fn write_config_at(
+    home: &std::path::Path,
+    setup: &NodeSetup,
+    network: &hashgram_sdk::NetworkIdentity,
+    operator_secret_hex: &str,
+) -> Result<(), String> {
     let home = home.to_path_buf();
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
     let roles: Vec<String> = setup
@@ -154,9 +166,17 @@ reward_address = "{reward}"
 auto_register_provider = {auto}
 operator_key_file = "{home}/operator.key"
 "#,
-        network = if network.is_mainnet() { "mainnet" } else { "devnet" },
+        network = if network.is_mainnet() {
+            "mainnet"
+        } else {
+            "devnet"
+        },
         genesis = network.genesis_hash,
-        roles = roles.iter().map(|r| format!("\"{r}\"")).collect::<Vec<_>>().join(", "),
+        roles = roles
+            .iter()
+            .map(|r| format!("\"{r}\""))
+            .collect::<Vec<_>>()
+            .join(", "),
         moniker = setup.moniker.replace('"', ""),
         port = NODE_PORT,
         chain_api = crate::chain_proxy::url(),
@@ -168,8 +188,13 @@ operator_key_file = "{home}/operator.key"
     std::fs::write(home.join("node.toml"), toml).map_err(|e| e.to_string())?;
     // The operator key file the node reads (0600-equivalent: the user's
     // profile directory). The vault keeps the authoritative copy.
-    std::fs::write(home.join("operator.key"), operator_secret_hex.trim()).map_err(|e| e.to_string())?;
-    std::fs::write(home.join("setup.json"), serde_json::to_vec_pretty(setup).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::write(home.join("operator.key"), operator_secret_hex.trim())
+        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        home.join("setup.json"),
+        serde_json::to_vec_pretty(setup).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -203,7 +228,12 @@ fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
     if out.status.success() {
         Ok(stdout)
     } else {
-        Err(format!("{cmd} {}: {}{}", args.join(" "), stdout.trim(), stderr.trim()))
+        Err(format!(
+            "{cmd} {}: {}{}",
+            args.join(" "),
+            stdout.trim(),
+            stderr.trim()
+        ))
     }
 }
 
@@ -232,7 +262,10 @@ pub fn is_elevated() -> bool {
 pub fn wrapper_binary() -> Option<PathBuf> {
     let node = node_binary()?;
     let dir = node.parent()?;
-    for name in ["hashgram-node-service.exe", "hashgram-node-service-x86_64-pc-windows-msvc.exe"] {
+    for name in [
+        "hashgram-node-service.exe",
+        "hashgram-node-service-x86_64-pc-windows-msvc.exe",
+    ] {
         let p = dir.join(name);
         if std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false) {
             return Some(p);
@@ -245,8 +278,10 @@ pub fn wrapper_binary() -> Option<PathBuf> {
 /// Both go through the wrapper, which supervises the node, restarts it
 /// with back-off and writes `node.log`.
 pub fn install() -> Result<Registration, String> {
-    let bin = node_binary().ok_or_else(|| "hashgram-node.exe is not bundled with this build".to_owned())?;
-    let wrapper = wrapper_binary().ok_or_else(|| "hashgram-node-service.exe is not bundled with this build".to_owned())?;
+    let bin = node_binary()
+        .ok_or_else(|| "hashgram-node.exe is not bundled with this build".to_owned())?;
+    let wrapper = wrapper_binary()
+        .ok_or_else(|| "hashgram-node-service.exe is not bundled with this build".to_owned())?;
     let home = node_home();
     let cfg = config_path();
     if !cfg.exists() {
@@ -264,10 +299,36 @@ pub fn install() -> Result<Registration, String> {
         let _ = run("sc.exe", &["delete", SERVICE_NAME]);
         run(
             "sc.exe",
-            &["create", SERVICE_NAME, "binPath=", &cmdline, "start=", "auto", "DisplayName=", "Hashgram Node"],
+            &[
+                "create",
+                SERVICE_NAME,
+                "binPath=",
+                &cmdline,
+                "start=",
+                "auto",
+                "DisplayName=",
+                "Hashgram Node",
+            ],
         )?;
-        let _ = run("sc.exe", &["description", SERVICE_NAME, "Hashgram peer-to-peer node managed by Hashgram for Windows"]);
-        let _ = run("sc.exe", &["failure", SERVICE_NAME, "reset=", "86400", "actions=", "restart/5000/restart/30000/restart/60000"]);
+        let _ = run(
+            "sc.exe",
+            &[
+                "description",
+                SERVICE_NAME,
+                "Hashgram peer-to-peer node managed by Hashgram for Windows",
+            ],
+        );
+        let _ = run(
+            "sc.exe",
+            &[
+                "failure",
+                SERVICE_NAME,
+                "reset=",
+                "86400",
+                "actions=",
+                "restart/5000/restart/30000/restart/60000",
+            ],
+        );
         return Ok(Registration::Service);
     }
     let _ = run("schtasks.exe", &["/Delete", "/TN", SERVICE_NAME, "/F"]);
@@ -278,7 +339,16 @@ pub fn install() -> Result<Registration, String> {
     run(
         "schtasks.exe",
         &[
-            "/Create", "/TN", SERVICE_NAME, "/SC", "ONLOGON", "/RL", "LIMITED", "/F", "/TR", &cmdline,
+            "/Create",
+            "/TN",
+            SERVICE_NAME,
+            "/SC",
+            "ONLOGON",
+            "/RL",
+            "LIMITED",
+            "/F",
+            "/TR",
+            &cmdline,
         ],
     )?;
     Ok(Registration::ScheduledTask)
@@ -288,7 +358,9 @@ pub fn install() -> Result<Registration, String> {
 pub fn start() -> Result<(), String> {
     match registration() {
         Registration::Service => run("sc.exe", &["start", SERVICE_NAME]).map(|_| ()),
-        Registration::ScheduledTask => run("schtasks.exe", &["/Run", "/TN", SERVICE_NAME]).map(|_| ()),
+        Registration::ScheduledTask => {
+            run("schtasks.exe", &["/Run", "/TN", SERVICE_NAME]).map(|_| ())
+        }
         Registration::None => Err("the node is not installed".into()),
     }
 }
@@ -312,7 +384,9 @@ pub fn uninstall() -> Result<(), String> {
     let _ = stop();
     match registration() {
         Registration::Service => run("sc.exe", &["delete", SERVICE_NAME]).map(|_| ()),
-        Registration::ScheduledTask => run("schtasks.exe", &["/Delete", "/TN", SERVICE_NAME, "/F"]).map(|_| ()),
+        Registration::ScheduledTask => {
+            run("schtasks.exe", &["/Delete", "/TN", SERVICE_NAME, "/F"]).map(|_| ())
+        }
         Registration::None => Ok(()),
     }
 }
@@ -337,7 +411,10 @@ pub async fn api_get(path: &str) -> Result<serde_json::Value, String> {
 /// Reads the node's peer id from its key (`hashgram-node node-id`).
 pub fn node_id() -> Result<String, String> {
     let bin = node_binary().ok_or_else(|| "hashgram-node.exe is not bundled".to_owned())?;
-    let out = run(&bin.display().to_string(), &["node-id", "--home", &node_home().display().to_string()])?;
+    let out = run(
+        &bin.display().to_string(),
+        &["node-id", "--home", &node_home().display().to_string()],
+    )?;
     Ok(out.trim().to_owned())
 }
 
@@ -357,13 +434,23 @@ mod tests {
         let net = hashgram_sdk::NetworkIdentity::mainnet(hashgram_sdk::net::MAINNET_GENESIS_HASH);
         write_config_at(&d, &setup, &net, "aa".repeat(32).as_str()).unwrap();
         let toml = std::fs::read_to_string(d.join("node.toml")).unwrap();
-        assert!(toml.contains("roles = [\"store\"]"), "unknown roles dropped: {toml}");
+        assert!(
+            toml.contains("roles = [\"store\"]"),
+            "unknown roles dropped: {toml}"
+        );
         assert!(toml.contains(&format!("chain_api = \"{}\"", crate::chain_proxy::url())));
         assert!(toml.contains(hashgram_sdk::net::MAINNET_GENESIS_HASH));
         assert!(toml.contains("reward_address = \"hash13t8v5"));
-        assert!(!toml.contains("/ip4/") && !toml.contains("bootstrap_peers"), "no hardcoded server: discovery is the compiled-in list plus the peerstore");
-        assert_eq!(std::fs::read_to_string(d.join("operator.key")).unwrap(), "aa".repeat(32));
-        let saved: NodeSetup = serde_json::from_slice(&std::fs::read(d.join("setup.json")).unwrap()).unwrap();
+        assert!(
+            !toml.contains("/ip4/") && !toml.contains("bootstrap_peers"),
+            "no hardcoded server: discovery is the compiled-in list plus the peerstore"
+        );
+        assert_eq!(
+            std::fs::read_to_string(d.join("operator.key")).unwrap(),
+            "aa".repeat(32)
+        );
+        let saved: NodeSetup =
+            serde_json::from_slice(&std::fs::read(d.join("setup.json")).unwrap()).unwrap();
         assert_eq!(saved.roles, vec!["store".to_owned(), "bogus".to_owned()]);
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -375,6 +462,12 @@ mod tests {
             ..NodeSetup::default()
         };
         let net = hashgram_sdk::NetworkIdentity::mainnet(hashgram_sdk::net::MAINNET_GENESIS_HASH);
-        assert!(write_config_at(&std::env::temp_dir().join("hg-node-bad"), &setup, &net, "00").is_err());
+        assert!(write_config_at(
+            &std::env::temp_dir().join("hg-node-bad"),
+            &setup,
+            &net,
+            "00"
+        )
+        .is_err());
     }
 }

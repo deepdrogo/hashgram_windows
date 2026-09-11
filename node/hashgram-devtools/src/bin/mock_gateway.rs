@@ -166,9 +166,15 @@ async fn founder_params(State(app): S) -> Response {
 async fn hashgram_any(State(app): S, Path(rest): Path<String>) -> Response {
     // Enough of the Hashgram modules for screens to render "empty" honestly.
     let body = match rest.as_str() {
-        "username/v1/params" => serde_json::json!({ "params": { "registration_fee": { "denom": "uhash", "amount": "1000000" }, "validity_blocks": "7884000", "grace_blocks": "648000", "min_length": "3", "max_length": "32" } }),
-        "serviceproof/v1/epoch/current" => serde_json::json!({ "epoch": { "number": "42", "start_height": "907200", "end_height": "928800" } }),
-        "network/v1/info" => serde_json::json!({ "info": { "chain_id": app.chain_id, "network_id": "hashgram-devnet" } }),
+        "username/v1/params" => {
+            serde_json::json!({ "params": { "registration_fee": { "denom": "uhash", "amount": "1000000" }, "validity_blocks": "7884000", "grace_blocks": "648000", "min_length": "3", "max_length": "32" } })
+        }
+        "serviceproof/v1/epoch/current" => {
+            serde_json::json!({ "epoch": { "number": "42", "start_height": "907200", "end_height": "928800" } })
+        }
+        "network/v1/info" => {
+            serde_json::json!({ "info": { "chain_id": app.chain_id, "network_id": "hashgram-devnet" } })
+        }
         _ => return not_found(&app),
     };
     stamped(&app, StatusCode::OK, body)
@@ -206,11 +212,11 @@ async fn simulate(State(app): S) -> Response {
 }
 
 async fn tx_by_hash(State(app): S, Path(hash): Path<String>) -> Response {
-    let found = app
-        .txs
-        .lock()
-        .ok()
-        .and_then(|t| t.iter().find(|(h, _)| h.eq_ignore_ascii_case(&hash)).cloned());
+    let found = app.txs.lock().ok().and_then(|t| {
+        t.iter()
+            .find(|(h, _)| h.eq_ignore_ascii_case(&hash))
+            .cloned()
+    });
     match found {
         Some((h, height)) if app.height.load(Ordering::Relaxed) >= height => stamped(
             &app,
@@ -266,8 +272,14 @@ async fn main() {
     }
     let router = Router::new()
         .route("/cosmos/base/tendermint/v1beta1/node_info", get(node_info))
-        .route("/cosmos/base/tendermint/v1beta1/blocks/latest", get(latest_block))
-        .route("/cosmos/bank/v1beta1/balances/{address}/by_denom", get(balance_by_denom))
+        .route(
+            "/cosmos/base/tendermint/v1beta1/blocks/latest",
+            get(latest_block),
+        )
+        .route(
+            "/cosmos/bank/v1beta1/balances/{address}/by_denom",
+            get(balance_by_denom),
+        )
         .route("/cosmos/bank/v1beta1/balances/{address}", get(balances))
         .route("/cosmos/bank/v1beta1/supply/by_denom", get(supply))
         .route("/cosmos/auth/v1beta1/accounts/{address}", get(account))
@@ -286,7 +298,12 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    tracing::info!(addr, chain_id = cli.chain_id, lie = cli.lie, "DEVNET ONLY mock gateway listening");
+    tracing::info!(
+        addr,
+        chain_id = cli.chain_id,
+        lie = cli.lie,
+        "DEVNET ONLY mock gateway listening"
+    );
     if let Err(e) = axum::serve(listener, router).await {
         eprintln!("mock-gateway: {e}");
         std::process::exit(1);

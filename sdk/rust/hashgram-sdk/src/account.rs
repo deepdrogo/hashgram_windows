@@ -487,15 +487,25 @@ mod tests {
         let b = Account::import(&tmp("b"), "pass-b", WORDS, "pc-2", KdfCost::light()).unwrap();
         assert_eq!(a.address(), b.address());
         assert!(a.address().starts_with("hash1"));
-        assert_eq!(a.root().unwrap().public_key(), b.root().unwrap().public_key());
-        assert_ne!(a.device().unwrap().public_key(), b.device().unwrap().public_key());
+        assert_eq!(
+            a.root().unwrap().public_key(),
+            b.root().unwrap().public_key()
+        );
+        assert_ne!(
+            a.device().unwrap().public_key(),
+            b.device().unwrap().public_key()
+        );
     }
 
     #[test]
     fn a_created_account_restores_to_itself() {
         let (created, mnemonic) =
             Account::create(&tmp("c"), "pass", "pc-1", KdfCost::light()).unwrap();
-        assert_eq!(mnemonic.split_whitespace().count(), 24, "accounts are 24 words only");
+        assert_eq!(
+            mnemonic.split_whitespace().count(),
+            24,
+            "accounts are 24 words only"
+        );
         let restored =
             Account::import(&tmp("d"), "other", &mnemonic, "pc-2", KdfCost::light()).unwrap();
         assert_eq!(created.address(), restored.address());

@@ -1,7 +1,7 @@
 //! Symmetric sealing for database columns.
 //!
 //! The database key is a 32-byte secret generated at account creation and
-//! stored only inside the vault (`extra["desktop_db_key"]`), so everything
+//! stored only inside the vault (its `extra` map, desktop database entry), so everything
 //! sealed here is "encrypted at rest with the vault key": XChaCha20-Poly1305
 //! with a random 24-byte nonce prefixed to the ciphertext. Column-level
 //! sealing keeps the SQLite build plain (no SQLCipher toolchain on Windows)
@@ -79,7 +79,10 @@ mod tests {
         assert!(open(&k, b"row-2", &s).is_err(), "aad is bound");
         let other = generate_key().unwrap();
         assert!(open(&other, b"row-1", &s).is_err());
-        assert!(!s.windows(5).any(|w| w == b"hello"), "no plaintext in the blob");
+        assert!(
+            !s.windows(5).any(|w| w == b"hello"),
+            "no plaintext in the blob"
+        );
     }
 
     #[test]

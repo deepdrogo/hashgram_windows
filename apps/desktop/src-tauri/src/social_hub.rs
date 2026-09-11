@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hashgram_sdk::account::Account;
 use crate::state::SharedAccount;
+use hashgram_sdk::account::Account;
 use hashgram_sdk::link::Link;
 use hashgram_sdk::social::{payload_json, Social};
 use hashgram_sdk::{blob, pb, ChainClient, NetworkIdentity};
@@ -136,9 +136,15 @@ impl SocialHub {
         media: Vec<pb::MediaReference>,
     ) -> Result<pb::SocialEvent, String> {
         let mut guard = self.inner.lock().await;
-        let s = guard.as_mut().ok_or_else(|| "social is not open (locked?)".to_owned())?;
-        let ev = s.build(network, kind, payload, media).map_err(|e| e.to_string())?;
-        s.publish(link, ev.clone()).await.map_err(|e| e.to_string())?;
+        let s = guard
+            .as_mut()
+            .ok_or_else(|| "social is not open (locked?)".to_owned())?;
+        let ev = s
+            .build(network, kind, payload, media)
+            .map_err(|e| e.to_string())?;
+        s.publish(link, ev.clone())
+            .await
+            .map_err(|e| e.to_string())?;
         let mut a = account.lock().await;
         s.persist(&mut a);
         a.save().map_err(|e| e.to_string())?;
@@ -147,7 +153,12 @@ impl SocialHub {
 
     /// Checks that `device` is an active device of `author` on chain, with
     /// a cache. `None` chain means "cannot check": the event is hidden.
-    pub async fn device_authorised(&self, chain: Option<&ChainClient>, author: &str, device_hex: &str) -> bool {
+    pub async fn device_authorised(
+        &self,
+        chain: Option<&ChainClient>,
+        author: &str,
+        device_hex: &str,
+    ) -> bool {
         {
             let a = self.authz.lock().await;
             if let Some((who, at)) = a.get(device_hex) {
@@ -164,14 +175,24 @@ impl SocialHub {
         };
         let b64 = base64_std(&bytes);
         let who = match chain
-            .query(&format!("hashgram/identity/v1/resolve_device_key?device_pubkey={}", urlenc(&b64)))
+            .query(&format!(
+                "hashgram/identity/v1/resolve_device_key?device_pubkey={}",
+                urlenc(&b64)
+            ))
             .await
         {
             Ok(v) => {
                 let found = v.get("found").and_then(|f| f.as_bool()).unwrap_or(false);
-                let revoked = v.get("device").and_then(|d| d.get("revoked")).and_then(|r| r.as_bool()).unwrap_or(false);
+                let revoked = v
+                    .get("device")
+                    .and_then(|d| d.get("revoked"))
+                    .and_then(|r| r.as_bool())
+                    .unwrap_or(false);
                 if found && !revoked {
-                    v.get("root_address").and_then(|r| r.as_str()).unwrap_or("").to_owned()
+                    v.get("root_address")
+                        .and_then(|r| r.as_str())
+                        .unwrap_or("")
+                        .to_owned()
                 } else {
                     String::new()
                 }
@@ -207,7 +228,9 @@ impl SocialHub {
             .unwrap_or(-1);
         let events = {
             let guard = self.inner.lock().await;
-            let s = guard.as_ref().ok_or_else(|| "social is not open".to_owned())?;
+            let s = guard
+                .as_ref()
+                .ok_or_else(|| "social is not open".to_owned())?;
             s.fetch_author(link, network, author, (from + 1).max(0) as u64, limit)
                 .await
                 .map_err(|e| e.to_string())?
@@ -217,7 +240,8 @@ impl SocialHub {
             let dev = hex::encode(&ev.device_pubkey);
             let verified = self.device_authorised(chain, &ev.author, &dev).await;
             if !verified {
-                self.hidden.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.hidden
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
             if store_event(db, &ev, true)? {
@@ -228,20 +252,32 @@ impl SocialHub {
     }
 
     /// Fetches specific events by id (thread loading).
-    pub async fn fetch_ids(&self, db: &Db, link: &Link, network: &NetworkIdentity, chain: Option<&ChainClient>, ids: &[String]) -> Result<usize, String> {
+    pub async fn fetch_ids(
+        &self,
+        db: &Db,
+        link: &Link,
+        network: &NetworkIdentity,
+        chain: Option<&ChainClient>,
+        ids: &[String],
+    ) -> Result<usize, String> {
         let raw: Vec<Vec<u8>> = ids.iter().filter_map(|i| hex::decode(i).ok()).collect();
         if raw.is_empty() {
             return Ok(0);
         }
         let events = {
             let guard = self.inner.lock().await;
-            let s = guard.as_ref().ok_or_else(|| "social is not open".to_owned())?;
-            s.fetch_ids(link, network, raw).await.map_err(|e| e.to_string())?
+            let s = guard
+                .as_ref()
+                .ok_or_else(|| "social is not open".to_owned())?;
+            s.fetch_ids(link, network, raw)
+                .await
+                .map_err(|e| e.to_string())?
         };
         let mut stored = 0;
         for ev in events {
             let dev = hex::encode(&ev.device_pubkey);
-            if self.device_authorised(chain, &ev.author, &dev).await && store_event(db, &ev, true)? {
+            if self.device_authorised(chain, &ev.author, &dev).await && store_event(db, &ev, true)?
+            {
                 stored += 1;
             }
         }
@@ -253,11 +289,19 @@ fn base64_std(input: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
-        let b = [chunk.first().copied().unwrap_or(0), chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
+        let b = [
+            chunk.first().copied().unwrap_or(0),
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {
-                out.push(T.get(((n >> (18 - 6 * i)) & 63) as usize).copied().unwrap_or(b'A') as char);
+                out.push(
+                    T.get(((n >> (18 - 6 * i)) & 63) as usize)
+                        .copied()
+                        .unwrap_or(b'A') as char,
+                );
             } else {
                 out.push('=');
             }
@@ -270,7 +314,9 @@ fn urlenc(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -339,17 +385,33 @@ fn fold_interactions(db: &Db, views: &mut [EventView], me: &str) -> Result<(), S
         let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect()
     })?;
-    let mut idx: HashMap<String, usize> = views.iter().enumerate().map(|(i, v)| (v.id.clone(), i)).collect();
+    let mut idx: HashMap<String, usize> = views
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (v.id.clone(), i))
+        .collect();
     for (kind, author, body) in rows {
-        let Some(ev) = decode_row(&body) else { continue };
+        let Some(ev) = decode_row(&body) else {
+            continue;
+        };
         let target = match kind.as_str() {
-            "REACTION" => pb::Reaction::decode(ev.payload.as_slice()).ok().map(|r| (hex::encode(r.target), r.reaction)),
-            "COMMENT_CREATE" => pb::CommentCreate::decode(ev.payload.as_slice()).ok().map(|c| (hex::encode(c.post), String::new())),
-            "REPOST" => pb::Repost::decode(ev.payload.as_slice()).ok().map(|r| (hex::encode(r.post), String::new())),
+            "REACTION" => pb::Reaction::decode(ev.payload.as_slice())
+                .ok()
+                .map(|r| (hex::encode(r.target), r.reaction)),
+            "COMMENT_CREATE" => pb::CommentCreate::decode(ev.payload.as_slice())
+                .ok()
+                .map(|c| (hex::encode(c.post), String::new())),
+            "REPOST" => pb::Repost::decode(ev.payload.as_slice())
+                .ok()
+                .map(|r| (hex::encode(r.post), String::new())),
             _ => None,
         };
-        let Some((tid, reaction)) = target else { continue };
-        let Some(i) = idx.get_mut(&tid).copied() else { continue };
+        let Some((tid, reaction)) = target else {
+            continue;
+        };
+        let Some(i) = idx.get_mut(&tid).copied() else {
+            continue;
+        };
         let Some(v) = views.get_mut(i) else { continue };
         match kind.as_str() {
             "REACTION" => {
@@ -370,12 +432,26 @@ fn fold_interactions(db: &Db, views: &mut [EventView], me: &str) -> Result<(), S
 
 /// Feed: newest first among `authors` (followed + self), optional kind
 /// filter and hashtag.
-pub fn feed(db: &Db, authors: &[String], kinds: &[&str], tag: Option<&str>, before_ts: Option<u64>, limit: usize, me: &str) -> Result<Vec<EventView>, String> {
+pub fn feed(
+    db: &Db,
+    authors: &[String],
+    kinds: &[&str],
+    tag: Option<&str>,
+    before_ts: Option<u64>,
+    limit: usize,
+    me: &str,
+) -> Result<Vec<EventView>, String> {
     let mut sql = String::from("SELECT body FROM social_events WHERE verified = 1 AND ts < ?1");
-    let mut args: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::Integer(before_ts.map(|t| t as i64).unwrap_or(i64::MAX))];
+    let mut args: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::Integer(
+        before_ts.map(|t| t as i64).unwrap_or(i64::MAX),
+    )];
     if !authors.is_empty() {
         sql.push_str(" AND author IN (");
-        sql.push_str(&std::iter::repeat_n("?", authors.len()).collect::<Vec<_>>().join(","));
+        sql.push_str(
+            &std::iter::repeat_n("?", authors.len())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
         sql.push(')');
         for a in authors {
             args.push(rusqlite::types::Value::Text(a.clone()));
@@ -383,27 +459,45 @@ pub fn feed(db: &Db, authors: &[String], kinds: &[&str], tag: Option<&str>, befo
     }
     if !kinds.is_empty() {
         sql.push_str(" AND kind IN (");
-        sql.push_str(&std::iter::repeat_n("?", kinds.len()).collect::<Vec<_>>().join(","));
+        sql.push_str(
+            &std::iter::repeat_n("?", kinds.len())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
         sql.push(')');
         for k in kinds {
             args.push(rusqlite::types::Value::Text((*k).to_owned()));
         }
     }
     sql.push_str(" ORDER BY ts DESC LIMIT ?");
-    args.push(rusqlite::types::Value::Integer((limit * if tag.is_some() { 8 } else { 1 }) as i64));
+    args.push(rusqlite::types::Value::Integer(
+        (limit * if tag.is_some() { 8 } else { 1 }) as i64,
+    ));
     let bodies: Vec<Vec<u8>> = db.with(|c| {
         let mut st = c.prepare(&sql)?;
-        let rows = st.query_map(rusqlite::params_from_iter(args.iter()), |r| r.get::<_, Vec<u8>>(0))?;
+        let rows = st.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+            r.get::<_, Vec<u8>>(0)
+        })?;
         rows.collect()
     })?;
-    let mut views: Vec<EventView> = bodies.iter().filter_map(|b| decode_row(b)).map(|e| view_of(&e)).collect();
+    let mut views: Vec<EventView> = bodies
+        .iter()
+        .filter_map(|b| decode_row(b))
+        .map(|e| view_of(&e))
+        .collect();
     if let Some(t) = tag {
         let t = t.trim_start_matches('#').to_lowercase();
         views.retain(|v| {
             v.payload
                 .get("hashtags")
                 .and_then(|h| h.as_array())
-                .map(|a| a.iter().any(|x| x.as_str().map(|s| s.trim_start_matches('#').to_lowercase() == t).unwrap_or(false)))
+                .map(|a| {
+                    a.iter().any(|x| {
+                        x.as_str()
+                            .map(|s| s.trim_start_matches('#').to_lowercase() == t)
+                            .unwrap_or(false)
+                    })
+                })
                 .unwrap_or(false)
         });
         views.truncate(limit);
@@ -414,7 +508,14 @@ pub fn feed(db: &Db, authors: &[String], kinds: &[&str], tag: Option<&str>, befo
 
 /// One event and the comments on it.
 pub fn thread(db: &Db, id: &str, me: &str) -> Result<(Option<EventView>, Vec<EventView>), String> {
-    let body: Option<Vec<u8>> = db.with(|c| c.query_row("SELECT body FROM social_events WHERE id = ?1 AND verified = 1", params![id], |r| r.get(0)).optional())?;
+    let body: Option<Vec<u8>> = db.with(|c| {
+        c.query_row(
+            "SELECT body FROM social_events WHERE id = ?1 AND verified = 1",
+            params![id],
+            |r| r.get(0),
+        )
+        .optional()
+    })?;
     let mut post = body.and_then(|b| decode_row(&b)).map(|e| view_of(&e));
     let rows: Vec<Vec<u8>> = db.with(|c| {
         let mut st = c.prepare("SELECT body FROM social_events WHERE verified = 1 AND kind = 'COMMENT_CREATE' ORDER BY ts ASC")?;
@@ -424,7 +525,11 @@ pub fn thread(db: &Db, id: &str, me: &str) -> Result<(Option<EventView>, Vec<Eve
     let mut comments: Vec<EventView> = rows
         .iter()
         .filter_map(|b| decode_row(b))
-        .filter(|e| pb::CommentCreate::decode(e.payload.as_slice()).map(|c| hex::encode(c.post) == id).unwrap_or(false))
+        .filter(|e| {
+            pb::CommentCreate::decode(e.payload.as_slice())
+                .map(|c| hex::encode(c.post) == id)
+                .unwrap_or(false)
+        })
         .map(|e| view_of(&e))
         .collect();
     if let Some(p) = post.as_mut() {
@@ -453,7 +558,12 @@ pub fn channels(db: &Db, authors: &[String], me: &str) -> Result<Vec<EventView>,
 }
 
 /// Posts in a channel (by channel event id).
-pub fn channel_posts(db: &Db, channel_id: &str, limit: usize, me: &str) -> Result<Vec<EventView>, String> {
+pub fn channel_posts(
+    db: &Db,
+    channel_id: &str,
+    limit: usize,
+    me: &str,
+) -> Result<Vec<EventView>, String> {
     let rows: Vec<Vec<u8>> = db.with(|c| {
         let mut st = c.prepare("SELECT body FROM social_events WHERE verified = 1 AND kind = 'POST_CREATE' ORDER BY ts DESC LIMIT 2000")?;
         let rows = st.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
@@ -462,7 +572,11 @@ pub fn channel_posts(db: &Db, channel_id: &str, limit: usize, me: &str) -> Resul
     let mut views: Vec<EventView> = rows
         .iter()
         .filter_map(|b| decode_row(b))
-        .filter(|e| pb::PostCreate::decode(e.payload.as_slice()).map(|p| hex::encode(p.channel) == channel_id).unwrap_or(false))
+        .filter(|e| {
+            pb::PostCreate::decode(e.payload.as_slice())
+                .map(|p| hex::encode(p.channel) == channel_id)
+                .unwrap_or(false)
+        })
         .map(|e| view_of(&e))
         .take(limit)
         .collect();
@@ -514,7 +628,15 @@ pub fn set_block(db: &Db, address: &str, mode: Option<&str>) -> Result<(), Strin
 
 /// Downloads public media (reel, image) into the cache, verifying the
 /// content hash; returns the path.
-pub async fn fetch_media(link: &Link, m: &MediaView, receipt: Option<(&ChainClient, &NetworkIdentity, &hashgram_sdk::proto::Ed25519Signer)>) -> Result<std::path::PathBuf, String> {
+pub async fn fetch_media(
+    link: &Link,
+    m: &MediaView,
+    receipt: Option<(
+        &ChainClient,
+        &NetworkIdentity,
+        &hashgram_sdk::proto::Ed25519Signer,
+    )>,
+) -> Result<std::path::PathBuf, String> {
     let dir = crate::paths::data_dir().join("media-cache");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}{}", m.cid, crate::chat::ext_for(&m.mime)));
@@ -522,8 +644,11 @@ pub async fn fetch_media(link: &Link, m: &MediaView, receipt: Option<(&ChainClie
         return Ok(path);
     }
     let cid = hex::decode(&m.cid).map_err(|e| e.to_string())?;
-    let (bytes, _manifest, _from) = blob::download(link, &cid, receipt).await.map_err(|e| e.to_string())?;
-    if !m.content_hash.is_empty() && hex::encode(blake3::hash(&bytes).as_bytes()) != m.content_hash {
+    let (bytes, _manifest, _from) = blob::download(link, &cid, receipt)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !m.content_hash.is_empty() && hex::encode(blake3::hash(&bytes).as_bytes()) != m.content_hash
+    {
         return Err("media hash mismatch: the provider served corrupt data".into());
     }
     let tmp = path.with_extension("part");
@@ -533,8 +658,18 @@ pub async fn fetch_media(link: &Link, m: &MediaView, receipt: Option<(&ChainClie
 }
 
 /// Uploads public media and returns its reference.
-pub async fn upload_media(link: &Link, network: &NetworkIdentity, device: &hashgram_sdk::proto::Ed25519Signer, data: &[u8], mime: &str, kind: &str, duration_ms: u32) -> Result<pb::MediaReference, String> {
-    let up = blob::upload(link, network, device, data, mime, false, 2).await.map_err(|e| e.to_string())?;
+pub async fn upload_media(
+    link: &Link,
+    network: &NetworkIdentity,
+    device: &hashgram_sdk::proto::Ed25519Signer,
+    data: &[u8],
+    mime: &str,
+    kind: &str,
+    duration_ms: u32,
+) -> Result<pb::MediaReference, String> {
+    let up = blob::upload(link, network, device, data, mime, false, 2)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(pb::MediaReference {
         cid: hex::decode(&up.cid).map_err(|e| e.to_string())?,
         mime: mime.to_owned(),
@@ -579,12 +714,70 @@ mod tests {
     #[test]
     fn feed_folds_reactions_comments_and_filters_tags() {
         let db = Db::open(&tmp("feed")).unwrap();
-        let post = ev(1, "hash1a", "POST_CREATE", 100, pb::PostCreate { text: "gm #hashgram".into(), hashtags: vec!["hashgram".into()], ..Default::default() }.encode_to_vec());
-        let other = ev(2, "hash1b", "POST_CREATE", 90, pb::PostCreate { text: "hello".into(), ..Default::default() }.encode_to_vec());
-        let react = ev(3, "hash1me", "REACTION", 101, pb::Reaction { target: vec![1; 32], reaction: "🔥".into() }.encode_to_vec());
-        let comment = ev(4, "hash1b", "COMMENT_CREATE", 102, pb::CommentCreate { post: vec![1; 32], text: "nice".into(), ..Default::default() }.encode_to_vec());
-        let unverified = ev(5, "hash1evil", "POST_CREATE", 103, pb::PostCreate { text: "spam".into(), ..Default::default() }.encode_to_vec());
-        for (e, v) in [(&post, true), (&other, true), (&react, true), (&comment, true), (&unverified, false)] {
+        let post = ev(
+            1,
+            "hash1a",
+            "POST_CREATE",
+            100,
+            pb::PostCreate {
+                text: "gm #hashgram".into(),
+                hashtags: vec!["hashgram".into()],
+                ..Default::default()
+            }
+            .encode_to_vec(),
+        );
+        let other = ev(
+            2,
+            "hash1b",
+            "POST_CREATE",
+            90,
+            pb::PostCreate {
+                text: "hello".into(),
+                ..Default::default()
+            }
+            .encode_to_vec(),
+        );
+        let react = ev(
+            3,
+            "hash1me",
+            "REACTION",
+            101,
+            pb::Reaction {
+                target: vec![1; 32],
+                reaction: "🔥".into(),
+            }
+            .encode_to_vec(),
+        );
+        let comment = ev(
+            4,
+            "hash1b",
+            "COMMENT_CREATE",
+            102,
+            pb::CommentCreate {
+                post: vec![1; 32],
+                text: "nice".into(),
+                ..Default::default()
+            }
+            .encode_to_vec(),
+        );
+        let unverified = ev(
+            5,
+            "hash1evil",
+            "POST_CREATE",
+            103,
+            pb::PostCreate {
+                text: "spam".into(),
+                ..Default::default()
+            }
+            .encode_to_vec(),
+        );
+        for (e, v) in [
+            (&post, true),
+            (&other, true),
+            (&react, true),
+            (&comment, true),
+            (&unverified, false),
+        ] {
             store_event(&db, e, v).unwrap();
         }
         let f = feed(&db, &[], &["POST_CREATE"], None, None, 50, "hash1me").unwrap();
@@ -593,9 +786,27 @@ mod tests {
         assert_eq!(f[0].reactions.get("🔥"), Some(&1));
         assert_eq!(f[0].my_reaction.as_deref(), Some("🔥"));
         assert_eq!(f[0].comments, 1);
-        let tagged = feed(&db, &[], &["POST_CREATE"], Some("#Hashgram"), None, 50, "hash1me").unwrap();
+        let tagged = feed(
+            &db,
+            &[],
+            &["POST_CREATE"],
+            Some("#Hashgram"),
+            None,
+            50,
+            "hash1me",
+        )
+        .unwrap();
         assert_eq!(tagged.len(), 1);
-        let only_b = feed(&db, &["hash1b".into()], &["POST_CREATE"], None, None, 50, "hash1me").unwrap();
+        let only_b = feed(
+            &db,
+            &["hash1b".into()],
+            &["POST_CREATE"],
+            None,
+            None,
+            50,
+            "hash1me",
+        )
+        .unwrap();
         assert_eq!(only_b.len(), 1);
         let (p, comments) = thread(&db, &hex::encode([1u8; 32]), "hash1me").unwrap();
         assert!(p.is_some());

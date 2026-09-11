@@ -238,7 +238,9 @@ mod tests {
         let _ = std::fs::create_dir_all(&d);
         let p = d.join("settings.json");
         let mut s = Settings::default();
-        s.network.https_endpoints.push("https://rest.example.org".into());
+        s.network
+            .https_endpoints
+            .push("https://rest.example.org".into());
         s.save(&p).unwrap();
         assert_eq!(Settings::load(&p), s);
         std::fs::write(&p, b"{not json").unwrap();

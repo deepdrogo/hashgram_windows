@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hashgram_sdk::account::Account;
 use crate::state::SharedAccount;
+use hashgram_sdk::account::Account;
 use hashgram_sdk::blob;
 use hashgram_sdk::chat;
 use hashgram_sdk::link::Link;
@@ -166,7 +166,7 @@ fn now_ms() -> u64 {
 }
 
 fn now_s() -> u64 {
-    now_ms() / 1000
+    now_ms().div_euclid(1000)
 }
 
 fn random_id() -> Vec<u8> {
@@ -181,7 +181,14 @@ fn kind_name(k: i32) -> String {
         .unwrap_or_else(|_| "UNKNOWN".into())
 }
 
-fn view_of(m: &chat::ChatMessage, group_id: &str, sender: &str, sender_device: &str, me: &str, my_device: &str) -> MessageView {
+fn view_of(
+    m: &chat::ChatMessage,
+    group_id: &str,
+    sender: &str,
+    sender_device: &str,
+    me: &str,
+    my_device: &str,
+) -> MessageView {
     MessageView {
         id: hex::encode(&m.id),
         group_id: group_id.to_owned(),
@@ -197,7 +204,11 @@ fn view_of(m: &chat::ChatMessage, group_id: &str, sender: &str, sender_device: &
         reaction: m.reaction.clone(),
         attachments: m.attachments.iter().map(AttachmentView::from).collect(),
         disappear_after_secs: m.disappear_after_secs,
-        state: if sender == me { "sent".into() } else { "received".into() },
+        state: if sender == me {
+            "sent".into()
+        } else {
+            "received".into()
+        },
         expires: 0,
         call_kind: m.call.as_ref().map(|c| c.kind.clone()).unwrap_or_default(),
         call: m.call.as_ref().map(|c| CallSignalView {
@@ -210,7 +221,11 @@ fn view_of(m: &chat::ChatMessage, group_id: &str, sender: &str, sender_device: &
             video: c.video,
         }),
         reactions: HashMap::new(),
-        group_name: m.group_info.as_ref().map(|g| g.name.clone()).unwrap_or_default(),
+        group_name: m
+            .group_info
+            .as_ref()
+            .map(|g| g.name.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -276,18 +291,35 @@ impl ChatHub {
     }
 
     /// Publishes key packages (first run and replenish).
-    pub async fn publish_key_packages(&self, account: &SharedAccount, link: &Link, network: &NetworkIdentity) -> Result<usize, String> {
+    pub async fn publish_key_packages(
+        &self,
+        account: &SharedAccount,
+        link: &Link,
+        network: &NetworkIdentity,
+    ) -> Result<usize, String> {
         let mut guard = self.inner.lock().await;
-        let m = guard.as_mut().ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
-        let out = m.publish_key_package(link, network).await.map_err(|e| e.to_string());
+        let m = guard
+            .as_mut()
+            .ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
+        let out = m
+            .publish_key_package(link, network)
+            .await
+            .map_err(|e| e.to_string());
         Self::persist(m, account).await?;
         out
     }
 
     /// Conversations known to MLS, merged with local metadata.
-    pub async fn conversations(&self, db: &Db, key: &DbKey, me: &str) -> Result<Vec<ConversationMeta>, String> {
+    pub async fn conversations(
+        &self,
+        db: &Db,
+        key: &DbKey,
+        me: &str,
+    ) -> Result<Vec<ConversationMeta>, String> {
         let guard = self.inner.lock().await;
-        let m = guard.as_ref().ok_or_else(|| "messaging is not open".to_owned())?;
+        let m = guard
+            .as_ref()
+            .ok_or_else(|| "messaging is not open".to_owned())?;
         let mut out = Vec::new();
         for (gid, meta, members) in m.conversations() {
             let mut cm = load_meta(db, key, &gid)?.unwrap_or_default();
@@ -307,19 +339,28 @@ impl ChatHub {
             }
             out.push(cm);
         }
-        out.sort_by(|a, b| b.last_ts.cmp(&a.last_ts));
+        out.sort_by_key(|c| std::cmp::Reverse(c.last_ts));
         Ok(out)
     }
 
     /// Starts (or reuses) a direct conversation.
-    pub async fn start_direct(&self, account: &SharedAccount, link: &Link, chain: &ChainClient, network: &NetworkIdentity, address: &str) -> Result<String, String> {
+    pub async fn start_direct(
+        &self,
+        account: &SharedAccount,
+        link: &Link,
+        chain: &ChainClient,
+        network: &NetworkIdentity,
+        address: &str,
+    ) -> Result<String, String> {
         let to = address.to_owned();
         let mut guard = self.inner.lock().await;
-        let m = guard.as_mut().ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
+        let m = guard
+            .as_mut()
+            .ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
         let existing = m
             .conversations()
             .into_iter()
-            .find(|(_, meta, addrs)| meta.direct && addrs.iter().any(|a| *a == to) && addrs.len() <= 2)
+            .find(|(_, meta, addrs)| meta.direct && addrs.contains(&to) && addrs.len() <= 2)
             .map(|(gid, _, _)| gid);
         if let Some(g) = existing {
             return Ok(g);
@@ -333,9 +374,19 @@ impl ChatHub {
     }
 
     /// Creates a named group.
-    pub async fn create_group(&self, account: &SharedAccount, link: &Link, chain: &ChainClient, network: &NetworkIdentity, name: &str, members: &[String]) -> Result<String, String> {
+    pub async fn create_group(
+        &self,
+        account: &SharedAccount,
+        link: &Link,
+        chain: &ChainClient,
+        network: &NetworkIdentity,
+        name: &str,
+        members: &[String],
+    ) -> Result<String, String> {
         let mut guard = self.inner.lock().await;
-        let m = guard.as_mut().ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
+        let m = guard
+            .as_mut()
+            .ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
         let out = m
             .create_conversation(link, chain, network, name, members)
             .await
@@ -345,26 +396,54 @@ impl ChatHub {
     }
 
     /// Adds a member.
-    pub async fn add_member(&self, account: &SharedAccount, link: &Link, chain: &ChainClient, network: &NetworkIdentity, group_id: &str, address: &str) -> Result<(), String> {
+    pub async fn add_member(
+        &self,
+        account: &SharedAccount,
+        link: &Link,
+        chain: &ChainClient,
+        network: &NetworkIdentity,
+        group_id: &str,
+        address: &str,
+    ) -> Result<(), String> {
         let gid = hex::decode(group_id).map_err(|e| e.to_string())?;
         let mut guard = self.inner.lock().await;
-        let m = guard.as_mut().ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
-        let out = m.add_participant(link, chain, network, &gid, address).await.map_err(|e| e.to_string());
+        let m = guard
+            .as_mut()
+            .ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
+        let out = m
+            .add_participant(link, chain, network, &gid, address)
+            .await
+            .map_err(|e| e.to_string());
         Self::persist(m, account).await?;
         out
     }
 
     /// Removes a member's devices.
-    pub async fn remove_member(&self, account: &SharedAccount, link: &Link, network: &NetworkIdentity, group_id: &str, address: &str) -> Result<usize, String> {
+    pub async fn remove_member(
+        &self,
+        account: &SharedAccount,
+        link: &Link,
+        network: &NetworkIdentity,
+        group_id: &str,
+        address: &str,
+    ) -> Result<usize, String> {
         let gid = hex::decode(group_id).map_err(|e| e.to_string())?;
         let mut guard = self.inner.lock().await;
-        let m = guard.as_mut().ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
-        let out = m.remove_participant(link, network, &gid, address).await.map_err(|e| e.to_string());
+        let m = guard
+            .as_mut()
+            .ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
+        let out = m
+            .remove_participant(link, network, &gid, address)
+            .await
+            .map_err(|e| e.to_string());
         Self::persist(m, account).await?;
         out
     }
 
     /// Sends any chat message and records it locally.
+    // The session handles travel together; bundling them into a struct would
+    // only move the same eight values one level down.
+    #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
         account: &SharedAccount,
@@ -385,12 +464,20 @@ impl ChatHub {
         msg.version = WIRE_VERSION;
         let (me, my_device) = {
             let a = account.lock().await;
-            (a.address().to_owned(), hex::encode(a.device().map_err(|e| e.to_string())?.public_key()))
+            (
+                a.address().to_owned(),
+                hex::encode(a.device().map_err(|e| e.to_string())?.public_key()),
+            )
         };
         {
             let mut guard = self.inner.lock().await;
-            let m = guard.as_mut().ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
-            let out = m.send(link, network, &gid, msg.clone()).await.map_err(|e| e.to_string());
+            let m = guard
+                .as_mut()
+                .ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
+            let out = m
+                .send(link, network, &gid, msg.clone())
+                .await
+                .map_err(|e| e.to_string());
             Self::persist(m, account).await?;
             out?;
         }
@@ -416,7 +503,9 @@ impl ChatHub {
         if self.syncing.swap(true, Ordering::SeqCst) {
             return Ok(SyncReport::default());
         }
-        let res = self.sync_inner(account, db, key, link, network, chain).await;
+        let res = self
+            .sync_inner(account, db, key, link, network, chain)
+            .await;
         self.syncing.store(false, Ordering::SeqCst);
         *self.last_sync.lock().await = Some(Instant::now());
         res
@@ -433,13 +522,21 @@ impl ChatHub {
     ) -> Result<SyncReport, String> {
         let (me, my_device) = {
             let a = account.lock().await;
-            (a.address().to_owned(), hex::encode(a.device().map_err(|e| e.to_string())?.public_key()))
+            (
+                a.address().to_owned(),
+                hex::encode(a.device().map_err(|e| e.to_string())?.public_key()),
+            )
         };
         let (received, before, after): (Vec<Received>, usize, usize) = {
             let mut guard = self.inner.lock().await;
-            let m = guard.as_mut().ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
+            let m = guard
+                .as_mut()
+                .ok_or_else(|| "messaging is not open (locked?)".to_owned())?;
             let before = m.conversations().len();
-            let out = m.sync(link, network, chain).await.map_err(|e| e.to_string());
+            let out = m
+                .sync(link, network, chain)
+                .await
+                .map_err(|e| e.to_string());
             Self::persist(m, account).await?;
             let after = m.conversations().len();
             (out?, before, after)
@@ -451,7 +548,14 @@ impl ChatHub {
         let mut deliver: Vec<(String, Vec<u8>)> = Vec::new();
         for r in received {
             let raw = &r.raw;
-            let view = view_of(raw, &r.group_id, &r.sender, &r.sender_device, &me, &my_device);
+            let view = view_of(
+                raw,
+                &r.group_id,
+                &r.sender,
+                &r.sender_device,
+                &me,
+                &my_device,
+            );
             match raw.kind {
                 k if k == chat::ChatKind::Typing as i32 => {
                     self.typing
@@ -462,8 +566,18 @@ impl ChatHub {
                         .push((r.sender.clone(), Instant::now()));
                 }
                 k if k == chat::ChatKind::Read as i32 || k == chat::ChatKind::Delivered as i32 => {
-                    let state = if k == chat::ChatKind::Read as i32 { "read" } else { "delivered" };
-                    update_state(db, &r.group_id, &view.target, state, k == chat::ChatKind::Read as i32)?;
+                    let state = if k == chat::ChatKind::Read as i32 {
+                        "read"
+                    } else {
+                        "delivered"
+                    };
+                    update_state(
+                        db,
+                        &r.group_id,
+                        &view.target,
+                        state,
+                        k == chat::ChatKind::Read as i32,
+                    )?;
                 }
                 k if k == chat::ChatKind::Reaction as i32 => {
                     store_message(db, key, &view)?;
@@ -480,9 +594,16 @@ impl ChatHub {
                     touch_meta(db, key, &r.group_id, &view, !outgoing)?;
                     if !outgoing {
                         *report.new_by_group.entry(r.group_id.clone()).or_default() += 1;
-                        let preview = if view.text.is_empty() { view.kind.to_lowercase() } else { view.text.chars().take(80).collect() };
-                        report.notify.push((r.sender.clone(), preview, r.group_id.clone()));
-                        if is_stored_kind(raw.kind) && raw.kind != chat::ChatKind::GroupInfo as i32 {
+                        let preview = if view.text.is_empty() {
+                            view.kind.to_lowercase()
+                        } else {
+                            view.text.chars().take(80).collect()
+                        };
+                        report
+                            .notify
+                            .push((r.sender.clone(), preview, r.group_id.clone()));
+                        if is_stored_kind(raw.kind) && raw.kind != chat::ChatKind::GroupInfo as i32
+                        {
                             deliver.push((r.group_id.clone(), raw.id.clone()));
                         }
                     }
@@ -526,13 +647,16 @@ impl ChatHub {
     /// Members' identities as MLS sees them (address, device key hex).
     pub async fn members(&self, group_id: &str) -> Result<Vec<(String, String)>, String> {
         let guard = self.inner.lock().await;
-        let m = guard.as_ref().ok_or_else(|| "messaging is not open".to_owned())?;
+        let m = guard
+            .as_ref()
+            .ok_or_else(|| "messaging is not open".to_owned())?;
         let gid = hex::decode(group_id).map_err(|e| e.to_string())?;
         let members = m.mls().members(&gid).map_err(|e| e.to_string())?;
         Ok(members
             .iter()
             .map(|mm| {
-                let (addr, dev) = hashgram_sdk::mls::parse_identity(&mm.identity).unwrap_or_default();
+                let (addr, dev) =
+                    hashgram_sdk::mls::parse_identity(&mm.identity).unwrap_or_default();
                 (addr, hex::encode(dev))
             })
             .collect())
@@ -561,7 +685,8 @@ fn load_meta(db: &Db, key: &DbKey, group_id: &str) -> Result<Option<Conversation
     match row {
         Some((sealed, unread)) => {
             let json = crate::crypto::open(key, group_id.as_bytes(), &sealed)?;
-            let mut m: ConversationMeta = serde_json::from_slice(&json).map_err(|e| e.to_string())?;
+            let mut m: ConversationMeta =
+                serde_json::from_slice(&json).map_err(|e| e.to_string())?;
             m.unread = unread.max(0) as u32;
             Ok(Some(m))
         }
@@ -582,15 +707,21 @@ fn save_meta(db: &Db, key: &DbKey, m: &ConversationMeta) -> Result<(), String> {
     })
 }
 
-fn touch_meta(db: &Db, key: &DbKey, group_id: &str, view: &MessageView, bump_unread: bool) -> Result<(), String> {
+fn touch_meta(
+    db: &Db,
+    key: &DbKey,
+    group_id: &str,
+    view: &MessageView,
+    bump_unread: bool,
+) -> Result<(), String> {
     let mut m = load_meta(db, key, group_id)?.unwrap_or_default();
     m.group_id = group_id.to_owned();
     if view.timestamp_ms >= m.last_ts {
         m.last_ts = view.timestamp_ms;
         m.last_preview = if !view.text.is_empty() {
             view.text.chars().take(80).collect()
-        } else if !view.attachments.is_empty() {
-            format!("[{}]", view.attachments[0].kind)
+        } else if let Some(first) = view.attachments.first() {
+            format!("[{}]", first.kind)
         } else {
             view.kind.to_lowercase()
         };
@@ -614,7 +745,11 @@ pub fn set_disappear(db: &Db, key: &DbKey, group_id: &str, secs: u32) -> Result<
 
 /// The disappearing timer for a conversation.
 pub fn disappear_of(db: &Db, key: &DbKey, group_id: &str) -> u32 {
-    load_meta(db, key, group_id).ok().flatten().map(|m| m.disappear_secs).unwrap_or(0)
+    load_meta(db, key, group_id)
+        .ok()
+        .flatten()
+        .map(|m| m.disappear_secs)
+        .unwrap_or(0)
 }
 
 fn store_message(db: &Db, key: &DbKey, v: &MessageView) -> Result<(), String> {
@@ -625,13 +760,28 @@ fn store_message(db: &Db, key: &DbKey, v: &MessageView) -> Result<(), String> {
             "INSERT INTO messages(id, group_id, sender, device, ts, kind, sealed, state, expires)
              VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)
              ON CONFLICT(id) DO NOTHING",
-            params![v.id, v.group_id, v.sender, v.sender_device, v.timestamp_ms as i64, v.kind, sealed, v.state],
+            params![
+                v.id,
+                v.group_id,
+                v.sender,
+                v.sender_device,
+                v.timestamp_ms as i64,
+                v.kind,
+                sealed,
+                v.state
+            ],
         )
         .map(|_| ())
     })
 }
 
-fn update_state(db: &Db, group_id: &str, target: &str, state: &str, is_read: bool) -> Result<(), String> {
+fn update_state(
+    db: &Db,
+    group_id: &str,
+    target: &str,
+    state: &str,
+    is_read: bool,
+) -> Result<(), String> {
     // Receipts move a message forward only: sent → delivered → read.
     db.with(|c| {
         if is_read {
@@ -654,8 +804,12 @@ fn update_state(db: &Db, group_id: &str, target: &str, state: &str, is_read: boo
 
 fn tombstone(db: &Db, key: &DbKey, group_id: &str, target: &str, by: &str) -> Result<(), String> {
     let existing: Option<Vec<u8>> = db.with(|c| {
-        c.query_row("SELECT sealed FROM messages WHERE id = ?1 AND group_id = ?2 AND sender = ?3", params![target, group_id, by], |r| r.get(0))
-            .optional()
+        c.query_row(
+            "SELECT sealed FROM messages WHERE id = ?1 AND group_id = ?2 AND sender = ?3",
+            params![target, group_id, by],
+            |r| r.get(0),
+        )
+        .optional()
     })?;
     if let Some(sealed) = existing {
         let json = crate::crypto::open(key, target.as_bytes(), &sealed)?;
@@ -665,15 +819,32 @@ fn tombstone(db: &Db, key: &DbKey, group_id: &str, target: &str, by: &str) -> Re
         v.kind = "DELETE".into();
         let json = serde_json::to_vec(&v).map_err(|e| e.to_string())?;
         let sealed = crate::crypto::seal(key, target.as_bytes(), &json)?;
-        db.with(|c| c.execute("UPDATE messages SET sealed = ?2, kind = 'DELETE' WHERE id = ?1", params![target, sealed]).map(|_| ()))?;
+        db.with(|c| {
+            c.execute(
+                "UPDATE messages SET sealed = ?2, kind = 'DELETE' WHERE id = ?1",
+                params![target, sealed],
+            )
+            .map(|_| ())
+        })?;
     }
     Ok(())
 }
 
-fn apply_edit(db: &Db, key: &DbKey, group_id: &str, target: &str, by: &str, text: &str) -> Result<(), String> {
+fn apply_edit(
+    db: &Db,
+    key: &DbKey,
+    group_id: &str,
+    target: &str,
+    by: &str,
+    text: &str,
+) -> Result<(), String> {
     let existing: Option<Vec<u8>> = db.with(|c| {
-        c.query_row("SELECT sealed FROM messages WHERE id = ?1 AND group_id = ?2 AND sender = ?3", params![target, group_id, by], |r| r.get(0))
-            .optional()
+        c.query_row(
+            "SELECT sealed FROM messages WHERE id = ?1 AND group_id = ?2 AND sender = ?3",
+            params![target, group_id, by],
+            |r| r.get(0),
+        )
+        .optional()
     })?;
     if let Some(sealed) = existing {
         let json = crate::crypto::open(key, target.as_bytes(), &sealed)?;
@@ -681,23 +852,48 @@ fn apply_edit(db: &Db, key: &DbKey, group_id: &str, target: &str, by: &str, text
         v.text = text.to_owned();
         let json = serde_json::to_vec(&v).map_err(|e| e.to_string())?;
         let sealed = crate::crypto::seal(key, target.as_bytes(), &json)?;
-        db.with(|c| c.execute("UPDATE messages SET sealed = ?2 WHERE id = ?1", params![target, sealed]).map(|_| ()))?;
+        db.with(|c| {
+            c.execute(
+                "UPDATE messages SET sealed = ?2 WHERE id = ?1",
+                params![target, sealed],
+            )
+            .map(|_| ())
+        })?;
     }
     Ok(())
 }
 
 /// Applies an edit (public wrapper for our own edits).
-pub fn apply_edit_public(db: &Db, key: &DbKey, group_id: &str, target: &str, by: &str, text: &str) -> Result<(), String> {
+pub fn apply_edit_public(
+    db: &Db,
+    key: &DbKey,
+    group_id: &str,
+    target: &str,
+    by: &str,
+    text: &str,
+) -> Result<(), String> {
     apply_edit(db, key, group_id, target, by, text)
 }
 
 /// Tombstones a message (public wrapper for our own deletes).
-pub fn tombstone_public(db: &Db, key: &DbKey, group_id: &str, target: &str, by: &str) -> Result<(), String> {
+pub fn tombstone_public(
+    db: &Db,
+    key: &DbKey,
+    group_id: &str,
+    target: &str,
+    by: &str,
+) -> Result<(), String> {
     tombstone(db, key, group_id, target, by)
 }
 
 /// History of a group, newest last, with reactions folded in.
-pub fn history(db: &Db, key: &DbKey, group_id: &str, before_ts: Option<u64>, limit: usize) -> Result<Vec<MessageView>, String> {
+pub fn history(
+    db: &Db,
+    key: &DbKey,
+    group_id: &str,
+    before_ts: Option<u64>,
+    limit: usize,
+) -> Result<Vec<MessageView>, String> {
     let rows: Vec<(String, Vec<u8>, String, i64)> = db.with(|c| {
         let mut st = c.prepare(
             "SELECT id, sealed, state, expires FROM messages WHERE group_id = ?1 AND ts < ?2 AND kind != 'REACTION'
@@ -719,7 +915,8 @@ pub fn history(db: &Db, key: &DbKey, group_id: &str, before_ts: Option<u64>, lim
     out.reverse();
     // Reactions.
     let reactions: Vec<(String, Vec<u8>)> = db.with(|c| {
-        let mut st = c.prepare("SELECT id, sealed FROM messages WHERE group_id = ?1 AND kind = 'REACTION'")?;
+        let mut st =
+            c.prepare("SELECT id, sealed FROM messages WHERE group_id = ?1 AND kind = 'REACTION'")?;
         let rows = st.query_map(params![group_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect()
     })?;
@@ -730,7 +927,12 @@ pub fn history(db: &Db, key: &DbKey, group_id: &str, before_ts: Option<u64>, lim
                 if r.reaction.is_empty() {
                     continue;
                 }
-                by_target.entry(r.target).or_default().entry(r.reaction).or_default().push(r.sender);
+                by_target
+                    .entry(r.target)
+                    .or_default()
+                    .entry(r.reaction)
+                    .or_default()
+                    .push(r.sender);
             }
         }
     }
@@ -752,7 +954,9 @@ pub fn mark_read(db: &Db, key: &DbKey, group_id: &str, me: &str) -> Result<Optio
     save_meta(db, key, &m)?;
     // Disappearing: the timer starts when read.
     let rows: Vec<(String, Vec<u8>)> = db.with(|c| {
-        let mut st = c.prepare("SELECT id, sealed FROM messages WHERE group_id = ?1 AND sender != ?2 AND expires = 0")?;
+        let mut st = c.prepare(
+            "SELECT id, sealed FROM messages WHERE group_id = ?1 AND sender != ?2 AND expires = 0",
+        )?;
         let rows = st.query_map(params![group_id, me], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect()
     })?;
@@ -761,7 +965,13 @@ pub fn mark_read(db: &Db, key: &DbKey, group_id: &str, me: &str) -> Result<Optio
             if let Ok(v) = serde_json::from_slice::<MessageView>(&json) {
                 if v.disappear_after_secs > 0 {
                     let exp = now_s() + u64::from(v.disappear_after_secs);
-                    db.with(|c| c.execute("UPDATE messages SET expires = ?2 WHERE id = ?1", params![id, exp as i64]).map(|_| ()))?;
+                    db.with(|c| {
+                        c.execute(
+                            "UPDATE messages SET expires = ?2 WHERE id = ?1",
+                            params![id, exp as i64],
+                        )
+                        .map(|_| ())
+                    })?;
                 }
             }
         }
@@ -778,14 +988,25 @@ pub fn mark_read(db: &Db, key: &DbKey, group_id: &str, me: &str) -> Result<Optio
 
 /// Deletes messages whose disappearing timer elapsed. Returns how many.
 pub fn sweep_expired(db: &Db) -> Result<usize, String> {
-    db.with(|c| c.execute("DELETE FROM messages WHERE expires > 0 AND expires <= ?1", params![now_s() as i64]))
+    db.with(|c| {
+        c.execute(
+            "DELETE FROM messages WHERE expires > 0 AND expires <= ?1",
+            params![now_s() as i64],
+        )
+    })
 }
 
 /// Total unread across conversations (tray badge).
 pub fn unread_total(db: &Db) -> u32 {
-    db.with(|c| c.query_row("SELECT COALESCE(SUM(unread),0) FROM conversations", [], |r| r.get::<_, i64>(0)))
-        .unwrap_or(0)
-        .max(0) as u32
+    db.with(|c| {
+        c.query_row(
+            "SELECT COALESCE(SUM(unread),0) FROM conversations",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+    })
+    .unwrap_or(0)
+    .max(0) as u32
 }
 
 /// Search over local plaintext (decrypts in memory; the database holds
@@ -796,7 +1017,9 @@ pub fn search(db: &Db, key: &DbKey, query: &str, limit: usize) -> Result<Vec<Mes
         return Ok(Vec::new());
     }
     let rows: Vec<(String, Vec<u8>)> = db.with(|c| {
-        let mut st = c.prepare("SELECT id, sealed FROM messages WHERE kind IN ('TEXT') ORDER BY ts DESC LIMIT 5000")?;
+        let mut st = c.prepare(
+            "SELECT id, sealed FROM messages WHERE kind IN ('TEXT') ORDER BY ts DESC LIMIT 5000",
+        )?;
         let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect()
     })?;
@@ -820,6 +1043,7 @@ pub fn search(db: &Db, key: &DbKey, query: &str, limit: usize) -> Result<Vec<Mes
 
 /// Encrypts and uploads a file as a private blob and returns the
 /// attachment record to put in a message.
+#[allow(clippy::too_many_arguments)] // mirrors the attachment record field by field
 pub async fn upload_attachment(
     link: &Link,
     network: &NetworkIdentity,
@@ -834,8 +1058,16 @@ pub async fn upload_attachment(
     let up = blob::upload(link, network, device, data, mime, true, 2)
         .await
         .map_err(|e| e.to_string())?;
-    let key = up.key.as_deref().and_then(|k| hex::decode(k).ok()).unwrap_or_default();
-    let nonce = up.nonce.as_deref().and_then(|n| hex::decode(n).ok()).unwrap_or_default();
+    let key = up
+        .key
+        .as_deref()
+        .and_then(|k| hex::decode(k).ok())
+        .unwrap_or_default();
+    let nonce = up
+        .nonce
+        .as_deref()
+        .and_then(|n| hex::decode(n).ok())
+        .unwrap_or_default();
     Ok(chat::Attachment {
         cid: hex::decode(&up.cid).map_err(|e| e.to_string())?,
         key,
@@ -855,7 +1087,11 @@ pub async fn upload_attachment(
 pub async fn fetch_attachment(
     link: &Link,
     a: &AttachmentView,
-    receipt: Option<(&ChainClient, &NetworkIdentity, &hashgram_sdk::proto::Ed25519Signer)>,
+    receipt: Option<(
+        &ChainClient,
+        &NetworkIdentity,
+        &hashgram_sdk::proto::Ed25519Signer,
+    )>,
 ) -> Result<std::path::PathBuf, String> {
     let dir = crate::paths::data_dir().join("media-cache");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -865,7 +1101,9 @@ pub async fn fetch_attachment(
         return Ok(path);
     }
     let cid = hex::decode(&a.cid).map_err(|e| e.to_string())?;
-    let (bytes, _manifest, _from) = blob::download(link, &cid, receipt).await.map_err(|e| e.to_string())?;
+    let (bytes, _manifest, _from) = blob::download(link, &cid, receipt)
+        .await
+        .map_err(|e| e.to_string())?;
     let plain = if !a.key.is_empty() {
         let fk = blob::FileKey {
             key: hex::decode(&a.key)
@@ -881,7 +1119,9 @@ pub async fn fetch_attachment(
     } else {
         bytes
     };
-    if !a.plaintext_hash.is_empty() && hex::encode(blake3::hash(&plain).as_bytes()) != a.plaintext_hash {
+    if !a.plaintext_hash.is_empty()
+        && hex::encode(blake3::hash(&plain).as_bytes()) != a.plaintext_hash
+    {
         return Err("attachment hash mismatch: the provider served corrupt data".into());
     }
     let tmp = path.with_extension("part");
@@ -931,7 +1171,12 @@ pub fn mime_for(name: &str) -> (&'static str, &'static str) {
 
 /// Builds a TEXT message.
 #[must_use]
-pub fn text_message(text: &str, reply_to: Option<&str>, disappear_after_secs: u32, attachments: Vec<chat::Attachment>) -> chat::ChatMessage {
+pub fn text_message(
+    text: &str,
+    reply_to: Option<&str>,
+    disappear_after_secs: u32,
+    attachments: Vec<chat::Attachment>,
+) -> chat::ChatMessage {
     chat::ChatMessage {
         version: WIRE_VERSION,
         kind: if attachments.iter().any(|a| a.kind == "audio") && text.is_empty() {
@@ -942,7 +1187,9 @@ pub fn text_message(text: &str, reply_to: Option<&str>, disappear_after_secs: u3
         id: random_id(),
         timestamp_ms: now_ms(),
         text: text.to_owned(),
-        reply_to: reply_to.and_then(|r| hex::decode(r).ok()).unwrap_or_default(),
+        reply_to: reply_to
+            .and_then(|r| hex::decode(r).ok())
+            .unwrap_or_default(),
         attachments,
         disappear_after_secs,
         ..Default::default()
@@ -951,7 +1198,12 @@ pub fn text_message(text: &str, reply_to: Option<&str>, disappear_after_secs: u3
 
 /// Builds a control message (REACTION, READ, TYPING, EDIT, DELETE).
 #[must_use]
-pub fn control_message(kind: chat::ChatKind, target: Option<&str>, text: &str, reaction: &str) -> chat::ChatMessage {
+pub fn control_message(
+    kind: chat::ChatKind,
+    target: Option<&str>,
+    text: &str,
+    reaction: &str,
+) -> chat::ChatMessage {
     chat::ChatMessage {
         version: WIRE_VERSION,
         kind: kind as i32,

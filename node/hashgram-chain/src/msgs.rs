@@ -78,7 +78,12 @@ pub fn undelegate(delegator: &str, validator: &str, amount_uhash: u128) -> Any {
 
 /// `MsgBeginRedelegate` from `x/staking`.
 #[must_use]
-pub fn redelegate(delegator: &str, from_validator: &str, to_validator: &str, amount_uhash: u128) -> Any {
+pub fn redelegate(
+    delegator: &str,
+    from_validator: &str,
+    to_validator: &str,
+    amount_uhash: u128,
+) -> Any {
     any013(
         "/cosmos.staking.v1beta1.MsgBeginRedelegate",
         &cosmrs::proto::cosmos::staking::v1beta1::MsgBeginRedelegate {
@@ -334,7 +339,10 @@ mod tests {
         let u = undelegate("hash1d", "hashvaloper1a", 1);
         assert_eq!(u.type_url, "/cosmos.staking.v1beta1.MsgUndelegate");
         let w = withdraw_rewards("hash1d", "hashvaloper1a");
-        assert_eq!(w.type_url, "/cosmos.distribution.v1beta1.MsgWithdrawDelegatorReward");
+        assert_eq!(
+            w.type_url,
+            "/cosmos.distribution.v1beta1.MsgWithdrawDelegatorReward"
+        );
 
         let v = vote("hash1d", 7, VoteOption::NoWithVeto);
         assert_eq!(v.type_url, "/cosmos.gov.v1.MsgVote");
@@ -348,11 +356,26 @@ mod tests {
         assert_eq!(t.type_url, "/hashgram.username.v1.MsgTransfer");
         let tt = pb::username::MsgTransfer::decode(t.value.as_slice()).unwrap();
         assert_eq!(tt.new_owner, "hash1b");
-        assert_eq!(renew_username("hash1a", "alice").type_url, "/hashgram.username.v1.MsgRenew");
-        assert_eq!(release_username("hash1a", "alice").type_url, "/hashgram.username.v1.MsgRelease");
-        assert_eq!(cancel_recovery("hash1a").type_url, "/hashgram.identity.v1.MsgCancelRecovery");
-        assert_eq!(begin_unbonding("hash1a").type_url, "/hashgram.serviceproof.v1.MsgBeginUnbonding");
-        assert_eq!(withdraw_bond("hash1a").type_url, "/hashgram.serviceproof.v1.MsgWithdrawBond");
+        assert_eq!(
+            renew_username("hash1a", "alice").type_url,
+            "/hashgram.username.v1.MsgRenew"
+        );
+        assert_eq!(
+            release_username("hash1a", "alice").type_url,
+            "/hashgram.username.v1.MsgRelease"
+        );
+        assert_eq!(
+            cancel_recovery("hash1a").type_url,
+            "/hashgram.identity.v1.MsgCancelRecovery"
+        );
+        assert_eq!(
+            begin_unbonding("hash1a").type_url,
+            "/hashgram.serviceproof.v1.MsgBeginUnbonding"
+        );
+        assert_eq!(
+            withdraw_bond("hash1a").type_url,
+            "/hashgram.serviceproof.v1.MsgWithdrawBond"
+        );
     }
 
     #[test]

@@ -107,7 +107,9 @@ impl AppState {
     }
 
     /// The unlocked account and database key, or "locked".
-    pub async fn session_handles(&self) -> Result<(SharedAccount, crate::crypto::DbKey, String), String> {
+    pub async fn session_handles(
+        &self,
+    ) -> Result<(SharedAccount, crate::crypto::DbKey, String), String> {
         let s = self.session.read().await;
         let s = s.as_ref().ok_or_else(|| "locked".to_owned())?;
         Ok((s.account.clone(), s.db_key.clone(), s.address.clone()))

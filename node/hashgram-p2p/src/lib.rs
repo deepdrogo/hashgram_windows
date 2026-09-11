@@ -72,8 +72,8 @@ pub use swarm::{start, Command, Event, NodeHandle, PeerSummary, RequestError, St
 pub use libp2p::gossipsub::{MessageAcceptance, MessageId};
 pub use libp2p::identity as libp2p_identity;
 pub use libp2p::identity::Keypair;
-pub use libp2p::request_response::ResponseChannel;
 pub use libp2p::multiaddr::Protocol;
+pub use libp2p::request_response::ResponseChannel;
 pub use libp2p::{Multiaddr, PeerId};
 
 /// Gossip topic names. One place, so the publisher and every subscriber

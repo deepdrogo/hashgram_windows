@@ -11,7 +11,18 @@
 use std::path::{Path, PathBuf};
 
 /// Files the 0.1.0 preview wrote next to the binaries; moved into `data\` once.
-const LEGACY_ENTRIES: &[&str] = &["vault.json", "settings.json", "hashgram.db", "hashgram.db-wal", "hashgram.db-shm", "peers.json", "hello.bin", "logs", "media-cache", "node"];
+const LEGACY_ENTRIES: &[&str] = &[
+    "vault.json",
+    "settings.json",
+    "hashgram.db",
+    "hashgram.db-wal",
+    "hashgram.db-shm",
+    "peers.json",
+    "hello.bin",
+    "logs",
+    "media-cache",
+    "node",
+];
 
 /// The data root.
 #[must_use]
@@ -32,7 +43,10 @@ pub fn data_dir() -> PathBuf {
 /// Ensures the data root exists, moving a 0.1.0 layout into place first.
 pub fn ensure_dirs() -> std::io::Result<PathBuf> {
     let d = data_dir();
-    if std::env::var("HASHGRAM_DESKTOP_HOME").map(|p| p.trim().is_empty()).unwrap_or(true) {
+    if std::env::var("HASHGRAM_DESKTOP_HOME")
+        .map(|p| p.trim().is_empty())
+        .unwrap_or(true)
+    {
         if let Some(parent) = d.parent() {
             migrate_legacy_layout(parent, &d);
         }
@@ -62,43 +76,6 @@ fn migrate_legacy_layout(parent: &Path, data: &Path) {
         if from.exists() {
             let _ = std::fs::rename(&from, data.join(name));
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::migrate_legacy_layout;
-
-    #[test]
-    fn a_preview_layout_moves_into_data_once() {
-        let root = std::env::temp_dir().join(format!("hg-paths-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("logs")).unwrap();
-        std::fs::write(root.join("vault.json"), b"{}").unwrap();
-        std::fs::write(root.join("hashgram-desktop.exe"), b"MZ").unwrap();
-        let data = root.join("data");
-
-        migrate_legacy_layout(&root, &data);
-        assert!(data.join("vault.json").exists());
-        assert!(data.join("logs").is_dir());
-        assert!(!root.join("vault.json").exists());
-        assert!(root.join("hashgram-desktop.exe").exists(), "binaries stay where the installer put them");
-
-        // Second run: data exists, nothing else moves.
-        std::fs::write(root.join("peers.json"), b"[]").unwrap();
-        migrate_legacy_layout(&root, &data);
-        assert!(root.join("peers.json").exists());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_clean_install_creates_nothing_to_migrate() {
-        let root = std::env::temp_dir().join(format!("hg-paths-clean-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        migrate_legacy_layout(&root, &root.join("data"));
-        assert!(!root.join("data").exists());
-        let _ = std::fs::remove_dir_all(&root);
     }
 }
 
@@ -136,4 +113,44 @@ pub fn hello_blob_path() -> PathBuf {
 #[must_use]
 pub fn logs_dir() -> PathBuf {
     data_dir().join("logs")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::migrate_legacy_layout;
+
+    #[test]
+    fn a_preview_layout_moves_into_data_once() {
+        let root = std::env::temp_dir().join(format!("hg-paths-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("logs")).unwrap();
+        std::fs::write(root.join("vault.json"), b"{}").unwrap();
+        std::fs::write(root.join("hashgram-desktop.exe"), b"MZ").unwrap();
+        let data = root.join("data");
+
+        migrate_legacy_layout(&root, &data);
+        assert!(data.join("vault.json").exists());
+        assert!(data.join("logs").is_dir());
+        assert!(!root.join("vault.json").exists());
+        assert!(
+            root.join("hashgram-desktop.exe").exists(),
+            "binaries stay where the installer put them"
+        );
+
+        // Second run: data exists, nothing else moves.
+        std::fs::write(root.join("peers.json"), b"[]").unwrap();
+        migrate_legacy_layout(&root, &data);
+        assert!(root.join("peers.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_clean_install_creates_nothing_to_migrate() {
+        let root = std::env::temp_dir().join(format!("hg-paths-clean-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        migrate_legacy_layout(&root, &root.join("data"));
+        assert!(!root.join("data").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

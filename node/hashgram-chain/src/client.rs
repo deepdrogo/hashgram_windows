@@ -469,7 +469,10 @@ impl Client {
                 .gas_info
                 .and_then(|g| g.gas_used.parse().ok())
                 .unwrap_or(200_000);
-            (((gas_used as f64) * self.gas_adjustment).ceil() as u64 + 20_000, true)
+            (
+                ((gas_used as f64) * self.gas_adjustment).ceil() as u64 + 20_000,
+                true,
+            )
         } else {
             (estimate_gas(&body.messages), false)
         };

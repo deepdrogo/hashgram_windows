@@ -28,7 +28,9 @@ type S<'a> = State<'a, Arc<AppState>>;
 const DB_KEY_NAME: &str = "desktop_db_key";
 
 fn kdf() -> KdfCost {
-    if std::env::var("HASHGRAM_LIGHT_KDF").map(|v| v == "true").unwrap_or(false)
+    if std::env::var("HASHGRAM_LIGHT_KDF")
+        .map(|v| v == "true")
+        .unwrap_or(false)
         && std::env::var("HASHGRAM_DESKTOP_HOME").is_ok()
     {
         // Tests only: never on a real profile.
@@ -111,8 +113,13 @@ pub async fn app_status(state: S<'_>, app: AppHandle) -> Result<AppStatus, Strin
         .and_then(|p| p.as_str())
         .unwrap_or("")
         .to_owned();
-    let updater_configured = !updater_pubkey.is_empty() && !updater_pubkey.starts_with("REPLACE_WITH");
-    let updater_key_id = if updater_configured { minisign_key_id(&updater_pubkey) } else { String::new() };
+    let updater_configured =
+        !updater_pubkey.is_empty() && !updater_pubkey.starts_with("REPLACE_WITH");
+    let updater_key_id = if updater_configured {
+        minisign_key_id(&updater_pubkey)
+    } else {
+        String::new()
+    };
     let updater_endpoint = updater_cfg
         .as_ref()
         .and_then(|u| u.get("endpoints"))
@@ -218,7 +225,9 @@ async fn open_session(state: &AppState, mut account: Account) -> Result<AccountI
 #[tauri::command]
 pub async fn onboarding_generate(state: S<'_>) -> Result<Vec<String>, String> {
     if paths::vault_path().exists() {
-        return Err("a vault already exists on this PC; unlock it or restore over it from Settings".into());
+        return Err(
+            "a vault already exists on this PC; unlock it or restore over it from Settings".into(),
+        );
     }
     let (mnemonic, _wallet) = Wallet::generate().map_err(|e| e.to_string())?;
     let words: Vec<String> = mnemonic.split_whitespace().map(str::to_owned).collect();
@@ -356,7 +365,9 @@ pub async fn onboarding_restore(
     let m = Zeroizing::new(normalise_mnemonic(&mnemonic)?);
     let vault = paths::vault_path();
     if vault.exists() {
-        return Err("a vault already exists on this PC; remove it from Settings → Security first".into());
+        return Err(
+            "a vault already exists on this PC; remove it from Settings → Security first".into(),
+        );
     }
     paths::ensure_dirs().map_err(|e| e.to_string())?;
     let did = device_id();
@@ -393,19 +404,18 @@ pub async fn unlock(state: S<'_>, passphrase: String) -> Result<AccountInfo, Str
     if !vault.exists() {
         return Err("no vault on this PC".into());
     }
-    let account = tauri::async_runtime::spawn_blocking(move || {
-        Account::open(&vault, &passphrase, kdf())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| {
-        let s = e.to_string();
-        if s.contains("decrypt") || s.contains("passphrase") || s.contains("aead") {
-            "wrong passphrase".to_owned()
-        } else {
-            s
-        }
-    })?;
+    let account =
+        tauri::async_runtime::spawn_blocking(move || Account::open(&vault, &passphrase, kdf()))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| {
+                let s = e.to_string();
+                if s.contains("decrypt") || s.contains("passphrase") || s.contains("aead") {
+                    "wrong passphrase".to_owned()
+                } else {
+                    s
+                }
+            })?;
     open_session(&state, account).await
 }
 
@@ -569,11 +579,18 @@ pub async fn settings_set(state: S<'_>, app: AppHandle, settings: Settings) -> R
         cur.network != settings.network
     };
     for url in &settings.network.https_endpoints {
-        if !(url.starts_with("https://") || url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost")) {
-            return Err(format!("{url:?}: endpoints must be https:// (plain http only on this PC)"));
+        if !(url.starts_with("https://")
+            || url.starts_with("http://127.0.0.1")
+            || url.starts_with("http://localhost"))
+        {
+            return Err(format!(
+                "{url:?}: endpoints must be https:// (plain http only on this PC)"
+            ));
         }
     }
-    settings.save(&paths::settings_path()).map_err(|e| e.to_string())?;
+    settings
+        .save(&paths::settings_path())
+        .map_err(|e| e.to_string())?;
     *state.settings.write().await = settings.clone();
     if network_changed {
         state.net.stop().await;
@@ -674,18 +691,34 @@ pub async fn diagnostics_export(state: S<'_>, app: AppHandle) -> Result<String, 
         app.package_info().version,
         COMMIT
     ));
-    out.push_str(&format!("network {} chain {} genesis {}\n", snap.network, snap.chain_id, snap.genesis_hash));
-    out.push_str(&format!("own peer id {}\nnat {}\nverified peers {}\nkad {}\npeerstore {}\nuptime {}s\n",
-        snap.own_peer_id, snap.nat, snap.verified, snap.kad_peers, snap.peerstore_size, snap.uptime_secs));
+    out.push_str(&format!(
+        "network {} chain {} genesis {}\n",
+        snap.network, snap.chain_id, snap.genesis_hash
+    ));
+    out.push_str(&format!(
+        "own peer id {}\nnat {}\nverified peers {}\nkad {}\npeerstore {}\nuptime {}s\n",
+        snap.own_peer_id,
+        snap.nat,
+        snap.verified,
+        snap.kad_peers,
+        snap.peerstore_size,
+        snap.uptime_secs
+    ));
     out.push_str("\npeers (no addresses):\n");
     for p in &snap.peers {
         out.push_str(&format!(
             "  {} roles={} operator={} transport={} latency={} discovery={} verified={}\n",
             p.peer_id,
             p.roles.join(","),
-            if p.operator.is_empty() { "-" } else { &p.operator },
+            if p.operator.is_empty() {
+                "-"
+            } else {
+                &p.operator
+            },
             p.transport,
-            p.latency_ms.map(|l| l.to_string()).unwrap_or_else(|| "-".into()),
+            p.latency_ms
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| "-".into()),
             p.discovery,
             p.verified
         ));
@@ -696,10 +729,20 @@ pub async fn diagnostics_export(state: S<'_>, app: AppHandle) -> Result<String, 
     }
     out.push_str("\nchain sources:\n");
     for h in &health {
-        out.push_str(&format!("  {:?} ok={} {} {}ms{}\n", h.source, h.ok, h.detail, h.latency_ms, if h.active { " [active]" } else { "" }));
+        out.push_str(&format!(
+            "  {:?} ok={} {} {}ms{}\n",
+            h.source,
+            h.ok,
+            h.detail,
+            h.latency_ms,
+            if h.active { " [active]" } else { "" }
+        ));
     }
-    out.push_str(&format!("\nsettings.network: https_endpoints={} local_node_api={}\n",
-        settings.network.https_endpoints.len(), settings.network.local_node_api));
+    out.push_str(&format!(
+        "\nsettings.network: https_endpoints={} local_node_api={}\n",
+        settings.network.https_endpoints.len(),
+        settings.network.local_node_api
+    ));
     Ok(out)
 }
 
@@ -712,7 +755,12 @@ async fn chain_read(state: &AppState, path: &str) -> Result<ChainRead, String> {
     let link = state.net.link().await;
     let r = state
         .chain
-        .get(link, &s.network.local_node_api, &s.network.https_endpoints, path)
+        .get(
+            link,
+            &s.network.local_node_api,
+            &s.network.https_endpoints,
+            path,
+        )
         .await?;
     if !r.cached {
         state.net.note_read(r.verification.clone()).await;
@@ -728,7 +776,10 @@ pub async fn chain_get(state: S<'_>, path: String) -> Result<ChainRead, String> 
 
 /// Several reads at once (one screen, one round of dots).
 #[tauri::command]
-pub async fn chain_get_many(state: S<'_>, paths: Vec<String>) -> Result<Vec<Result<ChainRead, String>>, String> {
+pub async fn chain_get_many(
+    state: S<'_>,
+    paths: Vec<String>,
+) -> Result<Vec<Result<ChainRead, String>>, String> {
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
         out.push(chain_read(&state, &p).await);
@@ -808,34 +859,54 @@ pub async fn wallet_overview(state: S<'_>) -> Result<WalletOverview, String> {
         .unwrap_or("0")
         .to_owned();
     let acct = chain_read(&state, &format!("cosmos/auth/v1beta1/accounts/{address}")).await;
-    let (account_exists, account_number, sequence, vesting_type, original_vesting, vesting_end, vesting_start) =
-        match acct {
-            Ok(r) => {
-                let a = r.value.get("account").cloned().unwrap_or_default();
-                let ty = a.get("@type").and_then(|t| t.as_str()).unwrap_or("").to_owned();
-                let base = a
-                    .get("base_vesting_account")
-                    .and_then(|v| v.get("base_account"))
-                    .or_else(|| a.get("base_account"))
-                    .unwrap_or(&a);
-                let num = base.get("account_number").and_then(s_u64);
-                let seq = base.get("sequence").and_then(s_u64);
-                let bva = a.get("base_vesting_account");
-                let ov = bva
-                    .and_then(|v| v.get("original_vesting"))
-                    .and_then(|v| v.as_array())
-                    .and_then(|arr| arr.iter().find(|c| c.get("denom").and_then(|d| d.as_str()) == Some("uhash")))
-                    .and_then(|c| c.get("amount"))
-                    .and_then(|x| x.as_str())
-                    .map(str::to_owned);
-                let end = bva.and_then(|v| v.get("end_time")).and_then(s_i64);
-                let start = a.get("start_time").and_then(s_i64);
-                let vt = if ty.contains("Vesting") { Some(ty) } else { None };
-                (true, num, seq, vt, ov, end, start)
-            }
-            Err(e) if e.contains("404") || e.contains("not found") => (false, None, None, None, None, None, None),
-            Err(e) => return Err(e),
-        };
+    let (
+        account_exists,
+        account_number,
+        sequence,
+        vesting_type,
+        original_vesting,
+        vesting_end,
+        vesting_start,
+    ) = match acct {
+        Ok(r) => {
+            let a = r.value.get("account").cloned().unwrap_or_default();
+            let ty = a
+                .get("@type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let base = a
+                .get("base_vesting_account")
+                .and_then(|v| v.get("base_account"))
+                .or_else(|| a.get("base_account"))
+                .unwrap_or(&a);
+            let num = base.get("account_number").and_then(s_u64);
+            let seq = base.get("sequence").and_then(s_u64);
+            let bva = a.get("base_vesting_account");
+            let ov = bva
+                .and_then(|v| v.get("original_vesting"))
+                .and_then(|v| v.as_array())
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|c| c.get("denom").and_then(|d| d.as_str()) == Some("uhash"))
+                })
+                .and_then(|c| c.get("amount"))
+                .and_then(|x| x.as_str())
+                .map(str::to_owned);
+            let end = bva.and_then(|v| v.get("end_time")).and_then(s_i64);
+            let start = a.get("start_time").and_then(s_i64);
+            let vt = if ty.contains("Vesting") {
+                Some(ty)
+            } else {
+                None
+            };
+            (true, num, seq, vt, ov, end, start)
+        }
+        Err(e) if e.contains("404") || e.contains("not found") => {
+            (false, None, None, None, None, None, None)
+        }
+        Err(e) => return Err(e),
+    };
     let username = chain_read(&state, &format!("hashgram/username/v1/reverse/{address}"))
         .await
         .ok()
@@ -912,7 +983,7 @@ pub async fn tx_preview(state: S<'_>, spec: MsgSpec) -> Result<TxPreview, String
         gas_limit: fee.gas_limit,
         fee_uhash: fee.fee_uhash.to_string(),
         simulated: fee.simulated,
-        founder_share_uhash: (fee.fee_uhash / 100).to_string(),
+        founder_share_uhash: fee.fee_uhash.div_euclid(100).to_string(),
         source,
     })
 }
@@ -929,7 +1000,12 @@ pub struct TxSubmitted {
 /// Signs and broadcasts; returns as soon as a node accepted it. Inclusion
 /// is tracked in the background and reported as `tx:update` events.
 #[tauri::command]
-pub async fn tx_submit(state: S<'_>, app: AppHandle, spec: MsgSpec, memo: String) -> Result<TxSubmitted, String> {
+pub async fn tx_submit(
+    state: S<'_>,
+    app: AppHandle,
+    spec: MsgSpec,
+    memo: String,
+) -> Result<TxSubmitted, String> {
     let (wallet, address) = {
         let s = state.session.read().await;
         let s = s.as_ref().ok_or_else(|| "locked".to_owned())?;
@@ -947,7 +1023,10 @@ pub async fn tx_submit(state: S<'_>, app: AppHandle, spec: MsgSpec, memo: String
     state.db.pending_put(&r.txhash, &built.summary, "pending")?;
     state.pending.lock().await.push(r.txhash.clone());
     state.chain.clear_cache().await;
-    let _ = app.emit("tx:update", serde_json::json!({ "hash": r.txhash, "state": "pending" }));
+    let _ = app.emit(
+        "tx:update",
+        serde_json::json!({ "hash": r.txhash, "state": "pending" }),
+    );
     Ok(TxSubmitted {
         hash: r.txhash,
         summary: built.summary,
@@ -1051,7 +1130,11 @@ pub async fn identity_status(state: S<'_>) -> Result<IdentityStatus, String> {
         let (account, _, address) = state.session_handles().await?;
         let a = account.lock().await;
         let dev = a.device().map_err(|e| e.to_string())?;
-        (address, a.contents.device_id.clone(), hex::encode(dev.public_key()))
+        (
+            address,
+            a.contents.device_id.clone(),
+            hex::encode(dev.public_key()),
+        )
     };
     let (_, client) = chain_client(&state).await?;
     let rotation = account::rotation_count_on_chain(&client, &address)
@@ -1097,7 +1180,11 @@ pub async fn identity_status(state: S<'_>) -> Result<IdentityStatus, String> {
 /// already exists, this PC as a device (`MsgAddDevice`). Only public keys
 /// go on chain.
 #[tauri::command]
-pub async fn identity_register(state: S<'_>, app: AppHandle, label: String) -> Result<TxSubmitted, String> {
+pub async fn identity_register(
+    state: S<'_>,
+    app: AppHandle,
+    label: String,
+) -> Result<TxSubmitted, String> {
     let label = if label.trim().is_empty() {
         state.settings.read().await.device_label.clone()
     } else {
@@ -1143,7 +1230,10 @@ pub async fn identity_register(state: S<'_>, app: AppHandle, label: String) -> R
         state.pending.lock().await.push(r.txhash.clone());
     }
     state.chain.clear_cache().await;
-    let _ = app.emit("tx:update", serde_json::json!({ "hash": r.txhash, "state": st }));
+    let _ = app.emit(
+        "tx:update",
+        serde_json::json!({ "hash": r.txhash, "state": st }),
+    );
     Ok(TxSubmitted {
         hash: r.txhash,
         summary,
@@ -1223,7 +1313,13 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
         let username = chain_read(&state, &format!("hashgram/username/v1/reverse/{q}"))
             .await
             .ok()
-            .and_then(|r| r.value.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()).map(str::to_owned));
+            .and_then(|r| {
+                r.value
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+            });
         return Ok(SearchResult::Address {
             address: q.to_owned(),
             username,
@@ -1231,8 +1327,8 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
     }
     if let Some(name) = q.strip_prefix('@') {
         let name = name.to_ascii_lowercase();
-        match chain_read(&state, &format!("hashgram/username/v1/lookup/{name}")).await {
-            Ok(r) => {
+        if let Ok(r) = chain_read(&state, &format!("hashgram/username/v1/lookup/{name}")).await {
+            {
                 let owner = r
                     .value
                     .get("owner")
@@ -1244,7 +1340,11 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
                     let expiry = r
                         .value
                         .get("expiry_height")
-                        .or_else(|| r.value.get("registration").and_then(|x| x.get("expiry_height")))
+                        .or_else(|| {
+                            r.value
+                                .get("registration")
+                                .and_then(|x| x.get("expiry_height"))
+                        })
                         .and_then(s_i64);
                     return Ok(SearchResult::Username {
                         name,
@@ -1253,7 +1353,6 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
                     });
                 }
             }
-            Err(_) => {}
         }
         let confusable = chain_read(&state, &format!("hashgram/username/v1/availability/{name}"))
             .await
@@ -1262,7 +1361,11 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
                 r.value
                     .get("confusable_with")
                     .and_then(|c| c.as_array())
-                    .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(str::to_owned))
+                            .collect()
+                    })
             })
             .unwrap_or_default();
         return Ok(SearchResult::UsernameAvailable {
@@ -1275,7 +1378,11 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
         return match chain_read(&state, &format!("cosmos/tx/v1beta1/txs/{h}")).await {
             Ok(r) => Ok(SearchResult::Tx {
                 hash: h,
-                height: r.value.get("tx_response").and_then(|t| t.get("height")).and_then(s_u64),
+                height: r
+                    .value
+                    .get("tx_response")
+                    .and_then(|t| t.get("height"))
+                    .and_then(s_u64),
                 found: true,
             }),
             Err(_) => Ok(SearchResult::Tx {
@@ -1297,7 +1404,12 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
     if q.len() >= 3 && q.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         let name = q.to_ascii_lowercase();
         if let Ok(r) = chain_read(&state, &format!("hashgram/username/v1/lookup/{name}")).await {
-            if let Some(owner) = r.value.get("owner").and_then(|o| o.as_str()).filter(|o| !o.is_empty()) {
+            if let Some(owner) = r
+                .value
+                .get("owner")
+                .and_then(|o| o.as_str())
+                .filter(|o| !o.is_empty())
+            {
                 return Ok(SearchResult::Username {
                     name,
                     address: owner.to_owned(),
@@ -1431,7 +1543,10 @@ mod updater_tests {
 
     #[test]
     fn garbage_yields_an_empty_id() {
-        assert_eq!(minisign_key_id("REPLACE_WITH_MINISIGN_PUBLIC_KEY_KEPT_OFFLINE"), "");
+        assert_eq!(
+            minisign_key_id("REPLACE_WITH_MINISIGN_PUBLIC_KEY_KEPT_OFFLINE"),
+            ""
+        );
         assert_eq!(minisign_key_id("!!!"), "");
     }
 }

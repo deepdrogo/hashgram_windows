@@ -484,7 +484,10 @@ mod tests {
             calls: Mutex::new(vec![]),
         });
         let t = P2pChainTransport::new(mock.clone());
-        let r = t.get("cosmos/bank/v1beta1/balances/x/by_denom", "denom=uhash").await.unwrap();
+        let r = t
+            .get("cosmos/bank/v1beta1/balances/x/by_denom", "denom=uhash")
+            .await
+            .unwrap();
         assert_eq!(r.status, 200);
         let v = t.verification().unwrap();
         assert!(v.agreed);
@@ -497,16 +500,19 @@ mod tests {
     async fn a_lying_peer_is_outvoted_and_marked_disputed() {
         let (a, liar, c) = (peer(), peer(), peer());
         let mock = Arc::new(Mock {
-            peers: vec![known(a, "hash1opA"), known(liar, "hash1opB"), known(c, "hash1opC")],
-            answers: HashMap::from([
-                (a, ok(BAL, 100)),
-                (liar, ok(LIE, 100)),
-                (c, ok(BAL, 100)),
-            ]),
+            peers: vec![
+                known(a, "hash1opA"),
+                known(liar, "hash1opB"),
+                known(c, "hash1opC"),
+            ],
+            answers: HashMap::from([(a, ok(BAL, 100)), (liar, ok(LIE, 100)), (c, ok(BAL, 100))]),
             calls: Mutex::new(vec![]),
         });
         let t = P2pChainTransport::new(mock.clone());
-        let r = t.get("cosmos/bank/v1beta1/balances/x/by_denom", "denom=uhash").await.unwrap();
+        let r = t
+            .get("cosmos/bank/v1beta1/balances/x/by_denom", "denom=uhash")
+            .await
+            .unwrap();
         assert_eq!(r.body, BAL.as_bytes());
         let v = t.verification().unwrap();
         assert!(v.agreed);
@@ -515,7 +521,9 @@ mod tests {
         assert_eq!(t.disputed(), vec![liar]);
         // Next read avoids the liar: only the two honest peers are asked.
         mock.calls.lock().unwrap().clear();
-        t.get("cosmos/bank/v1beta1/balances/x/by_denom", "denom=uhash").await.unwrap();
+        t.get("cosmos/bank/v1beta1/balances/x/by_denom", "denom=uhash")
+            .await
+            .unwrap();
         let calls = mock.calls.lock().unwrap().clone();
         assert_eq!(calls.len(), 2);
         assert!(!calls.contains(&liar));
@@ -556,7 +564,11 @@ mod tests {
     async fn a_dead_peer_is_skipped() {
         let (dead, a, b) = (peer(), peer(), peer());
         let mock = Arc::new(Mock {
-            peers: vec![known(dead, "hash1opX"), known(a, "hash1opA"), known(b, "hash1opB")],
+            peers: vec![
+                known(dead, "hash1opX"),
+                known(a, "hash1opA"),
+                known(b, "hash1opB"),
+            ],
             answers: HashMap::from([(a, ok(BAL, 5)), (b, ok(BAL, 7))]),
             calls: Mutex::new(vec![]),
         });

@@ -15,8 +15,9 @@ title = "hashgram"
 useDefault = true
 
 [allowlist]
-description = "Dependency lockfiles: registry checksums, not secrets"
+description = "Dependency lockfiles: registry checksums, not secrets. The published Mainnet genesis: validator consensus public keys, whose hash is pinned in every client."
 paths = [
   '''(^|/)Cargo\.lock$''',
   '''(^|/)go\.sum$''',
+  '''(^|/)app/params/mainnet/genesis\.json$''',
 ]

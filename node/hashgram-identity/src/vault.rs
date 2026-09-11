@@ -245,7 +245,11 @@ impl Vault {
     /// Rewrites the vault under an already-derived key. The salt is the one
     /// the key was derived from; the nonce is fresh (24 random bytes, so
     /// reuse of the key is safe by construction of XChaCha20-Poly1305).
-    pub fn write_with_key(&self, vk: &VaultKey, contents: &VaultContents) -> Result<(), VaultError> {
+    pub fn write_with_key(
+        &self,
+        vk: &VaultKey,
+        contents: &VaultContents,
+    ) -> Result<(), VaultError> {
         let mut nonce = [0u8; 24];
         getrandom::fill(&mut nonce).map_err(|_| VaultError::NoRandomness)?;
         let cipher = XChaCha20Poly1305::new(vk.key.as_slice().into());
@@ -334,10 +338,7 @@ impl Vault {
             t_cost: file.t_cost,
             p_cost: file.p_cost,
         };
-        let salt_arr: [u8; 16] = salt
-            .as_slice()
-            .try_into()
-            .map_err(|_| bad("salt length"))?;
+        let salt_arr: [u8; 16] = salt.as_slice().try_into().map_err(|_| bad("salt length"))?;
         let key = self.derive(passphrase.as_bytes(), &salt, cost)?;
         let cipher = XChaCha20Poly1305::new((&key).into());
         let mut plaintext = cipher

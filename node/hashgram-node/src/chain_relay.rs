@@ -105,14 +105,35 @@ impl Refusal {
 }
 
 fn path_char_ok(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.' | '~' | '%' | ':' | '@' | '=' | '+' | ',')
+    c.is_ascii_alphanumeric()
+        || matches!(
+            c,
+            '/' | '-' | '_' | '.' | '~' | '%' | ':' | '@' | '=' | '+' | ','
+        )
 }
 
 fn query_char_ok(c: char) -> bool {
     c.is_ascii_alphanumeric()
         || matches!(
             c,
-            '/' | '-' | '_' | '.' | '~' | '%' | ':' | '@' | '=' | '&' | '+' | ',' | '\'' | '(' | ')' | '*' | '!' | '$' | ';'
+            '/' | '-'
+                | '_'
+                | '.'
+                | '~'
+                | '%'
+                | ':'
+                | '@'
+                | '='
+                | '&'
+                | '+'
+                | ','
+                | '\''
+                | '('
+                | ')'
+                | '*'
+                | '!'
+                | '$'
+                | ';'
         )
 }
 
@@ -129,13 +150,22 @@ pub fn allowed_read_path(path: &str) -> Result<String, Refusal> {
     if !p.chars().all(path_char_ok) {
         return Err(Refusal::BadCharacter);
     }
-    if p.contains("..") || p.contains("//") || p.contains("/./") || p.starts_with("./") || p.ends_with("/.") {
+    if p.contains("..")
+        || p.contains("//")
+        || p.contains("/./")
+        || p.starts_with("./")
+        || p.ends_with("/.")
+    {
         return Err(Refusal::Traversal);
     }
     // Percent-encoded traversal or separators are refused too; the gateway
     // decodes them, we do not.
     let lower = p.to_ascii_lowercase();
-    if lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c") || lower.contains("%00") {
+    if lower.contains("%2e")
+        || lower.contains("%2f")
+        || lower.contains("%5c")
+        || lower.contains("%00")
+    {
         return Err(Refusal::Traversal);
     }
     if p == TX_LIST_PATH {
@@ -223,11 +253,7 @@ impl ChainRelayService {
             "Chain relay requests received, by kind",
             requests.clone(),
         );
-        r.register(
-            "outcomes",
-            "Chain relay request outcomes",
-            outcomes.clone(),
-        );
+        r.register("outcomes", "Chain relay request outcomes", outcomes.clone());
         Self {
             chain,
             buckets: Mutex::new(HashMap::new()),
@@ -264,7 +290,7 @@ impl ChainRelayService {
         self.outcomes.get_or_create(&OutcomeLabel { outcome }).inc();
     }
 
-    fn map_raw(&self, r: Result<RawResponse, RawError>) -> Result<RawResponse, pb::Response> {
+    fn map_raw(&self, r: Result<RawResponse, RawError>) -> Result<RawResponse, Box<pb::Response>> {
         match r {
             Ok(r) => {
                 self.note(Outcome::Ok);
@@ -272,7 +298,7 @@ impl ChainRelayService {
             }
             Err(RawError::Timeout) => {
                 self.note(Outcome::Timeout);
-                Err(err("internal", "chain gateway timed out"))
+                Err(Box::new(err("internal", "chain gateway timed out")))
             }
             Err(RawError::TooLarge(n)) => {
                 self.note(Outcome::TooLarge);
@@ -287,14 +313,16 @@ impl ChainRelayService {
             Err(RawError::Unreachable(e)) => {
                 self.note(Outcome::Unreachable);
                 debug!(error = %e, "chain gateway unreachable for relay");
-                Err(err("internal", "chain gateway unreachable"))
+                Err(Box::new(err("internal", "chain gateway unreachable")))
             }
         }
     }
 
     /// Answers a `ChainQuery`.
     pub async fn query(&self, peer: PeerId, q: &pb::ChainQuery) -> pb::Response {
-        self.requests.get_or_create(&KindLabel { kind: Kind::Query }).inc();
+        self.requests
+            .get_or_create(&KindLabel { kind: Kind::Query })
+            .inc();
         if !self.take_token(peer) {
             self.note(Outcome::RateLimited);
             return err("rate_limited", "too many chain queries; slow down");
@@ -324,7 +352,7 @@ impl ChainRelayService {
                     height: r.height,
                 })),
             },
-            Err(e) => e,
+            Err(e) => *e,
         }
     }
 
@@ -349,7 +377,8 @@ impl ChainRelayService {
         });
         let fetched = tokio::time::timeout(
             UPSTREAM_TIMEOUT,
-            self.chain.post_raw(BROADCAST_PATH, &body, MAX_RESPONSE_BYTES),
+            self.chain
+                .post_raw(BROADCAST_PATH, &body, MAX_RESPONSE_BYTES),
         )
         .await
         .unwrap_or(Err(RawError::Timeout));
@@ -363,7 +392,7 @@ impl ChainRelayService {
                     },
                 )),
             },
-            Err(e) => e,
+            Err(e) => *e,
         }
     }
 }
@@ -495,7 +524,10 @@ mod tests {
     fn query_strings_are_bounded_and_printable() {
         assert!(allowed_query("").is_ok());
         assert!(allowed_query("denom=uhash").is_ok());
-        assert!(allowed_query("query=transfer.recipient%3D'hash1abc'&limit=20&order_by=ORDER_BY_DESC").is_ok());
+        assert!(allowed_query(
+            "query=transfer.recipient%3D'hash1abc'&limit=20&order_by=ORDER_BY_DESC"
+        )
+        .is_ok());
         assert_eq!(allowed_query("a=b c"), Err(Refusal::BadCharacter));
         assert_eq!(allowed_query("a=<script>"), Err(Refusal::BadCharacter));
         assert_eq!(

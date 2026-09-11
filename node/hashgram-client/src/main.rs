@@ -453,11 +453,18 @@ impl Ctx {
             return;
         }
         if v.agreed {
-            eprintln!("verified by {} nodes ({} operators)", v.verified_by(), v.operators.len());
+            eprintln!(
+                "verified by {} nodes ({} operators)",
+                v.verified_by(),
+                v.operators.len()
+            );
         } else if v.single_operator {
             eprintln!("verified by 1 node â€” only one operator is reachable on this network; agreement could not be independent");
         } else {
-            eprintln!("verified by {} node(s); no second operator answered", v.verified_by());
+            eprintln!(
+                "verified by {} node(s); no second operator answered",
+                v.verified_by()
+            );
         }
     }
 
@@ -474,12 +481,12 @@ impl Ctx {
         // the same file the nodes use (app/params/mainnet/bootstrap_peers.txt),
         // so a fresh client needs no address typed by anyone. Devnets have
         // nothing built in and must be told.
-        let configured: Vec<String> = if self.profile.bootstrap.is_empty() && self.network.is_mainnet()
-        {
-            hashgram_sdk::net::mainnet_bootstrap_peers()
-        } else {
-            self.profile.bootstrap.clone()
-        };
+        let configured: Vec<String> =
+            if self.profile.bootstrap.is_empty() && self.network.is_mainnet() {
+                hashgram_sdk::net::mainnet_bootstrap_peers()
+            } else {
+                self.profile.bootstrap.clone()
+            };
         let addrs: Vec<Multiaddr> = configured
             .iter()
             .map(|a| a.parse().with_context(|| format!("bootstrap {a}")))

@@ -52,9 +52,20 @@ pub async fn chat_list(state: S<'_>) -> Result<Vec<ConversationMeta>, String> {
 
 /// History of a conversation (newest last).
 #[tauri::command]
-pub async fn chat_history(state: S<'_>, group_id: String, before_ts: Option<u64>, limit: Option<usize>) -> Result<Vec<MessageView>, String> {
+pub async fn chat_history(
+    state: S<'_>,
+    group_id: String,
+    before_ts: Option<u64>,
+    limit: Option<usize>,
+) -> Result<Vec<MessageView>, String> {
     let (_, key, _) = state.session_handles().await?;
-    chatmod::history(&state.db, &key, &group_id, before_ts, limit.unwrap_or(80).min(500))
+    chatmod::history(
+        &state.db,
+        &key,
+        &group_id,
+        before_ts,
+        limit.unwrap_or(80).min(500),
+    )
 }
 
 /// Starts or reuses a direct chat. Returns the group id.
@@ -63,13 +74,22 @@ pub async fn chat_start_direct(state: S<'_>, address: String) -> Result<String, 
     crate::tx::validate_address(&address, crate::tx::ADDRESS_PREFIX)?;
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
-    let chain = chain_opt(&state).await.ok_or_else(|| "no chain source to look up the recipient's devices".to_owned())?;
-    state.chat.start_direct(&account, &link, &chain, &network, &address).await
+    let chain = chain_opt(&state)
+        .await
+        .ok_or_else(|| "no chain source to look up the recipient's devices".to_owned())?;
+    state
+        .chat
+        .start_direct(&account, &link, &chain, &network, &address)
+        .await
 }
 
 /// Creates a group.
 #[tauri::command]
-pub async fn chat_create_group(state: S<'_>, name: String, members: Vec<String>) -> Result<String, String> {
+pub async fn chat_create_group(
+    state: S<'_>,
+    name: String,
+    members: Vec<String>,
+) -> Result<String, String> {
     for m in &members {
         crate::tx::validate_address(m, crate::tx::ADDRESS_PREFIX)?;
     }
@@ -78,31 +98,58 @@ pub async fn chat_create_group(state: S<'_>, name: String, members: Vec<String>)
     }
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
-    let chain = chain_opt(&state).await.ok_or_else(|| "no chain source to look up members' devices".to_owned())?;
-    state.chat.create_group(&account, &link, &chain, &network, name.trim(), &members).await
+    let chain = chain_opt(&state)
+        .await
+        .ok_or_else(|| "no chain source to look up members' devices".to_owned())?;
+    state
+        .chat
+        .create_group(&account, &link, &chain, &network, name.trim(), &members)
+        .await
 }
 
 /// Adds a member.
 #[tauri::command]
-pub async fn chat_add_member(state: S<'_>, group_id: String, address: String) -> Result<(), String> {
+pub async fn chat_add_member(
+    state: S<'_>,
+    group_id: String,
+    address: String,
+) -> Result<(), String> {
     crate::tx::validate_address(&address, crate::tx::ADDRESS_PREFIX)?;
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
-    let chain = chain_opt(&state).await.ok_or_else(|| "no chain source".to_owned())?;
-    state.chat.add_member(&account, &link, &chain, &network, &group_id, &address).await
+    let chain = chain_opt(&state)
+        .await
+        .ok_or_else(|| "no chain source".to_owned())?;
+    state
+        .chat
+        .add_member(&account, &link, &chain, &network, &group_id, &address)
+        .await
 }
 
 /// Removes a member.
 #[tauri::command]
-pub async fn chat_remove_member(state: S<'_>, group_id: String, address: String) -> Result<usize, String> {
+pub async fn chat_remove_member(
+    state: S<'_>,
+    group_id: String,
+    address: String,
+) -> Result<usize, String> {
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
-    state.chat.remove_member(&account, &link, &network, &group_id, &address).await
+    state
+        .chat
+        .remove_member(&account, &link, &network, &group_id, &address)
+        .await
 }
 
 /// Sends text (optionally a reply).
 #[tauri::command]
-pub async fn chat_send_text(state: S<'_>, app: AppHandle, group_id: String, text: String, reply_to: Option<String>) -> Result<MessageView, String> {
+pub async fn chat_send_text(
+    state: S<'_>,
+    app: AppHandle,
+    group_id: String,
+    text: String,
+    reply_to: Option<String>,
+) -> Result<MessageView, String> {
     if text.trim().is_empty() {
         return Err("empty message".into());
     }
@@ -113,45 +160,87 @@ pub async fn chat_send_text(state: S<'_>, app: AppHandle, group_id: String, text
     let (link, network) = net(&state).await?;
     let disappear = chatmod::disappear_of(&state.db, &key, &group_id);
     let msg = chatmod::text_message(text.trim(), reply_to.as_deref(), disappear, vec![]);
-    let v = state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await?;
+    let v = state
+        .chat
+        .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+        .await?;
     let _ = app.emit("chat:changed", serde_json::json!({ "group_id": group_id }));
     Ok(v)
 }
 
 /// Sends a file from disk as an encrypted attachment.
 #[tauri::command]
-pub async fn chat_send_file(state: S<'_>, app: AppHandle, group_id: String, path: String, caption: Option<String>) -> Result<MessageView, String> {
+pub async fn chat_send_file(
+    state: S<'_>,
+    app: AppHandle,
+    group_id: String,
+    path: String,
+    caption: Option<String>,
+) -> Result<MessageView, String> {
     let data = std::fs::read(&path).map_err(|e| e.to_string())?;
     if data.len() > chatmod::MAX_ATTACHMENT_BYTES {
         return Err("attachments are limited to 100 MiB".into());
     }
-    let name = std::path::Path::new(&path).file_name().and_then(|n| n.to_str()).unwrap_or("file").to_owned();
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_owned();
     let (mime, kind) = chatmod::mime_for(&name);
     let (account, key, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let device = account.lock().await.device().map_err(|e| e.to_string())?;
-    let att = chatmod::upload_attachment(&link, &network, &device, &data, mime, &name, kind, 0).await?;
+    let att =
+        chatmod::upload_attachment(&link, &network, &device, &data, mime, &name, kind, 0).await?;
     let disappear = chatmod::disappear_of(&state.db, &key, &group_id);
-    let msg = chatmod::text_message(caption.as_deref().unwrap_or("").trim(), None, disappear, vec![att]);
-    let v = state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await?;
+    let msg = chatmod::text_message(
+        caption.as_deref().unwrap_or("").trim(),
+        None,
+        disappear,
+        vec![att],
+    );
+    let v = state
+        .chat
+        .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+        .await?;
     let _ = app.emit("chat:changed", serde_json::json!({ "group_id": group_id }));
     Ok(v)
 }
 
 /// Sends a voice note recorded in the webview (audio/webm bytes, base64).
 #[tauri::command]
-pub async fn chat_send_voice(state: S<'_>, app: AppHandle, group_id: String, audio_base64: String, duration_ms: u32) -> Result<MessageView, String> {
-    let data = base64_decode(&audio_base64).ok_or_else(|| "audio is not valid base64".to_owned())?;
+pub async fn chat_send_voice(
+    state: S<'_>,
+    app: AppHandle,
+    group_id: String,
+    audio_base64: String,
+    duration_ms: u32,
+) -> Result<MessageView, String> {
+    let data =
+        base64_decode(&audio_base64).ok_or_else(|| "audio is not valid base64".to_owned())?;
     if data.is_empty() || data.len() > 20 * 1024 * 1024 {
         return Err("voice note is empty or too large".into());
     }
     let (account, key, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let device = account.lock().await.device().map_err(|e| e.to_string())?;
-    let att = chatmod::upload_attachment(&link, &network, &device, &data, "audio/webm", "voice.weba", "audio", duration_ms).await?;
+    let att = chatmod::upload_attachment(
+        &link,
+        &network,
+        &device,
+        &data,
+        "audio/webm",
+        "voice.weba",
+        "audio",
+        duration_ms,
+    )
+    .await?;
     let disappear = chatmod::disappear_of(&state.db, &key, &group_id);
     let msg = chatmod::text_message("", None, disappear, vec![att]);
-    let v = state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await?;
+    let v = state
+        .chat
+        .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+        .await?;
     let _ = app.emit("chat:changed", serde_json::json!({ "group_id": group_id }));
     Ok(v)
 }
@@ -170,40 +259,74 @@ pub async fn chat_attachment(state: S<'_>, attachment: AttachmentView) -> Result
 
 /// Reacts to a message (empty reaction removes).
 #[tauri::command]
-pub async fn chat_react(state: S<'_>, app: AppHandle, group_id: String, target: String, reaction: String) -> Result<(), String> {
+pub async fn chat_react(
+    state: S<'_>,
+    app: AppHandle,
+    group_id: String,
+    target: String,
+    reaction: String,
+) -> Result<(), String> {
     let (account, key, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
-    let msg = chatmod::control_message(chat::ChatKind::Reaction, Some(&target), "", reaction.trim());
-    state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await?;
+    let msg =
+        chatmod::control_message(chat::ChatKind::Reaction, Some(&target), "", reaction.trim());
+    state
+        .chat
+        .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+        .await?;
     let _ = app.emit("chat:changed", serde_json::json!({ "group_id": group_id }));
     Ok(())
 }
 
 /// Edits one of our messages.
 #[tauri::command]
-pub async fn chat_edit(state: S<'_>, app: AppHandle, group_id: String, target: String, text: String) -> Result<(), String> {
+pub async fn chat_edit(
+    state: S<'_>,
+    app: AppHandle,
+    group_id: String,
+    target: String,
+    text: String,
+) -> Result<(), String> {
     let (account, key, me) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let msg = chatmod::control_message(chat::ChatKind::Edit, Some(&target), text.trim(), "");
-    state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await?;
+    state
+        .chat
+        .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+        .await?;
     // Apply locally too.
     let _ = chatmod_apply_edit(&state.db, &key, &group_id, &target, &me, text.trim());
     let _ = app.emit("chat:changed", serde_json::json!({ "group_id": group_id }));
     Ok(())
 }
 
-fn chatmod_apply_edit(db: &crate::db::Db, key: &crate::crypto::DbKey, group_id: &str, target: &str, me: &str, text: &str) -> Result<(), String> {
+fn chatmod_apply_edit(
+    db: &crate::db::Db,
+    key: &crate::crypto::DbKey,
+    group_id: &str,
+    target: &str,
+    me: &str,
+    text: &str,
+) -> Result<(), String> {
     // Reuse the same code path receivers use.
     crate::chat::apply_edit_public(db, key, group_id, target, me, text)
 }
 
 /// Deletes one of our messages for everyone (tombstone).
 #[tauri::command]
-pub async fn chat_delete(state: S<'_>, app: AppHandle, group_id: String, target: String) -> Result<(), String> {
+pub async fn chat_delete(
+    state: S<'_>,
+    app: AppHandle,
+    group_id: String,
+    target: String,
+) -> Result<(), String> {
     let (account, key, me) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let msg = chatmod::control_message(chat::ChatKind::Delete, Some(&target), "", "");
-    state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await?;
+    state
+        .chat
+        .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+        .await?;
     let _ = crate::chat::tombstone_public(&state.db, &key, &group_id, &target, &me);
     let _ = app.emit("chat:changed", serde_json::json!({ "group_id": group_id }));
     Ok(())
@@ -217,7 +340,10 @@ pub async fn chat_mark_read(state: S<'_>, app: AppHandle, group_id: String) -> R
     if let Some(target) = last {
         if let Ok((link, network)) = net(&state).await {
             let msg = chatmod::control_message(chat::ChatKind::Read, Some(&target), "", "");
-            let _ = state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await;
+            let _ = state
+                .chat
+                .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+                .await;
         }
     }
     update_badge(&app, &state);
@@ -231,7 +357,10 @@ pub async fn chat_typing(state: S<'_>, group_id: String) -> Result<(), String> {
     let (account, key, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let msg = chatmod::control_message(chat::ChatKind::Typing, None, "", "");
-    let _ = state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await;
+    let _ = state
+        .chat
+        .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+        .await;
     Ok(())
 }
 
@@ -269,7 +398,8 @@ pub async fn chat_info(state: S<'_>, group_id: String) -> Result<ChatInfo, Strin
     let members = state.chat.members(&group_id).await?;
     let chain = chain_opt(&state).await;
     let mut out = Vec::new();
-    let mut labels: std::collections::HashMap<String, std::collections::HashMap<String, String>> = Default::default();
+    let mut labels: std::collections::HashMap<String, std::collections::HashMap<String, String>> =
+        Default::default();
     for (addr, dev) in members {
         if !labels.contains_key(&addr) {
             let mut m = std::collections::HashMap::new();
@@ -282,17 +412,23 @@ pub async fn chat_info(state: S<'_>, group_id: String) -> Result<ChatInfo, Strin
             }
             labels.insert(addr.clone(), m);
         }
-        let label = labels.get(&addr).and_then(|m| m.get(&dev)).cloned().unwrap_or_default();
+        let label = labels
+            .get(&addr)
+            .and_then(|m| m.get(&dev))
+            .cloned()
+            .unwrap_or_default();
         out.push((addr, dev, label));
     }
     let store_nodes = match net(&state).await {
         Ok((link, _)) => {
             let device = account.lock().await.device().map_err(|e| e.to_string())?;
-            link.providers(hashgram_sdk::proto::dht::mailbox_for_device(&device.public_key()))
-                .await
-                .into_iter()
-                .map(|p| p.to_string())
-                .collect()
+            link.providers(hashgram_sdk::proto::dht::mailbox_for_device(
+                &device.public_key(),
+            ))
+            .await
+            .into_iter()
+            .map(|p| p.to_string())
+            .collect()
         }
         Err(_) => Vec::new(),
     };
@@ -326,7 +462,10 @@ pub async fn sync_once(state: &AppState, app: &AppHandle) -> Result<u32, String>
     let (account, key, _) = state.session_handles().await?;
     let (link, network) = net(state).await?;
     let chain = chain_opt(state).await;
-    let report = state.chat.sync(&account, &state.db, &key, &link, &network, chain.as_ref()).await?;
+    let report = state
+        .chat
+        .sync(&account, &state.db, &key, &link, &network, chain.as_ref())
+        .await?;
     let total: u32 = report.new_by_group.values().sum();
     if total > 0 || report.groups_changed {
         let _ = app.emit("chat:changed", serde_json::json!({ "new": total }));
@@ -339,7 +478,10 @@ pub async fn sync_once(state: &AppState, app: &AppHandle) -> Result<u32, String>
             let _ = app
                 .notification()
                 .builder()
-                .title(format!("Message from {}", crate::tx::truncate_middle(&sender, 10, 6)))
+                .title(format!(
+                    "Message from {}",
+                    crate::tx::truncate_middle(&sender, 10, 6)
+                ))
                 .body(preview)
                 .show();
         }
@@ -350,7 +492,11 @@ pub async fn sync_once(state: &AppState, app: &AppHandle) -> Result<u32, String>
 fn update_badge(app: &AppHandle, state: &AppState) {
     let n = chatmod::unread_total(&state.db);
     if let Some(tray) = app.tray_by_id("main") {
-        let _ = tray.set_tooltip(Some(if n > 0 { format!("Hashgram — {n} unread") } else { "Hashgram".to_owned() }));
+        let _ = tray.set_tooltip(Some(if n > 0 {
+            format!("Hashgram — {n} unread")
+        } else {
+            "Hashgram".to_owned()
+        }));
     }
     let _ = app.emit("chat:unread", n);
 }
@@ -360,13 +506,16 @@ fn update_badge(app: &AppHandle, state: &AppState) {
 pub async fn chat_publish_key_packages(state: S<'_>) -> Result<usize, String> {
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
-    state.chat.publish_key_packages(&account, &link, &network).await
+    state
+        .chat
+        .publish_key_packages(&account, &link, &network)
+        .await
 }
 
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let s = s.split(',').next_back().unwrap_or(s); // strip a data: prefix
-    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let mut out = Vec::with_capacity((s.len() * 3).div_euclid(4));
     let mut buf = 0u32;
     let mut bits = 0;
     for c in s.bytes() {
@@ -409,13 +558,28 @@ fn apply_blocks(db: &crate::db::Db, events: &mut Vec<EventView>) {
 /// The chronological following feed (from the local cache; call
 /// `feed_refresh` to pull).
 #[tauri::command]
-pub async fn feed(state: S<'_>, kinds: Option<Vec<String>>, tag: Option<String>, before_ts: Option<u64>, limit: Option<usize>) -> Result<FeedPage, String> {
+pub async fn feed(
+    state: S<'_>,
+    kinds: Option<Vec<String>>,
+    tag: Option<String>,
+    before_ts: Option<u64>,
+    limit: Option<usize>,
+) -> Result<FeedPage, String> {
     let (_, _, me) = state.session_handles().await?;
     let mut authors = social::follows(&state.db)?;
     authors.push(me.clone());
-    let kinds_v: Vec<String> = kinds.unwrap_or_else(|| vec!["POST_CREATE".into(), "REPOST".into(), "REEL_CREATE".into()]);
+    let kinds_v: Vec<String> =
+        kinds.unwrap_or_else(|| vec!["POST_CREATE".into(), "REPOST".into(), "REEL_CREATE".into()]);
     let kinds_ref: Vec<&str> = kinds_v.iter().map(String::as_str).collect();
-    let mut events = social::feed(&state.db, if tag.is_some() { &[] } else { &authors }, &kinds_ref, tag.as_deref(), before_ts, limit.unwrap_or(50).min(200), &me)?;
+    let mut events = social::feed(
+        &state.db,
+        if tag.is_some() { &[] } else { &authors },
+        &kinds_ref,
+        tag.as_deref(),
+        before_ts,
+        limit.unwrap_or(50).min(200),
+        &me,
+    )?;
     apply_blocks(&state.db, &mut events);
     Ok(FeedPage {
         events,
@@ -439,7 +603,11 @@ pub async fn refresh_feed(state: &AppState, app: &AppHandle) -> Result<usize, St
     authors.push(me);
     let mut total = 0;
     for a in authors {
-        match state.social.refresh_author(&state.db, &link, &network, chain.as_ref(), &a, 100).await {
+        match state
+            .social
+            .refresh_author(&state.db, &link, &network, chain.as_ref(), &a, 100)
+            .await
+        {
             Ok(n) => total += n,
             Err(e) => tracing::debug!(author = %a, error = %e, "feed refresh"),
         }
@@ -452,24 +620,47 @@ pub async fn refresh_feed(state: &AppState, app: &AppHandle) -> Result<usize, St
 
 /// Publishes a post (optionally with media already uploaded via `media_upload`).
 #[tauri::command]
-pub async fn post_create(state: S<'_>, app: AppHandle, text: String, hashtags: Vec<String>, channel: Option<String>, reply_to: Option<String>, media: Option<Vec<MediaView>>) -> Result<EventView, String> {
+pub async fn post_create(
+    state: S<'_>,
+    app: AppHandle,
+    text: String,
+    hashtags: Vec<String>,
+    channel: Option<String>,
+    reply_to: Option<String>,
+    media: Option<Vec<MediaView>>,
+) -> Result<EventView, String> {
     if text.trim().is_empty() && media.as_ref().map(|m| m.is_empty()).unwrap_or(true) {
         return Err("a post needs text or media".into());
     }
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
-    let tags: Vec<String> = hashtags.iter().map(|t| t.trim_start_matches('#').to_lowercase()).filter(|t| !t.is_empty()).collect();
-    let mentions: Vec<String> = text.split_whitespace().filter(|w| w.starts_with("hash1") && w.len() > 40).map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_owned()).collect();
+    let tags: Vec<String> = hashtags
+        .iter()
+        .map(|t| t.trim_start_matches('#').to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let mentions: Vec<String> = text
+        .split_whitespace()
+        .filter(|w| w.starts_with("hash1") && w.len() > 40)
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_owned())
+        .collect();
     let payload = pb::PostCreate {
         text: text.trim().to_owned(),
         hashtags: tags,
         mentions,
-        channel: channel.and_then(|c| hex::decode(c).ok()).unwrap_or_default(),
-        reply_to: reply_to.and_then(|c| hex::decode(c).ok()).unwrap_or_default(),
+        channel: channel
+            .and_then(|c| hex::decode(c).ok())
+            .unwrap_or_default(),
+        reply_to: reply_to
+            .and_then(|c| hex::decode(c).ok())
+            .unwrap_or_default(),
         ..Default::default()
     };
     let refs = media_refs(media);
-    let ev = state.social.publish(&account, &link, &network, "POST_CREATE", &payload, refs).await?;
+    let ev = state
+        .social
+        .publish(&account, &link, &network, "POST_CREATE", &payload, refs)
+        .await?;
     social::store_event(&state.db, &ev, true)?;
     let _ = app.emit("feed:changed", 1);
     Ok(social_view(&ev))
@@ -530,7 +721,12 @@ fn social_view(ev: &pb::SocialEvent) -> EventView {
 
 /// Comments on a post.
 #[tauri::command]
-pub async fn comment_create(state: S<'_>, app: AppHandle, post: String, text: String) -> Result<EventView, String> {
+pub async fn comment_create(
+    state: S<'_>,
+    app: AppHandle,
+    post: String,
+    text: String,
+) -> Result<EventView, String> {
     if text.trim().is_empty() {
         return Err("empty comment".into());
     }
@@ -541,7 +737,17 @@ pub async fn comment_create(state: S<'_>, app: AppHandle, post: String, text: St
         text: text.trim().to_owned(),
         ..Default::default()
     };
-    let ev = state.social.publish(&account, &link, &network, "COMMENT_CREATE", &payload, vec![]).await?;
+    let ev = state
+        .social
+        .publish(
+            &account,
+            &link,
+            &network,
+            "COMMENT_CREATE",
+            &payload,
+            vec![],
+        )
+        .await?;
     social::store_event(&state.db, &ev, true)?;
     let _ = app.emit("feed:changed", 1);
     Ok(social_view(&ev))
@@ -549,14 +755,22 @@ pub async fn comment_create(state: S<'_>, app: AppHandle, post: String, text: St
 
 /// Reacts to an event (empty reaction removes).
 #[tauri::command]
-pub async fn social_react(state: S<'_>, app: AppHandle, target: String, reaction: String) -> Result<(), String> {
+pub async fn social_react(
+    state: S<'_>,
+    app: AppHandle,
+    target: String,
+    reaction: String,
+) -> Result<(), String> {
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let payload = pb::Reaction {
         target: hex::decode(&target).map_err(|e| e.to_string())?,
         reaction: reaction.trim().to_owned(),
     };
-    let ev = state.social.publish(&account, &link, &network, "REACTION", &payload, vec![]).await?;
+    let ev = state
+        .social
+        .publish(&account, &link, &network, "REACTION", &payload, vec![])
+        .await?;
     social::store_event(&state.db, &ev, true)?;
     let _ = app.emit("feed:changed", 1);
     Ok(())
@@ -564,14 +778,22 @@ pub async fn social_react(state: S<'_>, app: AppHandle, target: String, reaction
 
 /// Reposts.
 #[tauri::command]
-pub async fn repost(state: S<'_>, app: AppHandle, post: String, comment: Option<String>) -> Result<(), String> {
+pub async fn repost(
+    state: S<'_>,
+    app: AppHandle,
+    post: String,
+    comment: Option<String>,
+) -> Result<(), String> {
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let payload = pb::Repost {
         post: hex::decode(&post).map_err(|e| e.to_string())?,
         comment: comment.unwrap_or_default(),
     };
-    let ev = state.social.publish(&account, &link, &network, "REPOST", &payload, vec![]).await?;
+    let ev = state
+        .social
+        .publish(&account, &link, &network, "REPOST", &payload, vec![])
+        .await?;
     social::store_event(&state.db, &ev, true)?;
     let _ = app.emit("feed:changed", 1);
     Ok(())
@@ -585,9 +807,33 @@ pub async fn follow(state: S<'_>, app: AppHandle, address: String, on: bool) -> 
     social::set_follow(&state.db, &address, on)?;
     if let Ok((link, network)) = net(&state).await {
         let res = if on {
-            state.social.publish(&account, &link, &network, "FOLLOW", &pb::Follow { target: address.clone() }, vec![]).await
+            state
+                .social
+                .publish(
+                    &account,
+                    &link,
+                    &network,
+                    "FOLLOW",
+                    &pb::Follow {
+                        target: address.clone(),
+                    },
+                    vec![],
+                )
+                .await
         } else {
-            state.social.publish(&account, &link, &network, "UNFOLLOW", &pb::Unfollow { target: address.clone() }, vec![]).await
+            state
+                .social
+                .publish(
+                    &account,
+                    &link,
+                    &network,
+                    "UNFOLLOW",
+                    &pb::Unfollow {
+                        target: address.clone(),
+                    },
+                    vec![],
+                )
+                .await
         };
         if let Err(e) = res {
             tracing::debug!(error = %e, "follow event not published (recorded locally)");
@@ -605,7 +851,11 @@ pub async fn follows(state: S<'_>) -> Result<Vec<String>, String> {
 
 /// Mute or block locally (`mode` = "mute" | "block" | null to clear).
 #[tauri::command]
-pub async fn social_block(state: S<'_>, address: String, mode: Option<String>) -> Result<(), String> {
+pub async fn social_block(
+    state: S<'_>,
+    address: String,
+    mode: Option<String>,
+) -> Result<(), String> {
     social::set_block(&state.db, &address, mode.as_deref())
 }
 
@@ -632,20 +882,36 @@ pub struct ProfileView {
 
 /// Loads (and refreshes) a profile.
 #[tauri::command]
-pub async fn profile_get(state: S<'_>, address: String, refresh: bool) -> Result<ProfileView, String> {
+pub async fn profile_get(
+    state: S<'_>,
+    address: String,
+    refresh: bool,
+) -> Result<ProfileView, String> {
     crate::tx::validate_address(&address, crate::tx::ADDRESS_PREFIX)?;
     if refresh {
         if let Ok((link, network)) = net(&state).await {
             let chain = chain_opt(&state).await;
-            let _ = state.social.refresh_author(&state.db, &link, &network, chain.as_ref(), &address, 100).await;
+            let _ = state
+                .social
+                .refresh_author(&state.db, &link, &network, chain.as_ref(), &address, 100)
+                .await;
         }
     }
     let profile = social::profile(&state.db, &address)?;
     let following = social::follows(&state.db)?.contains(&address);
-    let block_mode = social::blocks(&state.db)?.into_iter().find(|(a, _)| *a == address).map(|(_, m)| m);
+    let block_mode = social::blocks(&state.db)?
+        .into_iter()
+        .find(|(a, _)| *a == address)
+        .map(|(_, m)| m);
     let events: i64 = state
         .db
-        .with(|c| c.query_row("SELECT COUNT(*) FROM social_events WHERE author = ?1 AND verified = 1", [&address], |r| r.get(0)))
+        .with(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM social_events WHERE author = ?1 AND verified = 1",
+                [&address],
+                |r| r.get(0),
+            )
+        })
         .unwrap_or(0);
     Ok(ProfileView {
         address,
@@ -659,16 +925,35 @@ pub async fn profile_get(state: S<'_>, address: String, refresh: bool) -> Result
 /// Updates our profile (display name is never identity: the verified handle
 /// stays next to it everywhere).
 #[tauri::command]
-pub async fn profile_update(state: S<'_>, app: AppHandle, display_name: String, bio: String, avatar: Option<MediaView>) -> Result<EventView, String> {
+pub async fn profile_update(
+    state: S<'_>,
+    app: AppHandle,
+    display_name: String,
+    bio: String,
+    avatar: Option<MediaView>,
+) -> Result<EventView, String> {
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let payload = pb::ProfileUpdate {
         display_name: display_name.trim().chars().take(64).collect(),
         bio: bio.trim().chars().take(500).collect(),
-        avatar_cid: avatar.as_ref().and_then(|a| hex::decode(&a.cid).ok()).unwrap_or_default(),
+        avatar_cid: avatar
+            .as_ref()
+            .and_then(|a| hex::decode(&a.cid).ok())
+            .unwrap_or_default(),
         ..Default::default()
     };
-    let ev = state.social.publish(&account, &link, &network, "PROFILE_UPDATE", &payload, media_refs(avatar.map(|a| vec![a]))).await?;
+    let ev = state
+        .social
+        .publish(
+            &account,
+            &link,
+            &network,
+            "PROFILE_UPDATE",
+            &payload,
+            media_refs(avatar.map(|a| vec![a])),
+        )
+        .await?;
     social::store_event(&state.db, &ev, true)?;
     let _ = app.emit("feed:changed", 1);
     Ok(social_view(&ev))
@@ -676,16 +961,26 @@ pub async fn profile_update(state: S<'_>, app: AppHandle, display_name: String, 
 
 /// A post with its comments.
 #[tauri::command]
-pub async fn post_thread(state: S<'_>, id: String) -> Result<(Option<EventView>, Vec<EventView>), String> {
+pub async fn post_thread(
+    state: S<'_>,
+    id: String,
+) -> Result<(Option<EventView>, Vec<EventView>), String> {
     let (_, _, me) = state.session_handles().await?;
     social::thread(&state.db, &id, &me)
 }
 
 /// Uploads public media from disk (post image, reel video, avatar).
 #[tauri::command]
-pub async fn media_upload(state: S<'_>, path: String, duration_ms: Option<u32>) -> Result<MediaView, String> {
+pub async fn media_upload(
+    state: S<'_>,
+    path: String,
+    duration_ms: Option<u32>,
+) -> Result<MediaView, String> {
     let data = std::fs::read(&path).map_err(|e| e.to_string())?;
-    let name = std::path::Path::new(&path).file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
     let (mime, kind) = chatmod::mime_for(name);
     if kind == "video" && data.len() > social::MAX_REEL_BYTES {
         return Err("reels are limited to 100 MB (pre-encoded MP4)".into());
@@ -699,7 +994,16 @@ pub async fn media_upload(state: S<'_>, path: String, duration_ms: Option<u32>) 
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let device = account.lock().await.device().map_err(|e| e.to_string())?;
-    let r = social::upload_media(&link, &network, &device, &data, mime, kind, duration_ms.unwrap_or(0)).await?;
+    let r = social::upload_media(
+        &link,
+        &network,
+        &device,
+        &data,
+        mime,
+        kind,
+        duration_ms.unwrap_or(0),
+    )
+    .await?;
     Ok(MediaView {
         cid: hex::encode(&r.cid),
         mime: r.mime,
@@ -726,7 +1030,13 @@ pub async fn media_fetch(state: S<'_>, media: MediaView) -> Result<String, Strin
 
 /// Publishes a reel: uploaded MP4 + REEL_CREATE.
 #[tauri::command]
-pub async fn reel_publish(state: S<'_>, app: AppHandle, media: MediaView, caption: String, hashtags: Vec<String>) -> Result<EventView, String> {
+pub async fn reel_publish(
+    state: S<'_>,
+    app: AppHandle,
+    media: MediaView,
+    caption: String,
+    hashtags: Vec<String>,
+) -> Result<EventView, String> {
     if media.kind != "video" {
         return Err("a reel needs a video".into());
     }
@@ -734,12 +1044,26 @@ pub async fn reel_publish(state: S<'_>, app: AppHandle, media: MediaView, captio
     let (link, network) = net(&state).await?;
     let payload = pb::ReelCreate {
         caption: caption.trim().to_owned(),
-        hashtags: hashtags.iter().map(|t| t.trim_start_matches('#').to_lowercase()).filter(|t| !t.is_empty()).collect(),
+        hashtags: hashtags
+            .iter()
+            .map(|t| t.trim_start_matches('#').to_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect(),
         video_index: 0,
         allow_comments: true,
         ..Default::default()
     };
-    let ev = state.social.publish(&account, &link, &network, "REEL_CREATE", &payload, media_refs(Some(vec![media]))).await?;
+    let ev = state
+        .social
+        .publish(
+            &account,
+            &link,
+            &network,
+            "REEL_CREATE",
+            &payload,
+            media_refs(Some(vec![media])),
+        )
+        .await?;
     social::store_event(&state.db, &ev, true)?;
     let _ = app.emit("feed:changed", 1);
     Ok(social_view(&ev))
@@ -747,7 +1071,12 @@ pub async fn reel_publish(state: S<'_>, app: AppHandle, media: MediaView, captio
 
 /// Publishes a story (expires in 24 h).
 #[tauri::command]
-pub async fn story_publish(state: S<'_>, app: AppHandle, media: MediaView, caption: String) -> Result<EventView, String> {
+pub async fn story_publish(
+    state: S<'_>,
+    app: AppHandle,
+    media: MediaView,
+    caption: String,
+) -> Result<EventView, String> {
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let expires_at = std::time::SystemTime::now()
@@ -760,7 +1089,17 @@ pub async fn story_publish(state: S<'_>, app: AppHandle, media: MediaView, capti
         expires_at,
         ..Default::default()
     };
-    let ev = state.social.publish(&account, &link, &network, "STORY_CREATE", &payload, media_refs(Some(vec![media]))).await?;
+    let ev = state
+        .social
+        .publish(
+            &account,
+            &link,
+            &network,
+            "STORY_CREATE",
+            &payload,
+            media_refs(Some(vec![media])),
+        )
+        .await?;
     social::store_event(&state.db, &ev, true)?;
     let _ = app.emit("feed:changed", 1);
     Ok(social_view(&ev))
@@ -768,7 +1107,13 @@ pub async fn story_publish(state: S<'_>, app: AppHandle, media: MediaView, capti
 
 /// Creates a channel.
 #[tauri::command]
-pub async fn channel_create(state: S<'_>, app: AppHandle, name: String, description: String, open_posting: bool) -> Result<EventView, String> {
+pub async fn channel_create(
+    state: S<'_>,
+    app: AppHandle,
+    name: String,
+    description: String,
+    open_posting: bool,
+) -> Result<EventView, String> {
     if name.trim().is_empty() {
         return Err("a channel needs a name".into());
     }
@@ -780,7 +1125,17 @@ pub async fn channel_create(state: S<'_>, app: AppHandle, name: String, descript
         open_posting,
         ..Default::default()
     };
-    let ev = state.social.publish(&account, &link, &network, "CHANNEL_CREATE", &payload, vec![]).await?;
+    let ev = state
+        .social
+        .publish(
+            &account,
+            &link,
+            &network,
+            "CHANNEL_CREATE",
+            &payload,
+            vec![],
+        )
+        .await?;
     social::store_event(&state.db, &ev, true)?;
     let _ = app.emit("feed:changed", 1);
     Ok(social_view(&ev))
@@ -842,10 +1197,17 @@ pub struct CallInfra {
 #[tauri::command]
 pub async fn calls_discover(state: S<'_>) -> Result<CallInfra, String> {
     let (link, _) = net(&state).await?;
-    let nodes = hashgram_sdk::calls::discover(&link).await.map_err(|e| e.to_string())?;
-    let sfu_available = nodes.iter().any(|n| n.sfu_url.as_ref().map(|s| !s.is_empty()).unwrap_or(false));
+    let nodes = hashgram_sdk::calls::discover(&link)
+        .await
+        .map_err(|e| e.to_string())?;
+    let sfu_available = nodes
+        .iter()
+        .any(|n| n.sfu_url.as_ref().map(|s| !s.is_empty()).unwrap_or(false));
     Ok(CallInfra {
-        nodes: nodes.iter().map(|n| serde_json::to_value(n).unwrap_or_default()).collect(),
+        nodes: nodes
+            .iter()
+            .map(|n| serde_json::to_value(n).unwrap_or_default())
+            .collect(),
         sfu_available,
     })
 }
@@ -856,13 +1218,26 @@ pub async fn calls_turn(state: S<'_>) -> Result<serde_json::Value, String> {
     let (account, _, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let device = account.lock().await.device().map_err(|e| e.to_string())?;
-    let ice = hashgram_sdk::calls::turn_credentials(&link, &network, &device, None).await.map_err(|e| e.to_string())?;
+    let ice = hashgram_sdk::calls::turn_credentials(&link, &network, &device, None)
+        .await
+        .map_err(|e| e.to_string())?;
     serde_json::to_value(ice).map_err(|e| e.to_string())
 }
 
 /// Sends a call signal (offer/answer/ice/hangup/ring/busy) over the E2EE chat.
 #[tauri::command]
-pub async fn calls_signal(state: S<'_>, group_id: String, kind: String, call_id: String, sdp: Option<String>, candidate: Option<String>, sdp_mid: Option<String>, sdp_mline_index: Option<u32>, video: bool) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)] // one argument per field of the JS signal payload
+pub async fn calls_signal(
+    state: S<'_>,
+    group_id: String,
+    kind: String,
+    call_id: String,
+    sdp: Option<String>,
+    candidate: Option<String>,
+    sdp_mid: Option<String>,
+    sdp_mline_index: Option<u32>,
+    video: bool,
+) -> Result<(), String> {
     let (account, key, _) = state.session_handles().await?;
     let (link, network) = net(&state).await?;
     let signal = chat::CallSignal {
@@ -880,13 +1255,20 @@ pub async fn calls_signal(state: S<'_>, group_id: String, kind: String, call_id:
         call: Some(signal),
         ..Default::default()
     };
-    state.chat.send(&account, &state.db, &key, &link, &network, &group_id, msg).await?;
+    state
+        .chat
+        .send(&account, &state.db, &key, &link, &network, &group_id, msg)
+        .await?;
     Ok(())
 }
 
 /// Recent call signals in a conversation (the webview drives WebRTC).
 #[tauri::command]
-pub async fn calls_signals(state: S<'_>, group_id: String, since_ms: u64) -> Result<Vec<serde_json::Value>, String> {
+pub async fn calls_signals(
+    state: S<'_>,
+    group_id: String,
+    since_ms: u64,
+) -> Result<Vec<serde_json::Value>, String> {
     let (_, key, _) = state.session_handles().await?;
     let rows = chatmod::history(&state.db, &key, &group_id, None, 200)?;
     Ok(rows

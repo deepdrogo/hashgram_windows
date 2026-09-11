@@ -166,7 +166,7 @@ pub fn parse_hash_amount(s: &str) -> Result<u128, String> {
 /// least two.
 #[must_use]
 pub fn format_hash(uhash: u128) -> String {
-    let whole = uhash / 1_000_000;
+    let whole = uhash.div_euclid(1_000_000);
     let frac = uhash % 1_000_000;
     let mut f = format!("{frac:06}");
     while f.len() > 2 && f.ends_with('0') {
@@ -196,7 +196,14 @@ pub fn truncate_middle(s: &str, head: usize, tail: usize) -> String {
         return s.to_owned();
     }
     let h: String = s.chars().take(head).collect();
-    let t: String = s.chars().rev().take(tail).collect::<Vec<_>>().into_iter().rev().collect();
+    let t: String = s
+        .chars()
+        .rev()
+        .take(tail)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     format!("{h}…{t}")
 }
 
@@ -209,7 +216,10 @@ fn username_ok(name: &str) -> Result<String, String> {
     if n.len() < 3 || n.len() > 32 {
         return Err("a username is 3–32 characters".into());
     }
-    if !n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+    if !n
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
         return Err("a username is lowercase letters, digits and underscore".into());
     }
     Ok(n)
@@ -232,66 +242,112 @@ impl MsgSpec {
                 warnings.push(FEE_NOTE.to_owned());
                 (
                     vec![msgs::bank_send(signer, to.trim(), amt)],
-                    format!("Send {} HASH to {}", format_hash(amt), truncate_middle(to.trim(), 10, 6)),
+                    format!(
+                        "Send {} HASH to {}",
+                        format_hash(amt),
+                        truncate_middle(to.trim(), 10, 6)
+                    ),
                 )
             }
-            Self::Delegate { validator, amount_uhash } => {
+            Self::Delegate {
+                validator,
+                amount_uhash,
+            } => {
                 valoper(validator)?;
                 let amt = parse_uhash(amount_uhash)?;
                 warnings.push(UNBONDING_WARNING.to_owned());
                 (
                     vec![msgs::delegate(signer, validator.trim(), amt)],
-                    format!("Delegate {} HASH to {}", format_hash(amt), truncate_middle(validator.trim(), 14, 6)),
+                    format!(
+                        "Delegate {} HASH to {}",
+                        format_hash(amt),
+                        truncate_middle(validator.trim(), 14, 6)
+                    ),
                 )
             }
-            Self::Undelegate { validator, amount_uhash } => {
+            Self::Undelegate {
+                validator,
+                amount_uhash,
+            } => {
                 valoper(validator)?;
                 let amt = parse_uhash(amount_uhash)?;
                 warnings.push(UNBONDING_WARNING.to_owned());
                 (
                     vec![msgs::undelegate(signer, validator.trim(), amt)],
-                    format!("Undelegate {} HASH from {} (21 days)", format_hash(amt), truncate_middle(validator.trim(), 14, 6)),
+                    format!(
+                        "Undelegate {} HASH from {} (21 days)",
+                        format_hash(amt),
+                        truncate_middle(validator.trim(), 14, 6)
+                    ),
                 )
             }
-            Self::Redelegate { from_validator, to_validator, amount_uhash } => {
+            Self::Redelegate {
+                from_validator,
+                to_validator,
+                amount_uhash,
+            } => {
                 valoper(from_validator)?;
                 valoper(to_validator)?;
                 let amt = parse_uhash(amount_uhash)?;
                 warnings.push("A redelegation cannot be redelegated again for 21 days.".to_owned());
                 (
-                    vec![msgs::redelegate(signer, from_validator.trim(), to_validator.trim(), amt)],
-                    format!("Redelegate {} HASH to {}", format_hash(amt), truncate_middle(to_validator.trim(), 14, 6)),
+                    vec![msgs::redelegate(
+                        signer,
+                        from_validator.trim(),
+                        to_validator.trim(),
+                        amt,
+                    )],
+                    format!(
+                        "Redelegate {} HASH to {}",
+                        format_hash(amt),
+                        truncate_middle(to_validator.trim(), 14, 6)
+                    ),
                 )
             }
             Self::WithdrawRewards { validator } => {
                 valoper(validator)?;
                 (
                     vec![msgs::withdraw_rewards(signer, validator.trim())],
-                    format!("Withdraw rewards from {}", truncate_middle(validator.trim(), 14, 6)),
+                    format!(
+                        "Withdraw rewards from {}",
+                        truncate_middle(validator.trim(), 14, 6)
+                    ),
                 )
             }
-            Self::Vote { proposal_id, option } => {
-                let opt = VoteOption::parse(option)
-                    .ok_or_else(|| format!("vote option {option:?} is not yes/no/abstain/no_with_veto"))?;
+            Self::Vote {
+                proposal_id,
+                option,
+            } => {
+                let opt = VoteOption::parse(option).ok_or_else(|| {
+                    format!("vote option {option:?} is not yes/no/abstain/no_with_veto")
+                })?;
                 (
                     vec![msgs::vote(signer, *proposal_id, opt)],
-                    format!("Vote {} on proposal #{proposal_id}", option.to_ascii_lowercase()),
+                    format!(
+                        "Vote {} on proposal #{proposal_id}",
+                        option.to_ascii_lowercase()
+                    ),
                 )
             }
             Self::RegisterUsername { name } => {
                 let n = username_ok(name)?;
                 warnings.push("Registration costs 1 HASH (a protocol fee) and is valid for 7,884,000 blocks (about a year), with a 30-day grace period to renew.".to_owned());
                 (
-                    vec![msgs::register_username(&hashgram_sdk::chain::pb::username::MsgRegister {
-                        owner: signer.to_owned(),
-                        name: n.clone(),
-                    })],
+                    vec![msgs::register_username(
+                        &hashgram_sdk::chain::pb::username::MsgRegister {
+                            owner: signer.to_owned(),
+                            name: n.clone(),
+                        },
+                    )],
                     format!("Register @{n}"),
                 )
             }
             Self::RenewUsername { name } => {
                 let n = username_ok(name)?;
-                (vec![msgs::renew_username(signer, &n)], format!("Renew @{n}"))
+                (
+                    vec![msgs::renew_username(signer, &n)],
+                    format!("Renew @{n}"),
+                )
             }
             Self::TransferUsername { name, to } => {
                 let n = username_ok(name)?;
@@ -304,9 +360,16 @@ impl MsgSpec {
             Self::ReleaseUsername { name } => {
                 let n = username_ok(name)?;
                 warnings.push("Releasing a name lets anyone register it.".to_owned());
-                (vec![msgs::release_username(signer, &n)], format!("Release @{n}"))
+                (
+                    vec![msgs::release_username(signer, &n)],
+                    format!("Release @{n}"),
+                )
             }
-            Self::SetRecoveryConfig { guardians, threshold, delay_blocks } => {
+            Self::SetRecoveryConfig {
+                guardians,
+                threshold,
+                delay_blocks,
+            } => {
                 for g in guardians {
                     validate_address(g, ADDRESS_PREFIX)?;
                 }
@@ -333,17 +396,25 @@ impl MsgSpec {
                 "Cancel pending recovery".to_owned(),
             ),
             Self::RevokeDevice { device_id } => (
-                vec![msgs::revoke_device(&hashgram_sdk::chain::pb::identity::MsgRevokeDevice {
-                    address: signer.to_owned(),
-                    device_id: device_id.clone(),
-                })],
+                vec![msgs::revoke_device(
+                    &hashgram_sdk::chain::pb::identity::MsgRevokeDevice {
+                        address: signer.to_owned(),
+                        device_id: device_id.clone(),
+                    },
+                )],
                 format!("Revoke device {}", truncate_middle(device_id, 8, 4)),
             ),
             Self::BeginUnbonding => {
                 warnings.push("The provider bond unbonds over 21 days. The node stops earning when unbonding begins.".to_owned());
-                (vec![msgs::begin_unbonding(signer)], "Begin unbonding provider bond".to_owned())
+                (
+                    vec![msgs::begin_unbonding(signer)],
+                    "Begin unbonding provider bond".to_owned(),
+                )
             }
-            Self::WithdrawBond => (vec![msgs::withdraw_bond(signer)], "Withdraw provider bond".to_owned()),
+            Self::WithdrawBond => (
+                vec![msgs::withdraw_bond(signer)],
+                "Withdraw provider bond".to_owned(),
+            ),
         };
         Ok(Built {
             msgs,
@@ -369,7 +440,10 @@ mod tests {
         assert!(parse_hash_amount("1.0000001").is_err());
         assert!(parse_hash_amount("abc").is_err());
         // 1e15 uhash, the whole supply, fits and round-trips.
-        assert_eq!(parse_hash_amount("1000000000").unwrap(), 1_000_000_000_000_000);
+        assert_eq!(
+            parse_hash_amount("1000000000").unwrap(),
+            1_000_000_000_000_000
+        );
         assert_eq!(format_hash(1_000_000_000_000_000), "1000000000.00");
         assert_eq!(format_hash(12_500_000), "12.50");
         assert_eq!(format_hash(1), "0.000001");
@@ -378,7 +452,11 @@ mod tests {
     #[test]
     fn hash_prefix_is_required_and_cosmos_is_refused() {
         assert!(validate_address(ADDR, ADDRESS_PREFIX).is_ok());
-        assert!(validate_address("cosmos1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu", ADDRESS_PREFIX).is_err());
+        assert!(validate_address(
+            "cosmos1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu",
+            ADDRESS_PREFIX
+        )
+        .is_err());
         assert!(validate_address("hash1notvalid", ADDRESS_PREFIX).is_err());
         assert!(validate_address(VAL, VALOPER_PREFIX).is_ok());
         assert!(validate_address(VAL, ADDRESS_PREFIX).is_err());
@@ -401,21 +479,44 @@ mod tests {
     #[test]
     fn staking_warns_about_21_days_before_confirm() {
         for spec in [
-            MsgSpec::Delegate { validator: VAL.into(), amount_uhash: "1".into() },
-            MsgSpec::Undelegate { validator: VAL.into(), amount_uhash: "1".into() },
+            MsgSpec::Delegate {
+                validator: VAL.into(),
+                amount_uhash: "1".into(),
+            },
+            MsgSpec::Undelegate {
+                validator: VAL.into(),
+                amount_uhash: "1".into(),
+            },
         ] {
             let b = spec.build(ADDR).unwrap();
-            assert!(b.warnings.iter().any(|w| w.contains("21 days")), "{:?}", b.warnings);
-            assert!(b.warnings.iter().any(|w| w.contains("5 %") && w.contains("0.01 %")));
+            assert!(
+                b.warnings.iter().any(|w| w.contains("21 days")),
+                "{:?}",
+                b.warnings
+            );
+            assert!(b
+                .warnings
+                .iter()
+                .any(|w| w.contains("5 %") && w.contains("0.01 %")));
         }
     }
 
     #[test]
     fn usernames_are_normalised_and_bounded() {
-        let b = MsgSpec::RegisterUsername { name: "@Alice_01".into() }.build(ADDR).unwrap();
+        let b = MsgSpec::RegisterUsername {
+            name: "@Alice_01".into(),
+        }
+        .build(ADDR)
+        .unwrap();
         assert_eq!(b.summary, "Register @alice_01");
-        assert!(MsgSpec::RegisterUsername { name: "ab".into() }.build(ADDR).is_err());
-        assert!(MsgSpec::RegisterUsername { name: "has space".into() }.build(ADDR).is_err());
+        assert!(MsgSpec::RegisterUsername { name: "ab".into() }
+            .build(ADDR)
+            .is_err());
+        assert!(MsgSpec::RegisterUsername {
+            name: "has space".into()
+        }
+        .build(ADDR)
+        .is_err());
     }
 
     #[test]
@@ -426,7 +527,8 @@ mod tests {
 
     #[test]
     fn spec_json_shape_is_tagged() {
-        let s: MsgSpec = serde_json::from_str(r#"{"type":"vote","proposal_id":3,"option":"yes"}"#).unwrap();
+        let s: MsgSpec =
+            serde_json::from_str(r#"{"type":"vote","proposal_id":3,"option":"yes"}"#).unwrap();
         assert!(matches!(s, MsgSpec::Vote { proposal_id: 3, .. }));
         let b = s.build(ADDR).unwrap();
         assert_eq!(b.msgs[0].type_url, "/cosmos.gov.v1.MsgVote");

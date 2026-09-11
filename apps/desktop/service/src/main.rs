@@ -93,7 +93,10 @@ fn supervise(args: &Args, stop: &AtomicBool) -> anyhow::Result<()> {
             }
             match child.try_wait()? {
                 Some(status) => {
-                    let _ = append(&args.home, &format!("hashgram-node exited with {status}; restarting in {backoff:?}"));
+                    let _ = append(
+                        &args.home,
+                        &format!("hashgram-node exited with {status}; restarting in {backoff:?}"),
+                    );
                     std::thread::sleep(backoff);
                     backoff = (backoff * 2).min(Duration::from_secs(120));
                     break;
@@ -122,7 +125,8 @@ fn append(home: &std::path::Path, line: &str) -> std::io::Result<()> {
 mod svc {
     use super::*;
     use windows_service::service::{
-        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
     };
     use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
     use windows_service::{define_windows_service, service_dispatcher};
