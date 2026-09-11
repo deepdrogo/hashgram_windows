@@ -28,8 +28,10 @@ const source = (f: string) => {
 };
 
 describe("no hardcoded server", () => {
-  it("grep -rn 186.241 apps/ is empty", () => {
-    const hits = files.filter((f) => source(f).includes("186.241")).map((f) => relative(APPS, f));
+  // The seed node address is assembled here so this file does not contain it either.
+  const SEED_PREFIX = ["186", "241"].join(".");
+  it("the seed node address appears nowhere under apps/", () => {
+    const hits = files.filter((f) => source(f).includes(SEED_PREFIX)).map((f) => relative(APPS, f));
     expect(hits).toEqual([]);
   });
   it("no IPv4 literal other than loopback appears in the app", () => {
