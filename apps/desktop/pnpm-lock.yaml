@@ -48,8 +48,8 @@ importers:
         specifier: ^2.4.1
         version: 2.4.1
       lucide-solid:
-        specifier: ^1.44.0
-        version: 1.44.0(solid-js@1.9.15)
+        specifier: 1.43.0
+        version: 1.43.0(solid-js@1.9.15)
       solid-js:
         specifier: ^1.9.15
         version: 1.9.15
@@ -1194,8 +1194,8 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
-  lucide-solid@1.44.0:
-    resolution: {integrity: sha512-PpmuH8m4c3Sa26tWJbU46tixnCc/Nh+mUus6EPQfMsUFcnlGJToxvCFq3OmifCSStNR8WXAowHo6hbTNzysJ6w==}
+  lucide-solid@1.43.0:
+    resolution: {integrity: sha512-g1GL8xJDCVughcJFRPNQ5NCpyLXoC/k+0xDOxNzBRseFVXT2Fl/cqaDybxJUgkUzLjdxzwU3u2qzr0dwPTpY4g==}
     peerDependencies:
       solid-js: ^1.4.7
 
@@ -2465,7 +2465,7 @@ snapshots:
     dependencies:
       yallist: 3.1.1
 
-  lucide-solid@1.44.0(solid-js@1.9.15):
+  lucide-solid@1.43.0(solid-js@1.9.15):
     dependencies:
       solid-js: 1.9.15
 

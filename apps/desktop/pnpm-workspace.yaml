@@ -4,3 +4,9 @@ nodeLinker: hoisted
 allowBuilds:
   esbuild: true
 
+# Supply-chain policy: a package version must be at least a day old before
+# it may enter the lockfile (pnpm's default, written down so it is reviewed
+# rather than inherited). A brand-new release is the moment a hijacked
+# package is most dangerous; waiting 24 hours costs nothing here.
+minimumReleaseAge: 1440
+
