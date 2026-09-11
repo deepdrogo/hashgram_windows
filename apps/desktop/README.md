@@ -46,8 +46,32 @@ pwsh .\release.ps1                # artefacts + SHA256SUMS.txt in dist/desktop
 ```
 
 Environment for signing (owner's machine only): `TAURI_SIGNING_PRIVATE_KEY`
-(minisign, updater manifests), `HASHGRAM_CODESIGN_THUMBPRINT` (Authenticode).
+or `TAURI_SIGNING_PRIVATE_KEY_PATH` (+ `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
+minisign, updater artefacts), `HASHGRAM_CODESIGN_THUMBPRINT` (Authenticode).
 The public updater key lives in `src-tauri/tauri.conf.json`.
+
+### Self-update
+
+The app fetches
+`https://github.com/deepdrogo/hashgram_windows/releases/latest/download/latest.json`
+(on start when enabled, and from Settings → Updates → Check now), verifies
+the minisign signature of the manifest entry against the compiled-in public
+key, downloads the NSIS installer from that release and runs it passively
+for the current user. Unsigned or foreign manifests are refused.
+
+Publishing a new version:
+
+1. bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`;
+2. commit and `git tag vX.Y.Z && git push origin main vX.Y.Z`;
+3. `.github/workflows/desktop-release.yml` builds with `release.ps1`, signs
+   with the `TAURI_SIGNING_PRIVATE_KEY` repository secret and uploads
+   `Hashgram_X.Y.Z_x64-setup.exe`, its `.sig`, the MSI, `SHA256SUMS.txt` and
+   `latest.json` to the release. A local `pwsh .\release.ps1` with the key in
+   the environment produces the same files; upload them with
+   `gh release create vX.Y.Z dist\desktop\*`.
+
+The private key never enters the repository; losing it means installed apps
+cannot verify future updates, so keep an offline copy.
 
 ## Rules enforced by tests
 

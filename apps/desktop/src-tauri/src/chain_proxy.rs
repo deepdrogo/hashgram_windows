@@ -115,7 +115,7 @@ async fn unsupported() -> Response {
         .into_response()
 }
 
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn base64_decode(s: &str) -> Option<Vec<u8>> {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = Vec::with_capacity(s.len() * 3 / 4);
     let mut buf = 0u32;

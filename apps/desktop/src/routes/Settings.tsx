@@ -1,14 +1,14 @@
 // Settings: Network (precedence, HTTPS list, DEVNET), Security, Devices,
 // Notifications, Media, Appearance, Updates, Advanced, About.
 import { createSignal, createResource, For, Show } from "solid-js";
-import { check } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { enable as autostartEnable, disable as autostartDisable } from "@tauri-apps/plugin-autostart";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Card, Button, Field, Input, Notice, Switch, Tabs, Skeleton } from "~/components/ui";
 import { Mono } from "~/components/identity";
 import { ipc, type Settings as S } from "~/lib/ipc";
 import { store } from "~/lib/store";
+import { updates } from "~/lib/updates";
+import { formatBytes } from "~/lib/format";
 
 const TABS = [
   { id: "network", label: "Network" },
@@ -316,33 +316,33 @@ function SecurityTab(props: { d: S; patch: (f: (d: S) => void) => void }) {
 }
 
 function UpdatesTab(props: { d: S; patch: (f: (d: S) => void) => void }) {
-  const [state, setState] = createSignal<string>("");
-  const [busy, setBusy] = createSignal(false);
-  const configured = () => store.status()?.updater_configured;
-  const checkNow = async () => {
-    setBusy(true);
-    setState("Checking…");
-    try {
-      if (await ipc.txHasPending()) {
-        setState("A transaction is pending; the updater waits until it is committed.");
-        return;
+  const status = () => store.status();
+  const configured = () => status()?.updater_configured;
+  const phase = updates.phase;
+  const u = updates.available;
+  const statusLine = () => {
+    switch (phase()) {
+      case "checking":
+        return "Checking the signed manifest…";
+      case "up-to-date":
+        return `Up to date (v${status()?.version ?? ""}).`;
+      case "available":
+        return `Hashgram ${u()?.version} is available${u()?.date ? ` (${u()?.date})` : ""}.`;
+      case "downloading": {
+        const p = updates.progress();
+        return p.total ? `Downloading… ${formatBytes(p.done)} / ${formatBytes(p.total)}` : `Downloading… ${formatBytes(p.done)}`;
       }
-      const u = await check();
-      if (!u) {
-        setState("Up to date.");
-        return;
-      }
-      setState(`Version ${u.version} available (${u.date ?? ""}).\n\n${u.body ?? ""}`);
-      const ok = window.confirm(`Install Hashgram ${u.version} and restart?\n\n${u.body ?? ""}`);
-      if (ok) {
-        await u.downloadAndInstall();
-        await relaunch();
-      }
-    } catch (e) {
-      setState(`Update check failed: ${String(e)}`);
-    } finally {
-      setBusy(false);
+      case "installing":
+        return "Signature verified. Installing and restarting…";
+      case "error":
+        return `Update failed: ${updates.error()}`;
+      default:
+        return "";
     }
+  };
+  const pctDone = () => {
+    const p = updates.progress();
+    return p.total ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
   };
   return (
     <Card title="Updates">
@@ -352,19 +352,40 @@ function UpdatesTab(props: { d: S; patch: (f: (d: S) => void) => void }) {
             The signing public key compiled into this build is a placeholder. The owner generates a minisign keypair offline, puts the public key in <span class="mono">tauri.conf.json</span> and signs releases with the private key, which never touches a server. Until then “Check now” refuses unsigned manifests by design.
           </Notice>
         </Show>
-        <Switch label="Check for updates on start" hint="The only outbound HTTPS besides endpoints you configured. Manifests must be signed; unsigned ones are refused." checked={props.d.updates.auto_check} onChange={(v) => props.patch((x) => (x.updates.auto_check = v))} />
-        <Field label="Channel">
-          <Input value={props.d.updates.channel} onInput={(e) => props.patch((x) => (x.updates.channel = e.currentTarget.value))} />
-        </Field>
+        <Switch label="Check for updates on start" hint="The only outbound HTTPS this app makes on its own. The manifest and the installer must carry a valid signature; anything else is refused." checked={props.d.updates.auto_check} onChange={(v) => props.patch((x) => (x.updates.auto_check = v))} />
         <div class="flex items-center gap-3">
-          <Button variant="secondary" onClick={checkNow} loading={busy()}>
+          <Button variant="secondary" onClick={() => void updates.checkNow()} loading={phase() === "checking"} disabled={updates.busy() || !configured()}>
             Check now
           </Button>
-          <span class="whitespace-pre-wrap text-xs text-muted">{state()}</span>
+          <Show when={phase() === "available"}>
+            <Button onClick={() => void updates.install()} disabled={updates.busy()}>
+              Install v{u()?.version} and restart
+            </Button>
+          </Show>
+          <span class="whitespace-pre-wrap text-xs text-muted" role="status">
+            {statusLine()}
+          </span>
         </div>
-        <p class="text-xs text-muted">
-          Signature key fingerprint: <Mono text={configured() ? "configured" : "REPLACE_WITH_MINISIGN_PUBLIC_KEY (placeholder)"} full />
-        </p>
+        <Show when={phase() === "downloading" && updates.progress().total}>
+          <div class="h-1 w-full overflow-hidden rounded bg-surface-2" aria-hidden="true">
+            <div class="h-full bg-fg transition-[width]" style={{ width: `${pctDone()}%` }} />
+          </div>
+        </Show>
+        <Show when={phase() === "available" && u()?.body}>
+          <div class="rounded-md border border-border bg-surface-2 p-3 text-xs whitespace-pre-wrap">{u()?.body}</div>
+        </Show>
+        <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs text-muted">
+          <span>Installed</span>
+          <span class="mono">
+            v{status()?.version} · {status()?.commit}
+          </span>
+          <span>Source</span>
+          <span class="mono break-all">{status()?.updater_endpoint || "—"}</span>
+          <span>Signing key id</span>
+          <Mono text={configured() ? status()?.updater_key_id || "configured" : "REPLACE_WITH_MINISIGN_PUBLIC_KEY (placeholder)"} full />
+          <span>Install mode</span>
+          <span>Passive installer for the current user, no administrator prompt; your vault and settings stay in place.</span>
+        </div>
       </div>
     </Card>
   );

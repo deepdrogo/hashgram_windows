@@ -14,6 +14,7 @@
     TAURI_SIGNING_PRIVATE_KEY           minisign private key (updater manifest signing;
                                         the owner keeps this offline and only sets it on
                                         the release machine for the duration of the build)
+    TAURI_SIGNING_PRIVATE_KEY_PATH      alternatively, a file holding that key
     TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
     HASHGRAM_CODESIGN_THUMBPRINT        SHA-1 thumbprint of an EV/OV certificate in the
                                         user's certificate store (signtool)
@@ -26,7 +27,9 @@
 [CmdletBinding()]
 param(
     [switch]$SkipInstall,
-    [string]$OutDir = ""
+    [string]$OutDir = "",
+    # GitHub repository whose Releases host the installer and latest.json.
+    [string]$Repo = "deepdrogo/hashgram_windows"
 )
 
 $ErrorActionPreference = "Continue"
@@ -72,6 +75,9 @@ if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "rust tests failed" }
 Pop-Location
 
 $updater = $false
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY -and $env:TAURI_SIGNING_PRIVATE_KEY_PATH -and (Test-Path $env:TAURI_SIGNING_PRIVATE_KEY_PATH)) {
+    $env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content $env:TAURI_SIGNING_PRIVATE_KEY_PATH -Raw).Trim()
+}
 if ($env:TAURI_SIGNING_PRIVATE_KEY) {
     $updater = $true
     Write-Host "updater artefacts: signing key present, will produce and sign .sig files"
@@ -119,9 +125,34 @@ foreach ($a in $artefacts) {
     $notes += $line
     if ($a.Extension -eq ".exe" -and $a.Length -gt 40MB) { Write-Host "  [FAIL] installer exceeds the 40 MB budget"; $failures++ }
 }
+
+# Updater manifest: the app fetches <release>/latest/download/latest.json and
+# follows `url` only when `signature` verifies against the compiled-in key.
+$version = (Get-Content (Join-Path $here "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json).version
+if ($updater) {
+    Step "updater manifest (latest.json)"
+    $setup = $artefacts | Where-Object { $_.Extension -eq ".exe" } | Select-Object -First 1
+    $sigFile = "$($setup.FullName).sig"
+    if (-not (Test-Path $sigFile)) { Fail "missing signature $sigFile" }
+    $manifest = [ordered]@{
+        version  = $version
+        notes    = "Hashgram for Windows $version (commit $commit). SHA-256 of the installer: " + (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+        pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        platforms = [ordered]@{
+            "windows-x86_64" = [ordered]@{
+                signature = (Get-Content $sigFile -Raw).Trim()
+                url       = "https://github.com/$Repo/releases/download/v$version/$($setup.Name)"
+            }
+        }
+    }
+    $manifestPath = Join-Path $OutDir "latest.json"
+    [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+    Write-Host "latest.json -> $($manifest.platforms['windows-x86_64'].url)"
+    $notes += "latest.json  version $version  url $($manifest.platforms['windows-x86_64'].url)"
+}
 $notes += ""
 $notes += "Code signing: " + $(if ($env:HASHGRAM_CODESIGN_THUMBPRINT) { "signed" } else { "UNSIGNED - Windows SmartScreen will warn on first run until an EV/OV certificate is used" })
-$notes += "Updater: " + $(if ($updater) { "signed manifest artefacts produced" } else { "not produced (no offline minisign key on this machine)" })
+$notes += "Updater: " + $(if ($updater) { "signed .sig files and latest.json produced; publish them with the installer under GitHub release v$version" } else { "not produced (no minisign key on this machine)" })
 $notes += "Verify: (Get-FileHash <file> -Algorithm SHA256).Hash.ToLower()"
 $notes | Set-Content (Join-Path $OutDir "RELEASE_NOTES.txt") -Encoding ascii
 $notes | ForEach-Object { $_ } | Select-Object -Skip 2 | Where-Object { $_ -match "^[0-9a-f]{64}" } | Set-Content (Join-Path $OutDir "SHA256SUMS.txt") -Encoding ascii

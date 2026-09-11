@@ -41,8 +41,8 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_MINISIGN_PUBLIC_KEY_KEPT_OFFLINE",
-      "endpoints": ["https://hashgram.io/desktop/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyRTk0RDZFODdCQTRCRTUKUldUbFM3cUhiazNwTW55NExKb0U5OWh3N0NLTU9panBZaU41TGVEa3pjeFBaNEtTUnlJcTZDcDIK",
+      "endpoints": ["https://github.com/deepdrogo/hashgram_windows/releases/latest/download/latest.json"],
       "windows": { "installMode": "passive" }
     },
     "deep-link": {
@@ -53,7 +53,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "msi"],
     "publisher": "Hashgram",
     "copyright": "Apache-2.0",

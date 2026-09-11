@@ -74,8 +74,25 @@ pub struct AppStatus {
     pub data_dir: String,
     /// Whether the updater has a real public key compiled in.
     pub updater_configured: bool,
+    /// minisign key id of the compiled-in updater public key (hex), when configured.
+    pub updater_key_id: String,
+    /// Where the updater fetches its signed manifest from.
+    pub updater_endpoint: String,
     /// Milliseconds since process start (for the cold-start budget).
     pub uptime_ms: u64,
+}
+
+/// Extracts the minisign key id from a base64-encoded public key file
+/// ("untrusted comment: minisign public key: <ID>\n<key>").
+pub(crate) fn minisign_key_id(pubkey_b64: &str) -> String {
+    let Some(raw) = crate::chain_proxy::base64_decode(pubkey_b64.trim()) else {
+        return String::new();
+    };
+    let text = String::from_utf8_lossy(&raw);
+    text.lines()
+        .find_map(|l| l.split("public key:").nth(1))
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default()
 }
 
 /// Reports app status.
@@ -87,15 +104,23 @@ pub async fn app_status(state: S<'_>, app: AppHandle) -> Result<AppStatus, Strin
     let hello_available = tauri::async_runtime::spawn_blocking(crate::winsec::hello_supported)
         .await
         .unwrap_or(false);
-    let updater_configured = app
-        .config()
-        .plugins
-        .0
-        .get("updater")
+    let updater_cfg = app.config().plugins.0.get("updater").cloned();
+    let updater_pubkey = updater_cfg
+        .as_ref()
         .and_then(|u| u.get("pubkey"))
         .and_then(|p| p.as_str())
-        .map(|p| !p.starts_with("REPLACE_WITH"))
-        .unwrap_or(false);
+        .unwrap_or("")
+        .to_owned();
+    let updater_configured = !updater_pubkey.is_empty() && !updater_pubkey.starts_with("REPLACE_WITH");
+    let updater_key_id = if updater_configured { minisign_key_id(&updater_pubkey) } else { String::new() };
+    let updater_endpoint = updater_cfg
+        .as_ref()
+        .and_then(|u| u.get("endpoints"))
+        .and_then(|e| e.as_array())
+        .and_then(|a| a.first())
+        .and_then(|e| e.as_str())
+        .unwrap_or("")
+        .to_owned();
     Ok(AppStatus {
         vault_exists: paths::vault_path().exists(),
         unlocked: session.is_some(),
@@ -112,6 +137,8 @@ pub async fn app_status(state: S<'_>, app: AppHandle) -> Result<AppStatus, Strin
         commit: COMMIT.to_owned(),
         data_dir: paths::data_dir().display().to_string(),
         updater_configured,
+        updater_key_id,
+        updater_endpoint,
         uptime_ms: state.perf.uptime_ms(),
     })
 }
@@ -1389,4 +1416,22 @@ pub fn save_text_file(path: String, contents: String) -> Result<(), String> {
 pub struct DeepLink {
     /// Raw URL.
     pub url: String,
+}
+
+#[cfg(test)]
+mod updater_tests {
+    use super::minisign_key_id;
+
+    #[test]
+    fn key_id_comes_out_of_the_minisign_comment() {
+        // "untrusted comment: minisign public key: 32E94D6E87BA4BE5\nRW..." base64-encoded.
+        let b64 = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyRTk0RDZFODdCQTRCRTUKUldUbFM3cUhiazNwTW55NExKb0U5OWh3N0NLTU9panBZaU41TGVEa3pjeFBaNEtTUnlJcTZDcDIK";
+        assert_eq!(minisign_key_id(b64), "32E94D6E87BA4BE5");
+    }
+
+    #[test]
+    fn garbage_yields_an_empty_id() {
+        assert_eq!(minisign_key_id("REPLACE_WITH_MINISIGN_PUBLIC_KEY_KEPT_OFFLINE"), "");
+        assert_eq!(minisign_key_id("!!!"), "");
+    }
 }

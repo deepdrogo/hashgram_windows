@@ -1,7 +1,7 @@
 // The application frame: left rail, content, status bar. Keyboard-first:
 // every rail item has an accelerator, Ctrl+K opens search, Ctrl+L locks,
 // Ctrl+Shift+P opens the performance panel.
-import { For, Show, createSignal, onMount, onCleanup, type ParentProps } from "solid-js";
+import { For, Show, createEffect, createSignal, onMount, onCleanup, type ParentProps } from "solid-js";
 import { A, useLocation, useNavigate } from "@solidjs/router";
 import {
   Home,
@@ -19,8 +19,11 @@ import {
   CircleHelp,
   Search,
   Lock,
+  Download,
+  X,
 } from "lucide-solid";
 import { store } from "~/lib/store";
+import { updates } from "~/lib/updates";
 import { ipc } from "~/lib/ipc";
 import { verificationLabel } from "~/lib/format";
 import { HealthDot } from "./identity";
@@ -82,6 +85,15 @@ export function Shell(props: ParentProps) {
     });
   });
 
+  // Automatic update check, once, after the session is open and settings are known.
+  createEffect(() => {
+    if (!store.locked() && store.settings() && store.status()) void updates.checkOnStart();
+  });
+  const updateBanner = () => {
+    const p = updates.phase();
+    return (p === "available" && !updates.dismissed()) || p === "downloading" || p === "installing";
+  };
+
   const net = store.net;
   const health = store.health;
   const nodesState = () => {
@@ -105,6 +117,27 @@ export function Shell(props: ParentProps) {
       <Show when={store.status()?.network === "devnet"}>
         <div class="flex h-7 shrink-0 items-center justify-center border-b border-fg bg-fg text-xs font-semibold tracking-wide text-bg" role="status">
           DEVNET — this is not Hashgram Mainnet. Nothing here has value.
+        </div>
+      </Show>
+      <Show when={updateBanner()}>
+        <div class="flex h-8 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 text-xs" role="status">
+          <Download size={14} aria-hidden="true" />
+          <span class="flex-1">
+            <Show when={updates.phase() === "available"}>Hashgram {updates.available()?.version} is available.</Show>
+            <Show when={updates.phase() === "downloading"}>Downloading Hashgram {updates.available()?.version}…</Show>
+            <Show when={updates.phase() === "installing"}>Signature verified — installing and restarting…</Show>
+          </span>
+          <Show when={updates.phase() === "available"}>
+            <button type="button" class="btn-primary h-6 px-2.5 text-xs" onClick={() => void updates.install()}>
+              Install and restart
+            </button>
+            <A href="/settings" class="text-muted hover:text-fg">
+              Details
+            </A>
+            <button type="button" class="text-muted hover:text-fg" aria-label="Dismiss" onClick={() => updates.setDismissed(true)}>
+              <X size={14} />
+            </button>
+          </Show>
         </div>
       </Show>
       <div class="flex min-h-0 flex-1">

@@ -18,6 +18,8 @@ export interface AppStatus {
   commit: string;
   data_dir: string;
   updater_configured: boolean;
+  updater_key_id: string;
+  updater_endpoint: string;
   uptime_ms: number;
 }
 
