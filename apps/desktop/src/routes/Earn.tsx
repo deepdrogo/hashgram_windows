@@ -128,8 +128,11 @@ export function Earn() {
       </Card>
       <div class="grid grid-cols-2 gap-3">
         <Card title="Run a node on this PC">
-          <div class="p-4">
-            <Notice>Stage 3 of this build installs hashgram-node as a Windows service managed from here: roles, disk quota, bandwidth cap, a separate cold reward address, the {formatHash(minBond(), 0, 0)} HASH bond, then live assignments, challenges, fraud score and payouts.</Notice>
+          <div class="p-4 text-sm text-muted">
+            Install hashgram-node as a background service managed from here: roles, disk quota, bandwidth cap, a separate cold reward address, the {formatHash(minBond(), 0, 0)} HASH bond, then live assignments, challenges, fraud score and payouts.
+            <div class="mt-3">
+              <Button onClick={() => setShowNode((v) => !v)}>{showNode() ? "Hide node setup" : "Set up a node"}</Button>
+            </div>
           </div>
         </Card>
         <Card title="Welcome reward">
@@ -150,6 +153,9 @@ export function Earn() {
           </div>
         </Card>
       </div>
+      <Show when={showNode()}>
+        <RunNode />
+      </Show>
     </div>
   );
 }

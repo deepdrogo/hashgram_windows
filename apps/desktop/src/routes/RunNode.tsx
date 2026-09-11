@@ -30,7 +30,7 @@ export function RunNode() {
     onCleanup(() => clearInterval(t));
   });
   const o = () => (ov() && !("error" in ov()!) ? (ov() as NodeOverview) : null);
-  const current = () => setup() ?? o()?.setup ?? { roles: ["store", "media", "relay"], storage_gib: 20, bandwidth_mbps: 0, reward_address: "", moniker: "", auto_register: true };
+  const current = () => setup() ?? o()?.setup ?? { roles: ["store", "media", "relay"], storage_gib: 20, bandwidth_mbps: 0, reward_address: "", moniker: "home-pc", auto_register: true };
   const patch = (f: (s: NodeSetup) => void) => {
     const s = structuredClone(current());
     f(s);

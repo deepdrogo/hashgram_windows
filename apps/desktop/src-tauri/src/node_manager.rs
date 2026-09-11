@@ -89,8 +89,9 @@ pub fn node_binary() -> Option<PathBuf> {
         dir.join("binaries").join("hashgram-node-x86_64-pc-windows-msvc.exe"),
         dir.join("hashgram-node"),
     ];
+    let real = |p: &PathBuf| std::fs::metadata(p).map(|m| m.len() > 0).unwrap_or(false);
     for c in candidates {
-        if c.exists() {
+        if real(&c) {
             return Some(c);
         }
     }
@@ -233,7 +234,7 @@ pub fn wrapper_binary() -> Option<PathBuf> {
     let dir = node.parent()?;
     for name in ["hashgram-node-service.exe", "hashgram-node-service-x86_64-pc-windows-msvc.exe"] {
         let p = dir.join(name);
-        if p.exists() {
+        if std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false) {
             return Some(p);
         }
     }
