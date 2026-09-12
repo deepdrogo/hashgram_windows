@@ -208,11 +208,11 @@ message ExternalMailMeta {
 }
 
 enum MailReceiptKind {
-  MAIL_RECEIPT_UNSPECIFIED = 0;
+  MAIL_RECEIPT_KIND_UNSPECIFIED = 0;
   // The recipient's device decrypted the message.
-  MAIL_RECEIPT_DELIVERED = 1;
+  MAIL_RECEIPT_KIND_DELIVERED = 1;
   // The recipient opened it (sent only if the reader consents).
-  MAIL_RECEIPT_READ = 2;
+  MAIL_RECEIPT_KIND_READ = 2;
 }
 
 message MailReceipt {
@@ -255,11 +255,11 @@ message DriveObjectRef {
 
 enum DriveShareMode {
   // A fixed version. Later edits by the owner do not reach the grantee.
-  DRIVE_SHARE_SNAPSHOT = 0;
+  DRIVE_SHARE_MODE_SNAPSHOT = 0;
   // The grantee follows the owner's current version: the owner pushes
   // DriveShareUpdate messages with the new object on every change until a
   // DriveShareRevoke.
-  DRIVE_SHARE_LIVE = 1;
+  DRIVE_SHARE_MODE_LIVE = 1;
 }
 
 enum DrivePermission {
@@ -328,8 +328,8 @@ message DriveShareRevoke {
 // ---------------------------------------------------------------------------
 
 enum DriveEntryKind {
-  DRIVE_ENTRY_FILE = 0;
-  DRIVE_ENTRY_FOLDER = 1;
+  DRIVE_ENTRY_KIND_FILE = 0;
+  DRIVE_ENTRY_KIND_FOLDER = 1;
 }
 
 message DriveVersion {
@@ -393,6 +393,14 @@ message DriveManifest {
   bytes device_pubkey = 5;
   repeated DriveEntry entries = 6;
   repeated DriveShareRecord shares = 7;
+  // Permanently deleted entry ids, so a concurrent device that still has
+  // the entry does not resurrect it on merge. Bounded (oldest dropped).
+  repeated DriveTombstone tombstones = 8;
+}
+
+message DriveTombstone {
+  bytes id = 1;
+  uint64 at_ms = 2;
 }
 
 // The manifest of a shared folder (the object behind a folder capability).

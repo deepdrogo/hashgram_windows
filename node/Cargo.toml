@@ -8,6 +8,7 @@ members = [
     "hashgram-mls",
     "hashgram-p2p",
     "hashgram-node",
+    "hashgram-app",
     "hashgram-client",
     "hashgram-devtools",
     "../sdk/rust/hashgram-sdk",
