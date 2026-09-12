@@ -65,6 +65,11 @@ pub enum OneCmd {
         #[command(subcommand)]
         cmd: NetworkCmd,
     },
+    /// Encrypted vault backup (docs/MULTI_DEVICE_SECURITY.md §7.3).
+    Backup {
+        #[command(subcommand)]
+        cmd: BackupCmd,
+    },
     /// Run one sync round (mailbox, outbox, feed, wallet, devices).
     Sync {
         /// Repeat every N seconds until interrupted.
@@ -73,6 +78,20 @@ pub enum OneCmd {
     },
     /// Wallet balance through the facade.
     Balance,
+}
+
+/// Backup commands.
+#[derive(Subcommand)]
+pub enum BackupCmd {
+    /// Export an encrypted backup; passphrase from HASHGRAM_BACKUP_PASSPHRASE.
+    Export {
+        out: String,
+        /// DEVNET ONLY: light KDF for tests.
+        #[arg(long)]
+        light: bool,
+    },
+    /// Show a backup's KDF parameters (no passphrase needed).
+    Inspect { file: String },
 }
 
 /// Mail commands.
@@ -226,6 +245,8 @@ pub enum DriveCmd {
     Versions { entry: String },
     /// Restore a version.
     RestoreVersion { entry: String, version: u64 },
+    /// Re-encrypt a file under a fresh key (revokes its live shares).
+    Rekey { entry: String },
     /// Star.
     Star {
         entry: String,
@@ -600,7 +621,7 @@ fn out<T: Serialize>(json: bool, v: &T, text: impl FnOnce() -> String) {
     }
 }
 
-async fn open(ctx: &OneCtx<'_>) -> anyhow::Result<HashgramOne> {
+async fn open(ctx: &OneCtx<'_>, require_peer: bool) -> anyhow::Result<HashgramOne> {
     let bootstrap: Vec<Multiaddr> = ctx
         .bootstrap
         .iter()
@@ -616,10 +637,10 @@ async fn open(ctx: &OneCtx<'_>) -> anyhow::Result<HashgramOne> {
             Some(ctx.chain_api.clone())
         },
         kdf: ctx.kdf,
-        connect_wait: Duration::from_secs(10),
+        connect_wait: Duration::from_secs(if require_peer { 10 } else { 1 }),
     };
     let one = HashgramOne::open(cfg, ctx.passphrase).await?;
-    if one.link.peers().await.is_empty() {
+    if require_peer && one.link.peers().await.is_empty() {
         anyhow::bail!("no node completed the Hashgram handshake within 10s");
     }
     Ok(one)
@@ -670,7 +691,9 @@ fn guess_mime(name: &str) -> &'static str {
 /// Runs a `one` command.
 pub async fn run(ctx: OneCtx<'_>, cmd: OneCmd) -> anyhow::Result<()> {
     let json = ctx.json;
-    let mut one = open(&ctx).await?;
+    // Local-only commands (backup, folder listings) must work offline.
+    let needs_peer = !matches!(cmd, OneCmd::Backup { .. });
+    let mut one = open(&ctx, needs_peer).await?;
     let r = dispatch(&mut one, json, cmd).await;
     one.save()?;
     r
@@ -694,6 +717,21 @@ async fn dispatch(one: &mut HashgramOne, json: bool, cmd: OneCmd) -> anyhow::Res
             match watch {
                 Some(secs) => tokio::time::sleep(Duration::from_secs(secs.max(1))).await,
                 None => return Ok(()),
+            }
+        },
+        OneCmd::Backup { cmd } => match cmd {
+            BackupCmd::Export { out: path, light } => {
+                let pass = std::env::var("HASHGRAM_BACKUP_PASSPHRASE").context("set HASHGRAM_BACKUP_PASSPHRASE")?;
+                let cost = if light { Some((8 * 1024, 1, 1)) } else { None };
+                let meta = hashgram_sdk::backup::export_backup(&one.account, Path::new(&path), &pass, cost)?;
+                out(json, &meta, || format!("backup written to {path} (partial={})", meta.partial));
+                Ok(())
+            }
+            BackupCmd::Inspect { file } => {
+                let bytes = std::fs::read(&file)?;
+                let (m, t, p) = hashgram_sdk::backup::inspect_backup(&bytes)?;
+                println!("argon2id m={m} KiB t={t} p={p}");
+                Ok(())
             }
         },
         OneCmd::Balance => {
@@ -976,6 +1014,12 @@ async fn drive(one: &mut HashgramOne, json: bool, cmd: DriveCmd) -> anyhow::Resu
             one.drive().restore_version(&id, version).await?;
             one.drive().commit().await?;
             println!("ok");
+        }
+        DriveCmd::Rekey { entry } => {
+            let id = resolve_entry(one, &entry)?;
+            let v = one.drive().rekey(&id).await?;
+            one.drive().commit().await?;
+            println!("rekeyed as version {v}");
         }
         DriveCmd::Star { entry, off } => {
             let id = resolve_entry(one, &entry)?;
