@@ -229,6 +229,29 @@ fn view_of(
     }
 }
 
+/// Turns an SDK messaging error into a sentence that names the missing
+/// piece. The SDK's own words are correct but assume the reader knows the
+/// protocol; a person who typed an address and pressed Start does not.
+#[must_use]
+pub fn explain_send_error(e: &hashgram_sdk::SdkError, who: &str) -> String {
+    use hashgram_sdk::SdkError as E;
+    match e {
+        E::NoRecipients => format!(
+            "{who} has no device registered on chain yet. They need to open Hashgram once with an account that holds a little HASH (registration is automatic); until then there is no key to encrypt to."
+        ),
+        E::NoKeyPackage(dev) => format!(
+            "{who}'s device {}… has not published a key package to any store node this app can reach. They need to open Hashgram while online.",
+            dev.chars().take(8).collect::<String>()
+        ),
+        E::Link(hashgram_sdk::link::LinkError::NoPeer(role)) => format!(
+            "no connected node serves the {role} role; check Network"
+        ),
+        E::Delivery(d) => format!("delivery failed: {d}"),
+        E::Chain(c) => format!("cannot read the chain for {who}'s devices: {c}"),
+        other => other.to_string(),
+    }
+}
+
 /// The hub.
 pub struct ChatHub {
     inner: Mutex<Option<Messaging>>,
@@ -281,6 +304,17 @@ impl ChatHub {
     /// Seconds since the last sync, if any.
     pub async fn last_sync_secs(&self) -> Option<u64> {
         self.last_sync.lock().await.map(|t| t.elapsed().as_secs())
+    }
+
+    /// How many store nodes confirmed holding this device's key packages
+    /// this session (0 when messaging is closed).
+    pub async fn key_package_stores(&self) -> usize {
+        self.inner
+            .lock()
+            .await
+            .as_ref()
+            .map(|m| m.key_package_stores().len())
+            .unwrap_or(0)
     }
 
     /// Persists MLS state into the vault (session key: no KDF).
@@ -368,7 +402,7 @@ impl ChatHub {
         let out = m
             .create_conversation(link, chain, network, "", std::slice::from_ref(&to))
             .await
-            .map_err(|e| e.to_string());
+            .map_err(|e| explain_send_error(&e, &crate::tx::truncate_middle(&to, 10, 6)));
         Self::persist(m, account).await?;
         out.map(hex::encode)
     }
@@ -390,7 +424,7 @@ impl ChatHub {
         let out = m
             .create_conversation(link, chain, network, name, members)
             .await
-            .map_err(|e| e.to_string());
+            .map_err(|e| explain_send_error(&e, "a member"));
         Self::persist(m, account).await?;
         out.map(hex::encode)
     }
@@ -413,7 +447,7 @@ impl ChatHub {
         let out = m
             .add_participant(link, chain, network, &gid, address)
             .await
-            .map_err(|e| e.to_string());
+            .map_err(|e| explain_send_error(&e, &crate::tx::truncate_middle(address, 10, 6)));
         Self::persist(m, account).await?;
         out
     }
@@ -477,7 +511,7 @@ impl ChatHub {
             let out = m
                 .send(link, network, &gid, msg.clone())
                 .await
-                .map_err(|e| e.to_string());
+                .map_err(|e| explain_send_error(&e, "the recipient"));
             Self::persist(m, account).await?;
             out?;
         }

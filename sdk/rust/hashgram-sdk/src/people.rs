@@ -103,9 +103,13 @@ impl<'a> People<'a> {
             .chain
             .query(&format!("hashgram/username/v1/reverse/{address}"))
             .await;
+        // `x/username` answers `{registrations: [{name, owner, …}]}`
+        // (`proto/hashgram/username/v1/query.proto`); older mocks used
+        // `names`, accepted as a fallback.
         let name = match v {
             Ok(v) => v
-                .get("names")
+                .get("registrations")
+                .or_else(|| v.get("names"))
                 .and_then(|n| n.as_array())
                 .and_then(|a| a.first())
                 .and_then(|x| x.get("name").or(Some(x)))
@@ -138,12 +142,19 @@ impl<'a> People<'a> {
             .query(&format!("hashgram/username/v1/lookup/{username}"))
             .await;
         match v {
-            Ok(v) => Ok(v
-                .get("registration")
-                .and_then(|r| r.get("owner"))
-                .or_else(|| v.get("owner"))
-                .and_then(|o| o.as_str())
-                .map(|s| s.to_owned())),
+            Ok(v) => {
+                // The chain answers 200 with `found: false` for an
+                // unregistered name; the registration is then empty.
+                if v.get("found").and_then(|f| f.as_bool()) == Some(false) {
+                    return Ok(None);
+                }
+                Ok(v.get("registration")
+                    .and_then(|r| r.get("owner"))
+                    .or_else(|| v.get("owner"))
+                    .and_then(|o| o.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_owned()))
+            }
             Err(crate::chain::ClientError::Gateway { status: 404, .. }) => Ok(None),
             Err(e) => {
                 let msg = e.to_string();

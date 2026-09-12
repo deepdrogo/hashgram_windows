@@ -21,6 +21,10 @@ use prometheus_client::registry::Registry;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info};
 
+/// How long a DHT provider lookup may take before the caller falls back to
+/// the store nodes it is connected to. Alias of [`PROVIDER_QUERY_TIMEOUT`].
+pub const PROVIDER_LOOKUP_TIMEOUT: Duration = PROVIDER_QUERY_TIMEOUT;
+
 /// Why a link operation failed.
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
@@ -117,7 +121,12 @@ impl Link {
         cfg.listen_addr = "0.0.0.0"
             .parse()
             .map_err(|_| LinkError::Start("listen addr".into()))?;
-        cfg.listen_port = free_port();
+        // Port 0: the kernel picks a free port for each transport. A client
+        // advertises nothing, so TCP and QUIC need not share a number, and
+        // picking one "free" TCP port and hoping the same UDP port was free
+        // (as this did before) made the swarm fail to start whenever it was
+        // not, which on Windows is common enough to notice.
+        cfg.listen_port = 0;
         cfg.bootstrap_peers = bootstrap.iter().map(ToString::to_string).collect();
         cfg.min_peers = 2;
         cfg.serve_relay = Some(false);
@@ -412,6 +421,11 @@ impl Link {
 
     /// Providers of a DHT key, from Kademlia. Unverified peers among them
     /// will be verified at connection before any request is served.
+    ///
+    /// Bounded: a Kademlia query waits for every routing-table peer it
+    /// asked, up to the 30 s query timeout, and a send or a mailbox sync
+    /// that hangs that long because one stale peer is silent is worse than
+    /// falling back to the connected store nodes, which every caller does.
     pub async fn providers(&self, key: Vec<u8>) -> Vec<PeerId> {
         // A client never waits for a full Kademlia walk: with few peers the
         // walk lasts until the 30 s query timeout, and every caller falls
@@ -541,12 +555,4 @@ fn distinct_peer_ids(addrs: &[Multiaddr]) -> usize {
         }
     }
     ids.len() + anonymous
-}
-
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("0.0.0.0:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .unwrap_or(0)
-        .max(1)
 }

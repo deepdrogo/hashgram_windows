@@ -59,6 +59,12 @@ pub struct AppState {
     pub chat: Arc<crate::chat::ChatHub>,
     /// Social.
     pub social: Arc<crate::social_hub::SocialHub>,
+    /// When this session last submitted (or last tried) an identity
+    /// registration by itself, so the automatic path never double-spends
+    /// while a transaction is still in flight.
+    pub identity_auto_attempt: Mutex<Option<Instant>>,
+    /// The latest messaging readiness check, for the Messages banner.
+    pub readiness: RwLock<Option<crate::commands::MessagingReadiness>>,
 }
 
 impl AppState {
@@ -104,6 +110,8 @@ impl AppState {
         self.social.close().await;
         *self.session.write().await = None;
         self.pending_mnemonic.lock().await.take();
+        *self.identity_auto_attempt.lock().await = None;
+        *self.readiness.write().await = None;
     }
 
     /// The unlocked account and database key, or "locked".

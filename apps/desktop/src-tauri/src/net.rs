@@ -97,6 +97,10 @@ pub struct NetSnapshot {
     pub listen_addrs: Vec<String>,
     /// External addresses autonat/identify learned (ours).
     pub external_addrs: Vec<String>,
+    /// Why the swarm is not running, when it failed to start (the app keeps
+    /// retrying; this is what the panel shows meanwhile).
+    #[serde(default)]
+    pub last_error: String,
 }
 
 /// The manager.
@@ -109,6 +113,7 @@ pub struct NetManager {
     latency: Mutex<HashMap<String, u32>>,
     started: Mutex<Option<Instant>>,
     last_read: Mutex<Option<Verification>>,
+    last_error: Mutex<String>,
 }
 
 impl Default for NetManager {
@@ -122,6 +127,7 @@ impl Default for NetManager {
             latency: Mutex::new(HashMap::new()),
             started: Mutex::new(None),
             last_read: Mutex::new(None),
+            last_error: Mutex::new(String::new()),
         }
     }
 }
@@ -197,9 +203,15 @@ impl NetManager {
         *self.link.write().await = Some(link.clone());
         *self.identity.write().await = Some(identity);
         *self.started.lock().await = Some(Instant::now());
+        self.last_error.lock().await.clear();
         // Note sightings for the discovery layer as peers verify.
         let _ = db;
         Ok(link)
+    }
+
+    /// Records why a start failed, for the panel.
+    pub async fn note_start_error(&self, e: &str) {
+        *self.last_error.lock().await = e.to_owned();
     }
 
     /// The running link, if any.
@@ -316,6 +328,7 @@ impl NetManager {
                 uptime_secs: 0,
                 listen_addrs: vec![],
                 external_addrs: vec![],
+                last_error: self.last_error.lock().await.clone(),
             };
         };
         let last_read = self.last_read.lock().await.clone();
@@ -405,6 +418,7 @@ impl NetManager {
                 .as_ref()
                 .map(|s| s.external_addrs.clone())
                 .unwrap_or_default(),
+            last_error: String::new(),
         }
     }
 

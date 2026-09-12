@@ -11,7 +11,7 @@ import { useChain, readOf } from "~/lib/chain";
 import { ipc, pick, str, arr, type EventView, type MediaView } from "~/lib/ipc";
 import { isHashAddress, formatHash } from "~/lib/format";
 import { store } from "~/lib/store";
-import { forget } from "~/lib/people";
+import { forget, usernameFromReverse } from "~/lib/people";
 import { PostCard } from "./Feed";
 
 export function Profile() {
@@ -27,7 +27,7 @@ export function Profile() {
   const [prof, { refetch: refetchProf }] = createResource(address, (a) => ipc.profileGet(a, true).catch(() => null));
   const [posts, { refetch: refetchPosts }] = createResource(address, () => ipc.feed(["POST_CREATE", "REEL_CREATE"], undefined, undefined, 100).then((p) => p.events.filter((e) => e.author === address())).catch(() => [] as EventView[]));
   const [edit, setEdit] = createSignal(false);
-  const username = () => (reverse()?.ok ? str(pick((reverse() as { value: unknown }).value, "name")) || null : null);
+  const username = () => (reverse()?.ok ? usernameFromReverse((reverse() as { value: unknown }).value) ?? null : null);
   const displayName = () => str(pick(prof()?.profile, "display_name")) || null;
   const bio = () => str(pick(prof()?.profile, "bio"));
   const found = () => identity()?.ok && pick((identity() as { value: unknown }).value, "found") === true;

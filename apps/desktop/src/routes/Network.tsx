@@ -62,6 +62,12 @@ export function Network() {
         </div>
       </div>
 
+      <Show when={net() && !net()!.running}>
+        <Notice strong>
+          The network link is not running{net()!.last_error ? `: ${net()!.last_error}` : ""}. Hashgram keeps retrying by itself; "Reconnect" tries now.
+        </Notice>
+      </Show>
+
       <div class="grid grid-cols-4 gap-3">
         <Stat label="Connected nodes" value={`${net()?.verified ?? 0}`} sub={`${net()?.peers.length ?? 0} connections · ${net()?.kad_peers ?? 0} in DHT`} />
         <Stat label="Chain height" value={height()} sub={blockTime() ? new Date(blockTime()).toLocaleTimeString() : "from relayed reads"} />
