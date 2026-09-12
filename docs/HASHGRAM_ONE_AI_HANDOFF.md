@@ -212,8 +212,10 @@ screens are to be removed by the desktop task, not by platform work.
 
 ## 15. Git
 
-Branch `hashgram-one`, 75 commits on top of `main` (`17c1f1e`). Not pushed
-by the transformation session; push the branch and open a PR against
-`main` in `deepdrogo/hashgram_windows`. The public `deepdrogo/hashgram`
+Branch `hashgram-one`, 16 commits on top of `main` (`17c1f1e`), pushed to
+`origin` (`deepdrogo/hashgram_windows`) on 2026-09-12. Open a PR against
+`main` when reviewed. The genesis node runs the release binaries built
+from this branch (`/usr/local/bin/hashgram-node`, previous binary kept as
+`hashgram-node.prev`). The public `deepdrogo/hashgram`
 repository lags this one (it does not even contain the chain relay) and
 should be synced separately.
