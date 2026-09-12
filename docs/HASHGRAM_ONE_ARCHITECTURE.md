@@ -134,7 +134,7 @@ Detailed spec: `HASHMAIL.md`.
   cannot be reordered, dropped or truncated. Streaming: encrypt/decrypt one
   segment at a time; upload/download resume at chunk granularity through the
   existing `missing_chunks` protocol.
-* **Manifest.** `DriveManifest{entries, shares, revision}` is the whole tree
+* **Manifest.** `DriveManifest{entries, shares, tombstones, revision}` is the whole tree
   (folders are entries with `kind=FOLDER`; children point at `parent_id`).
   Encrypted with the Drive manifest key (random at Drive creation, shared to
   the owner's other devices via `DeviceSync.DriveKeyring`, never derived from
@@ -142,8 +142,10 @@ Detailed spec: `HASHMAIL.md`.
   blob. Vault keeps `{drive_id, manifest_key, manifest_cid, revision}`.
 * **Concurrency.** `hashgram-app::drive::merge(a, b)`: per-entry
   last-writer-wins by `modified_at_ms` then device key; versions are unioned;
-  a trashed entry beats an untrashed one with older modification. Revision =
-  max+1. Deterministic, tested.
+  a trashed entry beats an untrashed one with older modification;
+  permanent deletes leave tombstones so a concurrent device cannot
+  resurrect the entry (an edit after the delete wins). Revision = max+1.
+  Deterministic and commutative, tested.
 * **Versions, trash, restore.** Every overwrite appends the previous
   `DriveObjectRef` to `versions` (bounded, oldest evicted); trash is a flag;
   restore clears it; permanent delete removes the entry (blobs remain until
@@ -261,12 +263,15 @@ Hashgram One clients to ship.
 
 See `MULTI_DEVICE_SECURITY.md`. Summary: devices are on-chain; MLS groups hold
 every device; `devices::reconcile()` removes revoked devices from every group
-the local device is in (commit per group) and adds new devices on next send;
-Drive manifest key and contacts travel via `DeviceSync` in the self-group;
-a revoked device stops receiving from the next epoch of each group but keeps
-what it already has (unavoidable). Recovery: mnemonic (root), guardian
-recovery (on chain, existing), and — new — encrypted vault backup export
-(`account::export_backup`) that the operator of any hosting cannot decrypt.
+the local device is in (commit per group) and adds missing active devices;
+Drive manifest key, contacts and mail flags travel via `DeviceSync` in the
+self-group; a revoked device stops receiving from the next epoch of each
+group but keeps what it already has (unavoidable); `Drive::rekey` re-seals
+a file under a fresh key and revokes its live shares. Recovery: mnemonic
+(root), guardian recovery (on chain, existing), and — new — the encrypted
+vault backup (`hashgram_sdk::backup::export_backup` / `import_backup`,
+format `HGBKUP` v1, Argon2id 256 MiB + XChaCha20-Poly1305, device seed and
+MLS state deliberately excluded) that the host of the file cannot decrypt.
 
 ## 14. Sync engine
 
@@ -310,9 +315,34 @@ Node metrics extended: `hashgram_blob_incomplete_expired_total`,
 SDK emits `tracing` spans; never logs plaintext, keys, subjects or addresses
 at info level (subjects/bodies never at any level).
 
-## 19. What is not built (honest list)
+## 19. Verification
 
-Full SMTP listener/relay transport in the gateway (mapping, MIME conversion
-and policy are implemented and tested; the socket layer is a documented
-TODO); Merkle light client; push notifications; group-call E2EE; storage
-market escrow module; equivocation detection in the indexer.
+* Unit tests: `hashgram-app` (39 + fuzz smoke), `hashgram-sdk` (26),
+  node/p2p/proto fixes (F1–F6 tests), indexer Go tests.
+* `scripts/testnet/hashgram-one-e2e.sh`: a local devnet (mock chain
+  gateway with a DEVNET identity registry, one store/relay node, two
+  clients) driven through the same `HashgramOne` facade the desktop uses;
+  31 assertions over Mail (send, Requests filing, attachments inline +
+  live Drive, reply, receipts, threads, BCC), Drive (put/get, versions,
+  live share update, save-shared, revoke), People, Spaces (roles enforced),
+  Circles (poll tally), devices. Runs in ~45 s.
+* Mainnet (2026-09-12): `hashgram-client one drive put/get`, `one sync`,
+  `one balance`, `one network overview`, `one provider list` through the
+  genesis node's P2P relay — Drive round trip and balance verified.
+* Fuzz: `node/fuzz/fuzz_targets/app_message.rs` (+ mirrored smoke test).
+
+## 20. What is not built (honest list)
+
+* Mail gateway: see `MAIL_GATEWAY.md` for the exact implemented/stubbed
+  split (SMTP transport details, TLS, DKIM key handling).
+* Storage lease RPC bodies (`LeaseOffer` etc.) and provider-side
+  acceptance: the client model, signing, verify-before-pay and payment are
+  implemented (`hashgram_sdk::storage_lease`); the wire arms and node side
+  are protocol v1.1 work (`ADR_HASH_STORAGE_MARKET.md` §5).
+* Merkle light client; push notifications; group-call E2EE; storage market
+  escrow module (`x/storagemarket`, consensus upgrade); equivocation
+  detection in the indexer; protocol v1.1 signing changes (F1 purpose, F2
+  responder binding); the Go-side consensus fixes G1–G6.
+* Multi-device caveat: two devices that each created a Drive before ever
+  syncing keep separate Drives (`Drive::apply_keyring` refuses to merge
+  different drive ids); the user picks one.
