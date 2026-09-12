@@ -78,8 +78,8 @@ export function PersonLabel(props: { person: Person; size?: "sm" | "md" | "lg"; 
 export function Who(props: { address: string; class?: string; me?: boolean; size?: "sm" | "md" | "lg" }) {
   const isMe = () => props.me || store.status()?.address === props.address;
   const [name] = createResource(
-    () => props.address,
-    (a) => (store.locked() ? Promise.resolve("") : ipc.peopleUsernameOf(a).catch(() => "")),
+    () => ({ a: props.address, locked: store.locked() }),
+    (k) => (k.locked || !k.a ? Promise.resolve("") : ipc.peopleUsernameOf(k.a).catch(() => "")),
   );
   return (
     <span class={`inline-flex min-w-0 items-baseline gap-1.5 ${props.class ?? ""}`} title={props.address}>

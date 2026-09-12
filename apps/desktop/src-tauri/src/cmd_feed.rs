@@ -96,7 +96,7 @@ pub async fn feed_thread(state: S<'_>, post: String) -> CmdResult<Option<PostThr
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     if one.feed().thread(&post)?.is_none() {
-        let _ = one.feed().fetch(&[post.clone()]).await;
+        let _ = one.feed().fetch(std::slice::from_ref(&post)).await;
     }
     Ok(one.feed().thread(&post)?)
 }

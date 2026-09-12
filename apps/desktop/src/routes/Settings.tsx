@@ -422,6 +422,8 @@ function AdvancedTab(props: { s: Settings; patch: (f: (s: Settings) => void) => 
 
 function AboutTab() {
   const [about] = createResource(() => ipc.aboutInfo());
+  const [memBytes] = createResource(() => ipc.perfMemory().catch(() => 0));
+  const perfMem = () => memBytes() ?? 0;
   return (
     <Show when={about()}>
       {(a) => (
@@ -473,10 +475,4 @@ function AboutTab() {
       )}
     </Show>
   );
-}
-
-let memCache = 0;
-function perfMem() {
-  void ipc.perfMemory().then((m) => (memCache = m)).catch(() => undefined);
-  return memCache;
 }

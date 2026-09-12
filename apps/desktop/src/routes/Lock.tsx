@@ -91,7 +91,7 @@ export function Lock(props: { onUnlocked: () => void }) {
             <p class="text-xs text-muted">{store.status()?.link_error ? `Network: ${store.status()?.link_error}` : "Connecting to the network in the background…"}</p>
           </Show>
           <button type="button" class="text-xs text-muted hover:text-fg" onClick={() => setForgot((v) => !v)}>
-            Forgot passphrase?
+            Lost the passphrase? There is no reset — read what you can do
           </button>
           <Show when={forgot()}>
             <Notice title="There is no reset">

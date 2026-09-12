@@ -37,6 +37,7 @@ export function MailList(props: {
                 <span class="dot dot-ok shrink-0" aria-label="unread" />
               </Show>
               <span class={`min-w-0 flex-1 truncate text-[13px] ${m.read ? "" : "font-semibold"}`}>
+                {/* The authenticated sender resolved on chain — never the claimed From hint. */}
                 <Show when={m.outgoing} fallback={<Who address={m.from} />}>
                   <span class="text-muted">To </span>
                   <Show when={m.to[0]} fallback={<span class="text-muted">—</span>}>

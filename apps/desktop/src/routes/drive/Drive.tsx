@@ -81,7 +81,9 @@ export function DriveRoute() {
 
   onMount(async () => {
     const un = await on("drive:progress", (p) => {
-      setProgress((m) => ({ ...m, [p.op]: p }));
+      // Rust only fills `message` on failure; keep the file name we recorded
+      // when the upload was started so the row stays readable.
+      setProgress((m) => ({ ...m, [p.op]: { ...p, message: p.stage === "failed" ? p.message : m[p.op]?.message || p.message } }));
       if (p.stage === "done" || p.stage === "failed") {
         setTimeout(() => setProgress((m) => { const n = { ...m }; delete n[p.op]; return n; }), 4000);
         if (p.stage === "done") { store.bump("drive"); }

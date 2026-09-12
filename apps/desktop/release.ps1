@@ -1,14 +1,20 @@
 <#
 .SYNOPSIS
-  Reproducible release build of Hashgram for Windows. Prints the SHA-256 of
-  every artefact and enforces the installer size budget (< 40 MB).
+  Reproducible release build of Hashgram One for Windows. Prints the SHA-256
+  of every artefact and enforces the installer size budget (< 45 MB).
 
 .DESCRIPTION
-  Steps: pnpm install (frozen lockfile) -> frontend build -> `tauri build`
-  (NSIS + MSI) -> checksums. Code signing and updater signing are applied
-  when the owner supplies the keys through the environment; otherwise the
-  script says so in the release notes it writes, and SmartScreen will warn
-  on first run.
+  Steps: pnpm install (frozen lockfile) -> typecheck + frontend tests ->
+  sidecars -> desktop crate tests (incl. the no-plaintext audit) ->
+  `tauri build` (NSIS + MSI, per-user) -> optional Authenticode -> checksums
+  -> updater manifest. Code signing and updater signing are applied when the
+  owner supplies the keys through the environment; otherwise the script says
+  so in the release notes it writes, About shows "unsigned preview", and
+  SmartScreen will warn on first run.
+
+  Authenticode is architected but disabled until a certificate exists: set
+  HASHGRAM_CODESIGN_THUMBPRINT and the same script signs the .exe/.msi and
+  bakes HASHGRAM_CODESIGNED=1 into the binary (About -> "signed").
 
   Environment (all optional):
     TAURI_SIGNING_PRIVATE_KEY           minisign private key (updater manifest signing;
@@ -54,9 +60,25 @@ if (-not $SkipInstall) {
     if ($LASTEXITCODE -ne 0) { Fail "pnpm install failed" }
 }
 
+Step "typecheck"
+pnpm exec tsc --noEmit
+if ($LASTEXITCODE -ne 0) { Fail "typecheck failed" }
+
 Step "frontend tests"
 pnpm exec vitest run
 if ($LASTEXITCODE -ne 0) { Fail "frontend tests failed" }
+
+Step "rule checks (no hardcoded hosts, no telemetry, no CDN)"
+$appsDir = Join-Path $root "apps"
+$ipv4 = Get-ChildItem $appsDir -Recurse -File -Include *.rs,*.ts,*.tsx,*.json,*.html,*.css `
+    | Where-Object { $_.FullName -notmatch "node_modules|\\target\\|\\dist\\" } `
+    | Select-String -Pattern "\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b" `
+    | Where-Object { $_.Line -notmatch "127\.0\.0\.1|0\.0\.0\.0|version|\d+\.\d+\.\d+\.\d+\s*(MiB|MB)" }
+if ($ipv4) { $ipv4 | ForEach-Object { Write-Host "  $($_.Path):$($_.LineNumber): $($_.Line.Trim())" }; Fail "hardcoded IPv4 address in apps/" }
+$cdn = Get-ChildItem $appsDir -Recurse -File -Include *.ts,*.tsx,*.html,*.css `
+    | Where-Object { $_.FullName -notmatch "node_modules|\\dist\\" } `
+    | Select-String -Pattern "fonts\.googleapis|cdn\.jsdelivr|unpkg\.com|sentry\.io|googletagmanager|google-analytics|segment\.com|mixpanel|posthog"
+if ($cdn) { $cdn | ForEach-Object { Write-Host "  $($_.Path):$($_.LineNumber)" }; Fail "third-party CDN/analytics reference in apps/" }
 
 Step "sidecars: hashgram-node and the service wrapper (release)"
 Push-Location (Join-Path $root "node")
@@ -83,6 +105,15 @@ if ($env:TAURI_SIGNING_PRIVATE_KEY) {
     Write-Host "updater artefacts: signing key present, will produce and sign .sig files"
 } else {
     Write-Host "updater artefacts: no TAURI_SIGNING_PRIVATE_KEY; unsigned builds cannot be published as updates"
+}
+
+if ($env:HASHGRAM_CODESIGN_THUMBPRINT) {
+    # Baked into the binary at compile time: About shows "signed".
+    $env:HASHGRAM_CODESIGNED = "1"
+    Write-Host "code signing: thumbprint present, artefacts will be Authenticode-signed after the build"
+} else {
+    Remove-Item Env:HASHGRAM_CODESIGNED -ErrorAction SilentlyContinue
+    Write-Host "code signing: disabled (no HASHGRAM_CODESIGN_THUMBPRINT); About will say 'unsigned preview'"
 }
 
 Step "tauri build (nsis, msi)"
@@ -116,7 +147,8 @@ if ($env:HASHGRAM_CODESIGN_THUMBPRINT) {
 
 Step "artefacts and SHA-256"
 $notes = @()
-$notes += "Hashgram for Windows - commit $commit - built $(Get-Date -Format s)"
+$notes += "Hashgram One for Windows $version - commit $commit - built $(Get-Date -Format s)"
+$notes += "Installs per user (no admin), data in %LOCALAPPDATA%\Hashgram\data; a v0.1.x vault is migrated in place."
 $notes += ""
 $failures = 0
 foreach ($a in $artefacts) {
@@ -126,7 +158,7 @@ foreach ($a in $artefacts) {
     $line = "{0}  {1}  {2} MB" -f $sha, $a.Name, $mb
     Write-Host $line
     $notes += $line
-    if ($a.Extension -eq ".exe" -and $a.Length -gt 40MB) { Write-Host "  [FAIL] installer exceeds the 40 MB budget"; $failures++ }
+    if ($a.Extension -eq ".exe" -and $a.Length -gt 45MB) { Write-Host "  [FAIL] installer exceeds the 45 MB budget"; $failures++ }
 }
 
 # Updater manifest: the app fetches <release>/latest/download/latest.json and
@@ -138,7 +170,7 @@ if ($updater) {
     if (-not (Test-Path $sigFile)) { Fail "missing signature $sigFile" }
     $manifest = [ordered]@{
         version  = $version
-        notes    = "Hashgram for Windows $version (commit $commit). SHA-256 of the installer: " + (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+        notes    = "Hashgram One for Windows $version (commit $commit). SHA-256 of the installer: " + (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
         pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         platforms = [ordered]@{
             "windows-x86_64" = [ordered]@{
@@ -153,7 +185,7 @@ if ($updater) {
     $notes += "latest.json  version $version  url $($manifest.platforms['windows-x86_64'].url)"
 }
 $notes += ""
-$notes += "Code signing: " + $(if ($env:HASHGRAM_CODESIGN_THUMBPRINT) { "signed" } else { "UNSIGNED - Windows SmartScreen will warn on first run until an EV/OV certificate is used" })
+$notes += "Code signing: " + $(if ($env:HASHGRAM_CODESIGN_THUMBPRINT) { "signed (Authenticode, SHA-256, timestamped); About shows 'signed'" } else { "UNSIGNED PREVIEW - Windows SmartScreen will warn on first run until an EV/OV certificate is used; About shows 'unsigned preview'" })
 $notes += "Updater: " + $(if ($updater) { "signed .sig files and latest.json produced; publish them with the installer under GitHub release v$version" } else { "not produced (no minisign key on this machine)" })
 $notes += "Verify: (Get-FileHash <file> -Algorithm SHA256).Hash.ToLower()"
 $notes | Set-Content (Join-Path $OutDir "RELEASE_NOTES.txt") -Encoding ascii

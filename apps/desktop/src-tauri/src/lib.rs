@@ -20,6 +20,9 @@
         clippy::integer_division
     )
 )]
+// Unit conversions for display (bytes → MiB, ms → s) truncate on purpose;
+// Tauri commands mirror form fields one-to-one.
+#![allow(clippy::integer_division, clippy::too_many_arguments)]
 
 pub mod chain_proxy;
 pub mod cmd_drive;
