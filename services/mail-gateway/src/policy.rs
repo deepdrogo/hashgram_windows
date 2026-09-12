@@ -70,7 +70,9 @@ pub enum Decision {
 #[must_use]
 pub fn decide_inbound(policy: &PolicySection, auth: &AuthResults, spam_score: u32) -> Decision {
     if policy.require_spf_or_dkim && !auth.authenticated() {
-        return Decision::Reject("5.7.1 message not authenticated (SPF or DKIM pass required)".into());
+        return Decision::Reject(
+            "5.7.1 message not authenticated (SPF or DKIM pass required)".into(),
+        );
     }
     if policy.reject_spam_score_over > 0 && spam_score > policy.reject_spam_score_over {
         return Decision::Reject(format!(
@@ -87,7 +89,12 @@ pub fn allow_outbound(policy: &PolicySection, sender_is_contact: bool) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -101,13 +108,19 @@ mod tests {
 
     #[test]
     fn default_policy_accepts_everything() {
-        assert_eq!(decide_inbound(&pol(false, 0, false), &AuthResults::none(), 999), Decision::Accept);
+        assert_eq!(
+            decide_inbound(&pol(false, 0, false), &AuthResults::none(), 999),
+            Decision::Accept
+        );
     }
 
     #[test]
     fn spf_or_dkim_required() {
         let p = pol(true, 0, false);
-        assert!(matches!(decide_inbound(&p, &AuthResults::none(), 0), Decision::Reject(_)));
+        assert!(matches!(
+            decide_inbound(&p, &AuthResults::none(), 0),
+            Decision::Reject(_)
+        ));
         let mut a = AuthResults::none();
         a.dkim = "pass".into();
         assert_eq!(decide_inbound(&p, &a, 0), Decision::Accept);
@@ -121,8 +134,14 @@ mod tests {
     #[test]
     fn spam_threshold() {
         let p = pol(false, 500, false);
-        assert_eq!(decide_inbound(&p, &AuthResults::none(), 500), Decision::Accept);
-        assert!(matches!(decide_inbound(&p, &AuthResults::none(), 501), Decision::Reject(_)));
+        assert_eq!(
+            decide_inbound(&p, &AuthResults::none(), 500),
+            Decision::Accept
+        );
+        assert!(matches!(
+            decide_inbound(&p, &AuthResults::none(), 501),
+            Decision::Reject(_)
+        ));
     }
 
     #[test]
@@ -134,6 +153,9 @@ mod tests {
 
     #[test]
     fn auth_strings() {
-        assert_eq!(AuthResults::none().as_strings(), vec!["spf=none", "dkim=none", "dmarc=none"]);
+        assert_eq!(
+            AuthResults::none().as_strings(),
+            vec!["spf=none", "dkim=none", "dmarc=none"]
+        );
     }
 }

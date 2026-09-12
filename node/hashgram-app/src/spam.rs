@@ -82,7 +82,8 @@ impl RateWindow {
     /// Records an arrival and reports whether the window is exceeded for
     /// the network as a whole or for this sender.
     pub fn record(&mut self, sender: &str, now_secs: u64) -> (bool, bool) {
-        self.arrivals.retain(|(_, t)| now_secs.saturating_sub(*t) < 3600);
+        self.arrivals
+            .retain(|(_, t)| now_secs.saturating_sub(*t) < 3600);
         self.arrivals.push((sender.to_owned(), now_secs));
         if self.arrivals.len() > 4096 {
             let excess = self.arrivals.len() - 4096;
@@ -214,12 +215,24 @@ mod tests {
         let mut w = RateWindow::default();
         let m = msg("hash1a", 1);
         assert_eq!(
-            dispose(&SenderFacts { is_contact: true, ..Default::default() }, &m, &mut w, 0),
+            dispose(
+                &SenderFacts {
+                    is_contact: true,
+                    ..Default::default()
+                },
+                &m,
+                &mut w,
+                0
+            ),
             Disposition::Inbox
         );
         assert_eq!(
             dispose(
-                &SenderFacts { is_blocked: true, is_contact: true, ..Default::default() },
+                &SenderFacts {
+                    is_blocked: true,
+                    is_contact: true,
+                    ..Default::default()
+                },
                 &m,
                 &mut w,
                 0
@@ -236,9 +249,15 @@ mod tests {
             username_age_days: Some(400),
             ..Default::default()
         };
-        assert_eq!(dispose(&facts, &msg("hash1a", 1), &mut w, 0), Disposition::Requests);
+        assert_eq!(
+            dispose(&facts, &msg("hash1a", 1), &mut w, 0),
+            Disposition::Requests
+        );
         // A stranger without a username is still a request, not spam.
-        assert_eq!(dispose(&SenderFacts::default(), &msg("hash1z", 1), &mut w, 0), Disposition::Requests);
+        assert_eq!(
+            dispose(&SenderFacts::default(), &msg("hash1z", 1), &mut w, 0),
+            Disposition::Requests
+        );
         let bulk = msg("hash1b", 50);
         assert_eq!(
             dispose(&SenderFacts::default(), &bulk, &mut w, 0),
@@ -249,14 +268,20 @@ mod tests {
     #[test]
     fn per_sender_rate_limit() {
         let mut w = RateWindow::default();
-        let facts = SenderFacts { has_username: true, ..Default::default() };
+        let facts = SenderFacts {
+            has_username: true,
+            ..Default::default()
+        };
         let mut last = Disposition::Requests;
         for _ in 0..(MAX_PER_SENDER_PER_HOUR + 1) {
             last = dispose(&facts, &msg("hash1flood", 1), &mut w, 100);
         }
         assert_eq!(last, Disposition::Spam);
         // Window expiry.
-        assert_eq!(dispose(&facts, &msg("hash1flood", 1), &mut w, 100 + 3601), Disposition::Requests);
+        assert_eq!(
+            dispose(&facts, &msg("hash1flood", 1), &mut w, 100 + 3601),
+            Disposition::Requests
+        );
     }
 
     #[test]
@@ -267,7 +292,11 @@ mod tests {
         for i in 0..(MAX_UNKNOWN_PER_HOUR + 1) {
             d = dispose(&facts, &msg(&format!("hash1s{i}"), 1), &mut w, 5);
         }
-        assert_eq!(d, Disposition::Spam, "past the hourly window low-score strangers go to spam");
+        assert_eq!(
+            d,
+            Disposition::Spam,
+            "past the hourly window low-score strangers go to spam"
+        );
     }
 
     #[test]
@@ -285,6 +314,14 @@ mod tests {
             spam_score: 10,
             ..Default::default()
         });
-        assert!(trust_score(&SenderFacts { has_username: true, ..Default::default() }, &m) >= 0);
+        assert!(
+            trust_score(
+                &SenderFacts {
+                    has_username: true,
+                    ..Default::default()
+                },
+                &m
+            ) >= 0
+        );
     }
 }

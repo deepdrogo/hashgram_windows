@@ -212,8 +212,12 @@ impl MailState {
             .or_default()
             .push((r.received_at_ms, id.to_owned()));
         let thread = hex::encode(&r.message.thread_id);
-        self.by_thread.entry(thread.clone()).or_default().push(id.to_owned());
-        self.index.insert(id.to_owned(), (r.folder.clone(), r.read, r.starred, thread));
+        self.by_thread
+            .entry(thread.clone())
+            .or_default()
+            .push(id.to_owned());
+        self.index
+            .insert(id.to_owned(), (r.folder.clone(), r.read, r.starred, thread));
     }
 
     fn unindex(&mut self, id: &str) {
@@ -247,7 +251,10 @@ impl<'a> Mail<'a> {
     /// Resolves user-typed recipients into `MailAddress`es through the
     /// chain. External addresses are refused here; the gateway flow wraps
     /// them (see `docs/MAIL_GATEWAY.md`).
-    pub async fn resolve_recipients(&mut self, inputs: &[String]) -> Result<Vec<app::MailAddress>, SdkError> {
+    pub async fn resolve_recipients(
+        &mut self,
+        inputs: &[String],
+    ) -> Result<Vec<app::MailAddress>, SdkError> {
         let mut out = Vec::with_capacity(inputs.len());
         for i in inputs {
             let r = self.one.people().resolve(i).await?;
@@ -336,7 +343,11 @@ impl<'a> Mail<'a> {
             }
         }
         for (recipient, copy) in &out.bcc_copies {
-            match self.one.conversation_group(std::slice::from_ref(&recipient.address)).await {
+            match self
+                .one
+                .conversation_group(std::slice::from_ref(&recipient.address))
+                .await
+            {
                 Ok(gid) => {
                     if let Err(e) = self
                         .one
@@ -387,18 +398,21 @@ impl<'a> Mail<'a> {
 
     /// Reply (sender only) draft skeleton for a stored message.
     pub fn reply_draft(&self, id: &str, all: bool) -> Result<m::Draft, SdkError> {
-        let rec = self.get(id)?.ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
+        let rec = self
+            .get(id)?
+            .ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
         let me = self.one.account.address();
         let r = if all {
             m::reply_all_recipients(&rec.message, me)
         } else {
             m::reply_recipients(&rec.message)
         };
-        let subject = if m::normalised_subject(&rec.message.subject) == rec.message.subject.to_lowercase() {
-            format!("Re: {}", rec.message.subject)
-        } else {
-            rec.message.subject.clone()
-        };
+        let subject =
+            if m::normalised_subject(&rec.message.subject) == rec.message.subject.to_lowercase() {
+                format!("Re: {}", rec.message.subject)
+            } else {
+                rec.message.subject.clone()
+            };
         Ok(m::Draft {
             to: r.to,
             cc: r.cc,
@@ -414,7 +428,9 @@ impl<'a> Mail<'a> {
 
     /// Forward draft skeleton.
     pub fn forward_draft(&self, id: &str) -> Result<m::Draft, SdkError> {
-        let rec = self.get(id)?.ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
+        let rec = self
+            .get(id)?
+            .ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
         Ok(m::forward_draft(app::MailAddress::default(), &rec.message))
     }
 
@@ -447,7 +463,11 @@ impl<'a> Mail<'a> {
 
     /// Handles an incoming application message that concerns Mail.
     /// Returns the stored record when a new message was filed.
-    pub(crate) async fn handle_incoming(&mut self, r: &Received, appmsg: &app::AppMessage) -> Result<Option<MailRecord>, SdkError> {
+    pub(crate) async fn handle_incoming(
+        &mut self,
+        r: &Received,
+        appmsg: &app::AppMessage,
+    ) -> Result<Option<MailRecord>, SdkError> {
         use app::app_message::Body as B;
         match &appmsg.body {
             Some(B::Mail(msg)) => self.receive_mail(r, msg).await,
@@ -459,7 +479,11 @@ impl<'a> Mail<'a> {
         }
     }
 
-    async fn receive_mail(&mut self, r: &Received, msg: &app::MailMessage) -> Result<Option<MailRecord>, SdkError> {
+    async fn receive_mail(
+        &mut self,
+        r: &Received,
+        msg: &app::MailMessage,
+    ) -> Result<Option<MailRecord>, SdkError> {
         m::validate(msg)?;
         let id = hex::encode(&msg.message_id);
         if self.one.mail_state.index.contains_key(&id) {
@@ -483,16 +507,42 @@ impl<'a> Mail<'a> {
         let mut facts = self.one.people_state.contacts.sender_facts(&r.sender);
         if !facts.has_username {
             // The chain knows whether this stranger paid for a name.
-            facts.has_username = !self.one.people().username_of(&r.sender).await.unwrap_or_default().is_empty();
+            facts.has_username = !self
+                .one
+                .people()
+                .username_of(&r.sender)
+                .await
+                .unwrap_or_default()
+                .is_empty();
         }
-        facts.previously_written_to = self.one.mail_state.by_folder.get(folder::SENT).map(|v| {
-            v.iter().any(|(_, sid)| {
-                self.get(sid).ok().flatten().map(|rec| {
-                    rec.message.to.iter().chain(rec.message.cc.iter()).any(|a| a.address == r.sender)
-                }).unwrap_or(false)
+        facts.previously_written_to = self
+            .one
+            .mail_state
+            .by_folder
+            .get(folder::SENT)
+            .map(|v| {
+                v.iter().any(|(_, sid)| {
+                    self.get(sid)
+                        .ok()
+                        .flatten()
+                        .map(|rec| {
+                            rec.message
+                                .to
+                                .iter()
+                                .chain(rec.message.cc.iter())
+                                .any(|a| a.address == r.sender)
+                        })
+                        .unwrap_or(false)
+                })
             })
-        }).unwrap_or(false);
-        facts.prior_messages = self.one.mail_state.by_folder.get(folder::INBOX).map(|v| v.len().min(100) as u32).unwrap_or(0);
+            .unwrap_or(false);
+        facts.prior_messages = self
+            .one
+            .mail_state
+            .by_folder
+            .get(folder::INBOX)
+            .map(|v| v.len().min(100) as u32)
+            .unwrap_or(0);
         if claimed != r.sender && msg.origin != app::MailOrigin::ExternalGateway as i32 {
             // Impersonation of another address is dropped outright.
             facts.is_blocked = true;
@@ -500,7 +550,9 @@ impl<'a> Mail<'a> {
         let score = spam::trust_score(&facts, msg);
         let now = hashgram_app::ids::now_secs();
         let disposition = spam::dispose(&facts, msg, &mut self.one.mail_state.window, now);
-        self.one.store.put(NS_META, b"rate_window", &self.one.mail_state.window)?;
+        self.one
+            .store
+            .put(NS_META, b"rate_window", &self.one.mail_state.window)?;
         let folder_name = match disposition {
             spam::Disposition::Drop => return Ok(None),
             spam::Disposition::Inbox => folder::INBOX,
@@ -531,7 +583,11 @@ impl<'a> Mail<'a> {
                     kind: app::MailReceiptKind::Delivered as i32,
                     at_ms: hashgram_app::ids::now_ms(),
                 };
-                if let Err(e) = self.one.send_app(&gid, app::app_message::Body::MailReceipt(receipt)).await {
+                if let Err(e) = self
+                    .one
+                    .send_app(&gid, app::app_message::Body::MailReceipt(receipt))
+                    .await
+                {
                     debug!(error = %e, "delivery receipt not sent");
                 }
             }
@@ -541,7 +597,9 @@ impl<'a> Mail<'a> {
 
     fn receive_receipt(&mut self, sender: &str, rc: &app::MailReceipt) -> Result<(), SdkError> {
         let id = hex::encode(&rc.message_id);
-        let Some(mut rec) = self.get(&id)? else { return Ok(()) };
+        let Some(mut rec) = self.get(&id)? else {
+            return Ok(());
+        };
         if !rec.outgoing {
             return Ok(());
         }
@@ -613,10 +671,20 @@ impl<'a> Mail<'a> {
         let key = hex::decode(id).map_err(|e| SdkError::Invalid(e.to_string()))?;
         self.one.store.put(NS_MSG, &key, rec)?;
         self.one.mail_state.unindex(id);
-        self.one.mail_state.insert_sorted(&rec.folder, rec.received_at_ms, id);
+        self.one
+            .mail_state
+            .insert_sorted(&rec.folder, rec.received_at_ms, id);
         let thread = hex::encode(&rec.message.thread_id);
-        self.one.mail_state.by_thread.entry(thread.clone()).or_default().push(id.to_owned());
-        self.one.mail_state.index.insert(id.to_owned(), (rec.folder.clone(), rec.read, rec.starred, thread));
+        self.one
+            .mail_state
+            .by_thread
+            .entry(thread.clone())
+            .or_default()
+            .push(id.to_owned());
+        self.one.mail_state.index.insert(
+            id.to_owned(),
+            (rec.folder.clone(), rec.read, rec.starred, thread),
+        );
         Ok(())
     }
 
@@ -634,7 +702,12 @@ impl<'a> Mail<'a> {
     }
 
     /// A page of a folder, newest first, before `before_ms` (0 = now).
-    pub fn list(&self, folder_name: &str, before_ms: u64, limit: usize) -> Result<Vec<MailSummary>, SdkError> {
+    pub fn list(
+        &self,
+        folder_name: &str,
+        before_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<MailSummary>, SdkError> {
         let Some(v) = self.one.mail_state.by_folder.get(folder_name) else {
             return Ok(Vec::new());
         };
@@ -692,7 +765,10 @@ impl<'a> Mail<'a> {
         }
         Ok(Some(Thread {
             id: thread_id.to_owned(),
-            subject: msgs.first().map(|r| r.message.subject.clone()).unwrap_or_default(),
+            subject: msgs
+                .first()
+                .map(|r| r.message.subject.clone())
+                .unwrap_or_default(),
             unread: msgs.iter().filter(|r| !r.read).count(),
             participants: participants.into_iter().collect(),
             messages: msgs,
@@ -700,7 +776,12 @@ impl<'a> Mail<'a> {
     }
 
     /// Threads in a folder, newest activity first: one summary per thread.
-    pub fn threads(&self, folder_name: &str, before_ms: u64, limit: usize) -> Result<Vec<MailSummary>, SdkError> {
+    pub fn threads(
+        &self,
+        folder_name: &str,
+        before_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<MailSummary>, SdkError> {
         let mut seen = BTreeSet::new();
         let mut out = Vec::new();
         for s in self.list(folder_name, before_ms, limit * 4)? {
@@ -714,25 +795,42 @@ impl<'a> Mail<'a> {
         Ok(out)
     }
 
-    fn set_flag(&mut self, id: &str, f: impl Fn(&mut MailRecord), hint: impl Fn(&mut app::MailStateHint, Vec<u8>)) -> Result<(), SdkError> {
-        let mut rec = self.get(id)?.ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
+    fn set_flag(
+        &mut self,
+        id: &str,
+        f: impl Fn(&mut MailRecord),
+        hint: impl Fn(&mut app::MailStateHint, Vec<u8>),
+    ) -> Result<(), SdkError> {
+        let mut rec = self
+            .get(id)?
+            .ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
         f(&mut rec);
         self.put(id, &rec)?;
-        hint(&mut self.one.mail_state.pending_hint, rec.message.message_id.clone());
+        hint(
+            &mut self.one.mail_state.pending_hint,
+            rec.message.message_id.clone(),
+        );
         Ok(())
     }
 
     /// Marks read; sends a read receipt when the sender asked and settings
     /// allow.
     pub async fn mark_read(&mut self, id: &str, read: bool) -> Result<(), SdkError> {
-        let rec = self.get(id)?.ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
+        let rec = self
+            .get(id)?
+            .ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
         let was_unread = !rec.read;
         if read {
             self.set_flag(id, |r| r.read = true, |h, i| h.read.push(i))?;
         } else {
             self.set_flag(id, |r| r.read = false, |h, i| h.unread.push(i))?;
         }
-        if read && was_unread && !rec.outgoing && rec.message.request_read_receipt && self.one.mail_state.settings.send_read_receipts {
+        if read
+            && was_unread
+            && !rec.outgoing
+            && rec.message.request_read_receipt
+            && self.one.mail_state.settings.send_read_receipts
+        {
             if let Ok(gid) = hex::decode(&rec.group_id) {
                 let receipt = app::MailReceipt {
                     version: hashgram_app::version::MAIL_VERSION,
@@ -740,7 +838,10 @@ impl<'a> Mail<'a> {
                     kind: app::MailReceiptKind::Read as i32,
                     at_ms: hashgram_app::ids::now_ms(),
                 };
-                let _ = self.one.send_app(&gid, app::app_message::Body::MailReceipt(receipt)).await;
+                let _ = self
+                    .one
+                    .send_app(&gid, app::app_message::Body::MailReceipt(receipt))
+                    .await;
             }
         }
         Ok(())
@@ -780,7 +881,9 @@ impl<'a> Mail<'a> {
 
     /// Trash (or permanently delete if already in trash).
     pub fn trash(&mut self, id: &str) -> Result<(), SdkError> {
-        let rec = self.get(id)?.ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
+        let rec = self
+            .get(id)?
+            .ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
         if rec.folder == folder::TRASH {
             return self.delete(id);
         }
@@ -789,8 +892,14 @@ impl<'a> Mail<'a> {
 
     /// Permanently deletes.
     pub fn delete(&mut self, id: &str) -> Result<(), SdkError> {
-        let rec = self.get(id)?.ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
-        self.one.mail_state.pending_hint.deleted.push(rec.message.message_id.clone());
+        let rec = self
+            .get(id)?
+            .ok_or_else(|| SdkError::NotFound(format!("mail {id}")))?;
+        self.one
+            .mail_state
+            .pending_hint
+            .deleted
+            .push(rec.message.message_id.clone());
         self.remove(id)
     }
 
@@ -822,7 +931,14 @@ impl<'a> Mail<'a> {
     /// Messages carrying a label, newest first.
     pub fn by_label(&self, label: &str, limit: usize) -> Result<Vec<MailSummary>, SdkError> {
         let mut out = Vec::new();
-        let mut all: Vec<(u64, String)> = self.one.mail_state.by_folder.values().flatten().cloned().collect();
+        let mut all: Vec<(u64, String)> = self
+            .one
+            .mail_state
+            .by_folder
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
         all.sort();
         for (_, id) in all.iter().rev() {
             if let Some(r) = self.get(id)? {
@@ -866,16 +982,33 @@ impl<'a> Mail<'a> {
             return Ok(Vec::new());
         }
         let mut out = Vec::new();
-        let mut all: Vec<(u64, String)> = self.one.mail_state.by_folder.values().flatten().cloned().collect();
+        let mut all: Vec<(u64, String)> = self
+            .one
+            .mail_state
+            .by_folder
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
         all.sort();
         for (_, id) in all.iter().rev() {
             if let Some(r) = self.get(id)? {
                 let hit = r.message.subject.to_lowercase().contains(&q)
                     || r.message.body_text.to_lowercase().contains(&q)
                     || r.authenticated_sender.contains(&q)
-                    || r.message.from.as_ref().map(|a| a.username.to_lowercase().contains(&q)).unwrap_or(false)
-                    || r.message.to.iter().any(|a| a.address.contains(&q) || a.username.to_lowercase().contains(&q))
-                    || r.message.attachments.iter().any(|a| a.name.to_lowercase().contains(&q));
+                    || r.message
+                        .from
+                        .as_ref()
+                        .map(|a| a.username.to_lowercase().contains(&q))
+                        .unwrap_or(false)
+                    || r.message
+                        .to
+                        .iter()
+                        .any(|a| a.address.contains(&q) || a.username.to_lowercase().contains(&q))
+                    || r.message
+                        .attachments
+                        .iter()
+                        .any(|a| a.name.to_lowercase().contains(&q));
                 if hit {
                     out.push(summary(id, &r));
                     if out.len() >= limit {
@@ -897,7 +1030,14 @@ impl<'a> Mail<'a> {
             if days == 0 {
                 continue;
             }
-            for (at, id) in self.one.mail_state.by_folder.get(f).cloned().unwrap_or_default() {
+            for (at, id) in self
+                .one
+                .mail_state
+                .by_folder
+                .get(f)
+                .cloned()
+                .unwrap_or_default()
+            {
                 if now.saturating_sub(at) > u64::from(days) * 86_400_000 {
                     victims.push(id);
                 }
@@ -909,7 +1049,10 @@ impl<'a> Mail<'a> {
                 continue;
             }
             if let Some(r) = self.get(&id)? {
-                if r.message.expire_after_secs > 0 && now.saturating_sub(r.received_at_ms) > u64::from(r.message.expire_after_secs) * 1000 {
+                if r.message.expire_after_secs > 0
+                    && now.saturating_sub(r.received_at_ms)
+                        > u64::from(r.message.expire_after_secs) * 1000
+                {
                     victims.push(id);
                 }
             }
@@ -948,19 +1091,30 @@ impl<'a> Mail<'a> {
                 key.copy_from_slice(&b.key);
                 nonce.copy_from_slice(&b.nonce);
                 let pt = crate::blob::decrypt_private(&ct, &crate::blob::FileKey { key, nonce })?;
-                if !b.plaintext_hash.is_empty() && blake3::hash(&pt).as_bytes() != b.plaintext_hash.as_slice() {
-                    return Err(SdkError::Corrupt("attachment plaintext hash mismatch".into()));
+                if !b.plaintext_hash.is_empty()
+                    && blake3::hash(&pt).as_bytes() != b.plaintext_hash.as_slice()
+                {
+                    return Err(SdkError::Corrupt(
+                        "attachment plaintext hash mismatch".into(),
+                    ));
                 }
                 Ok(pt)
             }
-            Some(app::mail_attachment::Source::Drive(cap)) => self.one.drive().download_capability(cap).await,
+            Some(app::mail_attachment::Source::Drive(cap)) => {
+                self.one.drive().download_capability(cap).await
+            }
             None => Err(SdkError::Invalid("attachment has no source".into())),
         }
     }
 
     /// Builds an attachment from bytes: inline when small, otherwise an
     /// encrypted blob uploaded to store nodes.
-    pub async fn make_attachment(&mut self, name: &str, mime: &str, bytes: &[u8]) -> Result<app::MailAttachment, SdkError> {
+    pub async fn make_attachment(
+        &mut self,
+        name: &str,
+        mime: &str,
+        bytes: &[u8],
+    ) -> Result<app::MailAttachment, SdkError> {
         let hash = blake3::hash(bytes).as_bytes().to_vec();
         if bytes.len() <= m::MAX_INLINE_ATTACHMENT {
             return Ok(app::MailAttachment {
@@ -973,7 +1127,16 @@ impl<'a> Mail<'a> {
             });
         }
         let device = self.one.account.device()?;
-        let up = crate::blob::upload(&self.one.link, &self.one.network, &device, bytes, mime, true, 2).await?;
+        let up = crate::blob::upload(
+            &self.one.link,
+            &self.one.network,
+            &device,
+            bytes,
+            mime,
+            true,
+            2,
+        )
+        .await?;
         let key = hex::decode(up.key.unwrap_or_default()).unwrap_or_default();
         let nonce = hex::decode(up.nonce.unwrap_or_default()).unwrap_or_default();
         Ok(app::MailAttachment {
@@ -996,17 +1159,36 @@ impl<'a> Mail<'a> {
     }
 
     /// Builds a Drive-backed attachment from an existing Drive entry.
-    pub async fn attach_from_drive(&mut self, entry_id: &str, recipients: &[String], live: bool) -> Result<app::MailAttachment, SdkError> {
+    pub async fn attach_from_drive(
+        &mut self,
+        entry_id: &str,
+        recipients: &[String],
+        live: bool,
+    ) -> Result<app::MailAttachment, SdkError> {
         let cap = self
             .one
             .drive()
-            .share(entry_id, &recipients.join(","), if live { app::DriveShareMode::Live } else { app::DriveShareMode::Snapshot }, app::DrivePermission::Read, "")
+            .share(
+                entry_id,
+                &recipients.join(","),
+                if live {
+                    app::DriveShareMode::Live
+                } else {
+                    app::DriveShareMode::Snapshot
+                },
+                app::DrivePermission::Read,
+                "",
+            )
             .await?;
         Ok(app::MailAttachment {
             name: cap.name.clone(),
             mime: cap.mime.clone(),
             size: cap.size,
-            plaintext_hash: cap.object.as_ref().map(|o| o.plaintext_hash.clone()).unwrap_or_default(),
+            plaintext_hash: cap
+                .object
+                .as_ref()
+                .map(|o| o.plaintext_hash.clone())
+                .unwrap_or_default(),
             content_id: String::new(),
             source: Some(app::mail_attachment::Source::Drive(cap)),
         })
@@ -1043,7 +1225,12 @@ fn summary(id: &str, r: &MailRecord) -> MailSummary {
         thread_id: hex::encode(&r.message.thread_id),
         folder: r.folder.clone(),
         from: r.authenticated_sender.clone(),
-        from_username: r.message.from.as_ref().map(|a| a.username.clone()).unwrap_or_default(),
+        from_username: r
+            .message
+            .from
+            .as_ref()
+            .map(|a| a.username.clone())
+            .unwrap_or_default(),
         to: r.message.to.iter().map(|a| a.address.clone()).collect(),
         subject: r.message.subject.clone(),
         preview,

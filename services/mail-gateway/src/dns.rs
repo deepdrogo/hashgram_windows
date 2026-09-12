@@ -78,11 +78,15 @@ impl MxResolver for SystemResolver {
                 let msg = e.to_string();
                 if e.is_no_records_found() {
                     match self.inner.lookup_ip(fqdn.as_str()).await {
-                        Ok(ips) if ips.iter().next().is_some() => Ok(MxAnswer::Hosts(vec![MailHost {
-                            host: domain.to_owned(),
-                            preference: u16::MAX,
-                        }])),
-                        _ => Err(GatewayError::Dns(format!("{domain}: no MX and no address records"))),
+                        Ok(ips) if ips.iter().next().is_some() => {
+                            Ok(MxAnswer::Hosts(vec![MailHost {
+                                host: domain.to_owned(),
+                                preference: u16::MAX,
+                            }]))
+                        }
+                        _ => Err(GatewayError::Dns(format!(
+                            "{domain}: no MX and no address records"
+                        ))),
                     }
                 } else {
                     Err(GatewayError::Dns(format!("{domain}: {msg}")))
@@ -96,7 +100,11 @@ impl MxResolver for SystemResolver {
 /// MX when the record set is empty.
 #[must_use]
 pub fn order_hosts(mut hosts: Vec<MailHost>, domain: &str) -> MxAnswer {
-    if hosts.len() == 1 && hosts.first().is_some_and(|h| h.host.is_empty() && h.preference == 0) {
+    if hosts.len() == 1
+        && hosts
+            .first()
+            .is_some_and(|h| h.host.is_empty() && h.preference == 0)
+    {
         return MxAnswer::NullMx;
     }
     hosts.retain(|h| !h.host.is_empty());
@@ -106,7 +114,11 @@ pub fn order_hosts(mut hosts: Vec<MailHost>, domain: &str) -> MxAnswer {
             preference: u16::MAX,
         }]);
     }
-    hosts.sort_by(|a, b| a.preference.cmp(&b.preference).then_with(|| a.host.cmp(&b.host)));
+    hosts.sort_by(|a, b| {
+        a.preference
+            .cmp(&b.preference)
+            .then_with(|| a.host.cmp(&b.host))
+    });
     hosts.dedup_by(|a, b| a.host.eq_ignore_ascii_case(&b.host));
     MxAnswer::Hosts(hosts)
 }
@@ -128,7 +140,12 @@ impl MxResolver for StaticResolver {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -143,17 +160,32 @@ mod tests {
     fn ordering_and_null_mx() {
         assert_eq!(order_hosts(vec![h("", 0)], "example.com"), MxAnswer::NullMx);
         assert_eq!(
-            order_hosts(vec![h("b.example.com", 20), h("a.example.com", 10), h("A.example.com", 10)], "example.com"),
+            order_hosts(
+                vec![
+                    h("b.example.com", 20),
+                    h("a.example.com", 10),
+                    h("A.example.com", 10)
+                ],
+                "example.com"
+            ),
             MxAnswer::Hosts(vec![h("A.example.com", 10), h("b.example.com", 20)])
         );
-        assert_eq!(order_hosts(vec![], "example.com"), MxAnswer::Hosts(vec![h("example.com", u16::MAX)]));
+        assert_eq!(
+            order_hosts(vec![], "example.com"),
+            MxAnswer::Hosts(vec![h("example.com", u16::MAX)])
+        );
     }
 
     #[tokio::test]
     async fn static_resolver() {
         let mut r = StaticResolver::default();
-        r.table.insert("example.com".into(), MxAnswer::Hosts(vec![h("mx.example.com", 10)]));
-        assert!(matches!(r.resolve("Example.COM").await.unwrap(), MxAnswer::Hosts(v) if v.len() == 1));
+        r.table.insert(
+            "example.com".into(),
+            MxAnswer::Hosts(vec![h("mx.example.com", 10)]),
+        );
+        assert!(
+            matches!(r.resolve("Example.COM").await.unwrap(), MxAnswer::Hosts(v) if v.len() == 1)
+        );
         assert!(r.resolve("nope.org").await.is_err());
     }
 }

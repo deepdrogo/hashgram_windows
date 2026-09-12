@@ -77,19 +77,39 @@ impl Metrics {
     pub fn new() -> Self {
         let mut registry = Registry::with_prefix("hashgram_mail_gateway");
         let messages = Family::<OutcomeLabels, Counter>::default();
-        registry.register("messages", "Messages by direction and outcome", messages.clone());
+        registry.register(
+            "messages",
+            "Messages by direction and outcome",
+            messages.clone(),
+        );
         let smtp_messages_offered = Counter::default();
-        registry.register("smtp_messages_offered", "Messages offered through SMTP DATA, before parsing and policy", smtp_messages_offered.clone());
+        registry.register(
+            "smtp_messages_offered",
+            "Messages offered through SMTP DATA, before parsing and policy",
+            smtp_messages_offered.clone(),
+        );
         let sync_rounds = Counter::default();
         registry.register("sync_rounds", "Hashgram sync rounds", sync_rounds.clone());
         let sync_failures = Counter::default();
-        registry.register("sync_failures", "Hashgram sync rounds that failed", sync_failures.clone());
+        registry.register(
+            "sync_failures",
+            "Hashgram sync rounds that failed",
+            sync_failures.clone(),
+        );
         let queue_depth = Family::<QueueLabels, Gauge>::default();
         registry.register("queue_depth", "Retry queue depth", queue_depth.clone());
         let connected = Gauge::default();
-        registry.register("connected", "1 when a verified Hashgram peer is reachable", connected.clone());
+        registry.register(
+            "connected",
+            "1 when a verified Hashgram peer is reachable",
+            connected.clone(),
+        );
         let last_sync_ok = Gauge::default();
-        registry.register("last_sync_ok_seconds", "Unix time of the last successful sync round", last_sync_ok.clone());
+        registry.register(
+            "last_sync_ok_seconds",
+            "Unix time of the last successful sync round",
+            last_sync_ok.clone(),
+        );
         Self {
             registry: Mutex::new(registry),
             messages,
@@ -106,7 +126,9 @@ impl Metrics {
 
     /// Counts a message outcome.
     pub fn message(&self, direction: &'static str, outcome: &'static str) {
-        self.messages.get_or_create(&OutcomeLabels { direction, outcome }).inc();
+        self.messages
+            .get_or_create(&OutcomeLabels { direction, outcome })
+            .inc();
     }
 
     /// Sets the health flag.
@@ -142,14 +164,21 @@ async fn healthz(State(m): State<Arc<Metrics>>) -> impl IntoResponse {
         "uptime_secs": m.uptime_secs(),
     })
     .to_string();
-    let status = if m.is_healthy() { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    let status = if m.is_healthy() {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
     (status, [(header::CONTENT_TYPE, "application/json")], body)
 }
 
 async fn metrics(State(m): State<Arc<Metrics>>) -> impl IntoResponse {
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/openmetrics-text; version=1.0.0; charset=utf-8")],
+        [(
+            header::CONTENT_TYPE,
+            "application/openmetrics-text; version=1.0.0; charset=utf-8",
+        )],
         m.render(),
     )
 }
@@ -163,14 +192,25 @@ pub fn router(m: Arc<Metrics>) -> Router {
 }
 
 /// Serves until `shutdown` resolves.
-pub async fn serve(listen: SocketAddr, m: Arc<Metrics>, shutdown: impl std::future::Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
+pub async fn serve(
+    listen: SocketAddr,
+    m: Arc<Metrics>,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(listen).await?;
     info!(%listen, "http (healthz, metrics) listening");
-    axum::serve(listener, router(m)).with_graceful_shutdown(shutdown).await
+    axum::serve(listener, router(m))
+        .with_graceful_shutdown(shutdown)
+        .await
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -180,9 +220,13 @@ mod tests {
         m.message("inbound", "accepted");
         m.message("inbound", "accepted");
         m.message("outbound", "failed");
-        m.queue_depth.get_or_create(&QueueLabels { kind: "inbound" }).set(3);
+        m.queue_depth
+            .get_or_create(&QueueLabels { kind: "inbound" })
+            .set(3);
         let text = m.render();
-        assert!(text.contains("hashgram_mail_gateway_messages_total{direction=\"inbound\",outcome=\"accepted\"} 2"));
+        assert!(text.contains(
+            "hashgram_mail_gateway_messages_total{direction=\"inbound\",outcome=\"accepted\"} 2"
+        ));
         assert!(text.contains("hashgram_mail_gateway_queue_depth{kind=\"inbound\"} 3"));
         assert!(!m.is_healthy());
         m.set_healthy(true);

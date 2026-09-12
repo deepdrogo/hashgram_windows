@@ -85,7 +85,11 @@ pub struct ThreadIds {
 /// The id a header value maps to: a remembered pairing first (ids we
 /// generated for outbound mail cannot be re-derived), then our own
 /// `<hex@domain>` form, then the deterministic derivation.
-pub fn id_for_header(store: &Store, header: &str, domain: &str) -> Result<Option<Vec<u8>>, GatewayError> {
+pub fn id_for_header(
+    store: &Store,
+    header: &str,
+    domain: &str,
+) -> Result<Option<Vec<u8>>, GatewayError> {
     let n = thread::normalise_message_id(header);
     if n.is_empty() {
         return Ok(None);
@@ -101,10 +105,16 @@ pub fn id_for_header(store: &Store, header: &str, domain: &str) -> Result<Option
 
 /// Resolves message/thread ids for a parsed inbound message and records
 /// the pairing.
-pub fn resolve_thread_ids(store: &Store, parsed: &InboundMail, domain: &str, now_secs: u64) -> Result<ThreadIds, GatewayError> {
+pub fn resolve_thread_ids(
+    store: &Store,
+    parsed: &InboundMail,
+    domain: &str,
+    now_secs: u64,
+) -> Result<ThreadIds, GatewayError> {
     let (message_id, header) = match &parsed.message_id {
         Some(h) => (
-            id_for_header(store, h, domain)?.ok_or_else(|| GatewayError::Mime("empty Message-ID".into()))?,
+            id_for_header(store, h, domain)?
+                .ok_or_else(|| GatewayError::Mime("empty Message-ID".into()))?,
             h.clone(),
         ),
         None => {
@@ -184,7 +194,10 @@ pub struct InboundRecipients {
 /// reader can see they were not in the visible list because the original
 /// header addresses are not theirs.
 #[must_use]
-pub fn place_recipients(parsed: &InboundMail, resolved: Vec<(String, app::MailAddress)>) -> InboundRecipients {
+pub fn place_recipients(
+    parsed: &InboundMail,
+    resolved: Vec<(String, app::MailAddress)>,
+) -> InboundRecipients {
     let mut out = InboundRecipients::default();
     for (rcpt, addr) in resolved {
         let in_to = parsed.to.iter().any(|m| m.addr.eq_ignore_ascii_case(&rcpt));
@@ -253,7 +266,10 @@ pub fn build_inbound_message(
     msg.thread_id = ids.thread_id.clone();
     msg.in_reply_to = ids.in_reply_to.clone();
     msg.references = ids.references.clone();
-    msg.created_at_ms = parsed.date_ms.filter(|d| *d <= received_at_ms + 300_000).unwrap_or(received_at_ms);
+    msg.created_at_ms = parsed
+        .date_ms
+        .filter(|d| *d <= received_at_ms + 300_000)
+        .unwrap_or(received_at_ms);
     msg.origin = app::MailOrigin::ExternalGateway as i32;
     msg.external = Some(app::ExternalMailMeta {
         gateway,
@@ -269,7 +285,10 @@ pub fn build_inbound_message(
 /// External recipients from a native message's labels, (To, Cc), each
 /// validated as a remote mailbox under some other domain. Local addresses
 /// (`x@<our domain>`) are refused: native mail is the right path.
-pub fn external_recipients(labels: &[String], our_domain: &str) -> Result<(Vec<String>, Vec<String>), GatewayError> {
+pub fn external_recipients(
+    labels: &[String],
+    our_domain: &str,
+) -> Result<(Vec<String>, Vec<String>), GatewayError> {
     let mut to = Vec::new();
     let mut cc = Vec::new();
     for l in labels {
@@ -365,14 +384,19 @@ pub fn build_outbound(
         cc: cc.iter().map(|a| mailbox(a)).collect(),
         reply_to: None,
         subject: msg.subject.clone(),
-        date_ms: if msg.created_at_ms == 0 { now_secs * 1000 } else { msg.created_at_ms },
+        date_ms: if msg.created_at_ms == 0 {
+            now_secs * 1000
+        } else {
+            msg.created_at_ms
+        },
         message_id,
         in_reply_to,
         references,
         body_text: msg.body_text.clone(),
         body_html: msg.body_html.clone(),
         attachments,
-        importance: app::MailImportance::try_from(msg.importance).unwrap_or(app::MailImportance::Normal),
+        importance: app::MailImportance::try_from(msg.importance)
+            .unwrap_or(app::MailImportance::Normal),
         extra_headers: vec![("X-Hashgram-Origin".into(), "native".into())],
     };
     Ok((mail, all_rcpts))
@@ -448,7 +472,9 @@ pub struct Shared {
 
 impl std::fmt::Debug for Shared {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Shared").field("me", &self.me.address).finish_non_exhaustive()
+        f.debug_struct("Shared")
+            .field("me", &self.me.address)
+            .finish_non_exhaustive()
     }
 }
 
@@ -457,7 +483,11 @@ const RESOLVE_TTL_MISS: Duration = Duration::from_secs(60);
 
 impl Shared {
     /// Opens everything: store, DKIM key, the bridge identity.
-    pub async fn open(cfg: GatewayConfig, passphrase: &str, metrics: Arc<Metrics>) -> Result<Arc<Self>, GatewayError> {
+    pub async fn open(
+        cfg: GatewayConfig,
+        passphrase: &str,
+        metrics: Arc<Metrics>,
+    ) -> Result<Arc<Self>, GatewayError> {
         let store = Arc::new(Store::open(&cfg.store.sqlite_path)?);
         let signer = match (&cfg.domain.dkim_selector, &cfg.domain.dkim_private_key_file) {
             (Some(sel), Some(path)) => {
@@ -479,7 +509,8 @@ impl Shared {
         let mut one = HashgramOne::open(cfg.sdk_config()?, passphrase).await?;
         let me = one.mail().my_address().await;
         info!(address = %me.address, username = %me.username, "bridge identity opened");
-        let msgs_per_ip = IpLimiter::new(Duration::from_secs(3600), cfg.smtp.messages_per_ip_per_hour);
+        let msgs_per_ip =
+            IpLimiter::new(Duration::from_secs(3600), cfg.smtp.messages_per_ip_per_hour);
         Ok(Arc::new(Self {
             cfg,
             store,
@@ -493,10 +524,17 @@ impl Shared {
     }
 
     /// Username → `MailAddress`, cached. `Ok(None)` = no such username.
-    pub async fn resolve_username(&self, username: &str) -> Result<Option<app::MailAddress>, GatewayError> {
+    pub async fn resolve_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<app::MailAddress>, GatewayError> {
         if let Ok(c) = self.cache.lock() {
             if let Some(hit) = c.get(username) {
-                let ttl = if hit.result.is_some() { RESOLVE_TTL_OK } else { RESOLVE_TTL_MISS };
+                let ttl = if hit.result.is_some() {
+                    RESOLVE_TTL_OK
+                } else {
+                    RESOLVE_TTL_MISS
+                };
                 if hit.at.elapsed() < ttl {
                     return Ok(hit.result.clone());
                 }
@@ -556,10 +594,19 @@ impl InboundHandler for GatewayHandler {
     async fn accept_message(&self, envelope: Envelope, raw: Vec<u8>) -> Verdict {
         let s = &self.shared;
         s.metrics.smtp_messages_offered.inc();
-        if let Ok(ip) = envelope.peer.rsplit_once(':').map_or(envelope.peer.as_str(), |(h, _)| h).trim_matches(['[', ']']).parse() {
+        if let Ok(ip) = envelope
+            .peer
+            .rsplit_once(':')
+            .map_or(envelope.peer.as_str(), |(h, _)| h)
+            .trim_matches(['[', ']'])
+            .parse()
+        {
             if !s.msgs_per_ip.allow(ip) {
                 s.metrics.message("inbound", "rejected");
-                return Verdict::TempFail(451, "4.7.1 too many messages from your address, try later".into());
+                return Verdict::TempFail(
+                    451,
+                    "4.7.1 too many messages from your address, try later".into(),
+                );
             }
         }
         let parsed = match inbound::parse(&raw) {
@@ -572,7 +619,9 @@ impl InboundHandler for GatewayHandler {
         };
         let now_ms = hashgram_app::ids::now_ms();
         let now_secs = now_ms.div_euclid(1000);
-        if let Decision::Reject(text) = policy::decide_inbound(&s.cfg.policy, &parsed.auth, parsed.spam_score) {
+        if let Decision::Reject(text) =
+            policy::decide_inbound(&s.cfg.policy, &parsed.auth, parsed.spam_score)
+        {
             let _ = s.store.log_inbound(
                 now_secs,
                 &parsed.from_header,
@@ -611,19 +660,22 @@ impl InboundHandler for GatewayHandler {
             received_at_ms: now_ms,
             hashgram_message_id: id_hex.clone(),
         };
-        let queued = s.store.enqueue(st::kind::INBOUND, &job, now_secs, now_secs).and_then(|_| {
-            for r in &envelope.rcpt_to {
-                s.store.log_inbound(
-                    now_secs,
-                    &parsed.from_header,
-                    r,
-                    &ids.message_id_header,
-                    &id_hex,
-                    st::status::QUEUED,
-                )?;
-            }
-            Ok(())
-        });
+        let queued = s
+            .store
+            .enqueue(st::kind::INBOUND, &job, now_secs, now_secs)
+            .and_then(|_| {
+                for r in &envelope.rcpt_to {
+                    s.store.log_inbound(
+                        now_secs,
+                        &parsed.from_header,
+                        r,
+                        &ids.message_id_header,
+                        &id_hex,
+                        st::status::QUEUED,
+                    )?;
+                }
+                Ok(())
+            });
         match queued {
             Ok(()) => {
                 info!(
@@ -704,7 +756,11 @@ impl<R: MxResolver> Bridge<R> {
                     s.metrics.last_sync_ok.set(now_secs as i64);
                     s.metrics.set_healthy(true);
                     if report.mail > 0 {
-                        debug!(mail = report.mail, envelopes = report.envelopes, "sync round filed mail");
+                        debug!(
+                            mail = report.mail,
+                            envelopes = report.envelopes,
+                            "sync round filed mail"
+                        );
                     }
                 }
                 Err(e) => {
@@ -742,7 +798,10 @@ impl<R: MxResolver> Bridge<R> {
         }
         for k in [st::kind::INBOUND, st::kind::OUTBOUND] {
             if let Ok(d) = s.store.queue_depth(k) {
-                s.metrics.queue_depth.get_or_create(&QueueLabels { kind: k }).set(d);
+                s.metrics
+                    .queue_depth
+                    .get_or_create(&QueueLabels { kind: k })
+                    .set(d);
             }
         }
     }
@@ -754,13 +813,20 @@ impl<R: MxResolver> Bridge<R> {
         match result {
             Ok(()) => {
                 let _ = s.store.dequeue(item.id);
-                let _ = s.store.set_inbound_status(&job.hashgram_message_id, st::status::DELIVERED);
+                let _ = s
+                    .store
+                    .set_inbound_status(&job.hashgram_message_id, st::status::DELIVERED);
                 s.metrics.message("inbound", "delivered");
-                info!(attempts = item.attempts, "inbound message delivered into HashMail");
+                info!(
+                    attempts = item.attempts,
+                    "inbound message delivered into HashMail"
+                );
             }
             Err(InboundFailure::Permanent(reason)) => {
                 let _ = s.store.dequeue(item.id);
-                let _ = s.store.set_inbound_status(&job.hashgram_message_id, st::status::FAILED);
+                let _ = s
+                    .store
+                    .set_inbound_status(&job.hashgram_message_id, st::status::FAILED);
                 s.metrics.message("inbound", "failed");
                 warn!(reason, "inbound message dropped permanently");
             }
@@ -768,7 +834,9 @@ impl<R: MxResolver> Bridge<R> {
                 let attempts = item.attempts + 1;
                 if attempts >= s.cfg.outbound.max_attempts {
                     let _ = s.store.dequeue(item.id);
-                    let _ = s.store.set_inbound_status(&job.hashgram_message_id, st::status::FAILED);
+                    let _ = s
+                        .store
+                        .set_inbound_status(&job.hashgram_message_id, st::status::FAILED);
                     s.metrics.message("inbound", "failed");
                     warn!(reason, attempts, "inbound message gave up after retries");
                 } else {
@@ -783,7 +851,8 @@ impl<R: MxResolver> Bridge<R> {
 
     async fn try_deliver_inbound(&self, job: &InboundJob) -> Result<(), InboundFailure> {
         let s = &self.shared;
-        let parsed = inbound::parse(&job.raw).map_err(|e| InboundFailure::Permanent(e.to_string()))?;
+        let parsed =
+            inbound::parse(&job.raw).map_err(|e| InboundFailure::Permanent(e.to_string()))?;
         // Resolve every envelope recipient again: the cache may have
         // expired, and the identity may have gained devices since.
         let mut resolved = Vec::new();
@@ -798,10 +867,17 @@ impl<R: MxResolver> Bridge<R> {
             }
         }
         if resolved.is_empty() {
-            return Err(InboundFailure::Permanent("no deliverable recipients".into()));
+            return Err(InboundFailure::Permanent(
+                "no deliverable recipients".into(),
+            ));
         }
-        let ids = resolve_thread_ids(&s.store, &parsed, &s.cfg.domain.name, job.received_at_ms.div_euclid(1000))
-            .map_err(|e| InboundFailure::Permanent(e.to_string()))?;
+        let ids = resolve_thread_ids(
+            &s.store,
+            &parsed,
+            &s.cfg.domain.name,
+            job.received_at_ms.div_euclid(1000),
+        )
+        .map_err(|e| InboundFailure::Permanent(e.to_string()))?;
         let recipients = place_recipients(&parsed, resolved);
         let mut one = s.one.lock().await;
         let mut attachments = Vec::with_capacity(parsed.attachments.len());
@@ -814,11 +890,20 @@ impl<R: MxResolver> Bridge<R> {
                 Err(e) => return Err(InboundFailure::Transient(format!("attachment upload: {e}"))),
             }
         }
-        let msg = build_inbound_message(&parsed, s.me.clone(), recipients, attachments, &ids, job.received_at_ms)
-            .map_err(|e| InboundFailure::Permanent(e.to_string()))?;
+        let msg = build_inbound_message(
+            &parsed,
+            s.me.clone(),
+            recipients,
+            attachments,
+            &ids,
+            job.received_at_ms,
+        )
+        .map_err(|e| InboundFailure::Permanent(e.to_string()))?;
         match one.mail().send_built(Some(msg), Vec::new()).await {
             Ok(_) => Ok(()),
-            Err(e @ hashgram_sdk::SdkError::Invalid(_)) => Err(InboundFailure::Permanent(e.to_string())),
+            Err(e @ hashgram_sdk::SdkError::Invalid(_)) => {
+                Err(InboundFailure::Permanent(e.to_string()))
+            }
             Err(e) => Err(InboundFailure::Transient(e.to_string())),
         }
     }
@@ -827,7 +912,10 @@ impl<R: MxResolver> Bridge<R> {
     /// with `ext-to:` labels into outbound jobs.
     async fn scan_inbox(&mut self, now_secs: u64) -> Result<(), GatewayError> {
         let s = self.shared.clone();
-        for folder in [hashgram_sdk::mail::folder::INBOX, hashgram_sdk::mail::folder::REQUESTS] {
+        for folder in [
+            hashgram_sdk::mail::folder::INBOX,
+            hashgram_sdk::mail::folder::REQUESTS,
+        ] {
             let cursor_name = format!("{CURSOR_PREFIX}{folder}");
             let cursor = s.store.cursor(&cursor_name)?;
             // Collect everything newer than the cursor, oldest first.
@@ -864,7 +952,14 @@ impl<R: MxResolver> Bridge<R> {
                             warn!(error = %e, "giving up rendering an outbound message");
                             self.bounce(&summary.id, &format!("The gateway could not read this message's attachments after {MAX_RENDER_ATTEMPTS} attempts: {e}"))
                                 .await;
-                            let _ = s.store.log_outbound(now_secs, &summary.id, "", "", "", st::status::FAILED);
+                            let _ = s.store.log_outbound(
+                                now_secs,
+                                &summary.id,
+                                "",
+                                "",
+                                "",
+                                st::status::FAILED,
+                            );
                             new_cursor = summary.received_at_ms;
                             continue;
                         }
@@ -895,7 +990,10 @@ impl<R: MxResolver> Bridge<R> {
         let record = s.one.lock().await.mail().get(id)?;
         let Some(record) = record else { return Ok(()) };
         let labels = &record.message.labels;
-        if !labels.iter().any(|l| l.starts_with(EXT_TO) || l.starts_with(EXT_CC)) {
+        if !labels
+            .iter()
+            .any(|l| l.starts_with(EXT_TO) || l.starts_with(EXT_CC))
+        {
             // Ordinary mail to the bridge identity (someone said hello).
             // Not ours to relay; leave it in the folder.
             return Ok(());
@@ -906,8 +1004,10 @@ impl<R: MxResolver> Bridge<R> {
         let is_contact = one.people().friends().iter().any(|c| c.address == sender);
         if !policy::allow_outbound(&s.cfg.policy, is_contact) {
             drop(one);
-            self.bounce(id, "This gateway relays only for its contacts.").await;
-            s.store.log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
+            self.bounce(id, "This gateway relays only for its contacts.")
+                .await;
+            s.store
+                .log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
             s.metrics.message("outbound", "rejected");
             return Err(GatewayError::Address("sender is not a contact".into()));
         }
@@ -916,7 +1016,8 @@ impl<R: MxResolver> Bridge<R> {
             drop(one);
             self.bounce(id, "Your identity has no username; an Internet address needs one (`<username>@<domain>`).")
                 .await;
-            s.store.log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
+            s.store
+                .log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
             s.metrics.message("outbound", "rejected");
             return Err(GatewayError::Address("sender has no username".into()));
         }
@@ -924,24 +1025,35 @@ impl<R: MxResolver> Bridge<R> {
             Ok(x) => x,
             Err(e) => {
                 drop(one);
-                self.bounce(id, &format!("Recipient labels were invalid: {e}")).await;
-                s.store.log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
+                self.bounce(id, &format!("Recipient labels were invalid: {e}"))
+                    .await;
+                s.store
+                    .log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
                 s.metrics.message("outbound", "rejected");
                 return Err(e);
             }
         };
         if to.is_empty() && cc.is_empty() {
             drop(one);
-            self.bounce(id, "No valid ext-to: / ext-cc: recipient labels.").await;
-            s.store.log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
+            self.bounce(id, "No valid ext-to: / ext-cc: recipient labels.")
+                .await;
+            s.store
+                .log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
             return Err(GatewayError::Address("no recipients".into()));
         }
         let count = s.store.rate_hit(&format!("out:{sender}"), now_secs, 3600)?;
         if s.cfg.outbound.per_user_per_hour > 0 && count > s.cfg.outbound.per_user_per_hour {
             drop(one);
-            self.bounce(id, &format!("Rate limit: at most {} Internet messages per hour.", s.cfg.outbound.per_user_per_hour))
-                .await;
-            s.store.log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
+            self.bounce(
+                id,
+                &format!(
+                    "Rate limit: at most {} Internet messages per hour.",
+                    s.cfg.outbound.per_user_per_hour
+                ),
+            )
+            .await;
+            s.store
+                .log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
             s.metrics.message("outbound", "rejected");
             return Err(GatewayError::Address("rate limited".into()));
         }
@@ -957,7 +1069,14 @@ impl<R: MxResolver> Bridge<R> {
             });
         }
         drop(one);
-        let (mail, _all) = build_outbound(&s.store, &record, &resolved.username, &s.cfg.domain.name, attachments, now_secs)?;
+        let (mail, _all) = build_outbound(
+            &s.store,
+            &record,
+            &resolved.username,
+            &s.cfg.domain.name,
+            attachments,
+            now_secs,
+        )?;
         let mut seed = [0u8; 16];
         let _ = getrandom::fill(&mut seed);
         let rendered = mail.render(&seed);
@@ -966,20 +1085,38 @@ impl<R: MxResolver> Bridge<R> {
             None => rendered.bytes,
         };
         if bytes.len() as u64 > s.cfg.smtp.max_message_bytes {
-            self.bounce(id, &format!("The rendered message is {} bytes; the limit is {}.", bytes.len(), s.cfg.smtp.max_message_bytes))
-                .await;
-            s.store.log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
+            self.bounce(
+                id,
+                &format!(
+                    "The rendered message is {} bytes; the limit is {}.",
+                    bytes.len(),
+                    s.cfg.smtp.max_message_bytes
+                ),
+            )
+            .await;
+            s.store
+                .log_outbound(now_secs, id, &sender, "", "", st::status::REJECTED)?;
             return Err(GatewayError::Address("too large".into()));
         }
         // One job per recipient domain.
         let mut by_domain: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for r in to.iter().chain(cc.iter()) {
             if let Some((_, d)) = r.rsplit_once('@') {
-                by_domain.entry(d.to_ascii_lowercase()).or_default().push(r.clone());
+                by_domain
+                    .entry(d.to_ascii_lowercase())
+                    .or_default()
+                    .push(r.clone());
             }
         }
         let all_rcpts: Vec<String> = by_domain.values().flatten().cloned().collect();
-        s.store.log_outbound(now_secs, id, &sender, &all_rcpts.join(","), &mail.message_id, st::status::QUEUED)?;
+        s.store.log_outbound(
+            now_secs,
+            id,
+            &sender,
+            &all_rcpts.join(","),
+            &mail.message_id,
+            st::status::QUEUED,
+        )?;
         for (domain, rcpts) in by_domain {
             let job = OutboundJob {
                 hashgram_message_id: id.to_owned(),
@@ -990,10 +1127,16 @@ impl<R: MxResolver> Bridge<R> {
                 message: bytes.clone(),
                 subject: subject.clone(),
             };
-            s.store.enqueue(st::kind::OUTBOUND, &job, now_secs, now_secs)?;
+            s.store
+                .enqueue(st::kind::OUTBOUND, &job, now_secs, now_secs)?;
         }
         s.metrics.message("outbound", "accepted");
-        info!(rcpts = all_rcpts.len(), size = bytes.len(), signed = s.signer.is_some(), "outbound message queued");
+        info!(
+            rcpts = all_rcpts.len(),
+            size = bytes.len(),
+            signed = s.signer.is_some(),
+            "outbound message queued"
+        );
         // Keep the bridge mailbox small.
         let _ = s.one.lock().await.mail().archive(id);
         self.render_attempts.remove(id);
@@ -1009,12 +1152,18 @@ impl<R: MxResolver> Bridge<R> {
             require_tls: s.cfg.outbound.require_tls,
         };
         let hosts: Result<Vec<(String, u16)>, DeliveryError> = match &s.cfg.outbound.smarthost {
-            Some(sh) => match sh.rsplit_once(':').and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h.to_owned(), p))) {
+            Some(sh) => match sh
+                .rsplit_once(':')
+                .and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h.to_owned(), p)))
+            {
                 Some(hp) => Ok(vec![hp]),
                 None => Err(DeliveryError::Protocol("bad smarthost".into())),
             },
             None => match self.resolver.resolve(&job.domain).await {
-                Ok(MxAnswer::Hosts(h)) => Ok(h.into_iter().map(|h| (h.host, s.cfg.outbound.smtp_port)).collect()),
+                Ok(MxAnswer::Hosts(h)) => Ok(h
+                    .into_iter()
+                    .map(|h| (h.host, s.cfg.outbound.smtp_port))
+                    .collect()),
                 Ok(MxAnswer::NullMx) => Err(DeliveryError::Permanent(crate::smtp::Reply::new(
                     556,
                     format!("{} does not accept mail (null MX)", job.domain),
@@ -1027,7 +1176,16 @@ impl<R: MxResolver> Bridge<R> {
         match hosts {
             Ok(hosts) => {
                 for (host, port) in hosts.iter().take(5) {
-                    match client::deliver(&cfg, host, *port, &job.mail_from, &job.rcpts, &job.message).await {
+                    match client::deliver(
+                        &cfg,
+                        host,
+                        *port,
+                        &job.mail_from,
+                        &job.rcpts,
+                        &job.message,
+                    )
+                    .await
+                    {
                         Ok(d) => {
                             outcome = Some(d);
                             break;
@@ -1048,7 +1206,11 @@ impl<R: MxResolver> Bridge<R> {
         match (outcome, last) {
             (Some(d), _) => {
                 let _ = s.store.dequeue(item.id);
-                let _ = s.store.set_outbound_status(&job.hashgram_message_id, st::status::DELIVERED, "");
+                let _ = s.store.set_outbound_status(
+                    &job.hashgram_message_id,
+                    st::status::DELIVERED,
+                    "",
+                );
                 s.metrics.message("outbound", "delivered");
                 info!(domain = %job.domain, tls = d.tls, rcpts = job.rcpts.len(), rejected = d.rejected.len(), "outbound message delivered");
                 if !d.rejected.is_empty() {
@@ -1058,23 +1220,40 @@ impl<R: MxResolver> Bridge<R> {
                         .map(|(r, reply)| format!("{r}: {reply}"))
                         .collect::<Vec<_>>()
                         .join("\n");
-                    self.bounce(&job.hashgram_message_id, &format!("Some recipients were refused by {}:\n{list}", job.domain))
-                        .await;
+                    self.bounce(
+                        &job.hashgram_message_id,
+                        &format!("Some recipients were refused by {}:\n{list}", job.domain),
+                    )
+                    .await;
                 }
             }
             (None, Some(e)) if e.is_permanent() => {
                 let _ = s.store.dequeue(item.id);
-                let _ = s.store.set_outbound_status(&job.hashgram_message_id, st::status::FAILED, &e.to_string());
+                let _ = s.store.set_outbound_status(
+                    &job.hashgram_message_id,
+                    st::status::FAILED,
+                    &e.to_string(),
+                );
                 s.metrics.message("outbound", "failed");
                 warn!(domain = %job.domain, error = %e, "outbound message failed permanently");
-                self.bounce(&job.hashgram_message_id, &format!("{} refused the message: {e}", job.domain)).await;
+                self.bounce(
+                    &job.hashgram_message_id,
+                    &format!("{} refused the message: {e}", job.domain),
+                )
+                .await;
             }
             (None, last) => {
-                let reason = last.map(|e| e.to_string()).unwrap_or_else(|| "no mail hosts".into());
+                let reason = last
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "no mail hosts".into());
                 let attempts = item.attempts + 1;
                 if attempts >= s.cfg.outbound.max_attempts {
                     let _ = s.store.dequeue(item.id);
-                    let _ = s.store.set_outbound_status(&job.hashgram_message_id, st::status::FAILED, &reason);
+                    let _ = s.store.set_outbound_status(
+                        &job.hashgram_message_id,
+                        st::status::FAILED,
+                        &reason,
+                    );
                     s.metrics.message("outbound", "failed");
                     warn!(domain = %job.domain, attempts, reason, "outbound message gave up");
                     self.bounce(
@@ -1085,7 +1264,11 @@ impl<R: MxResolver> Bridge<R> {
                 } else {
                     let next = now_secs + backoff_secs(attempts);
                     let _ = s.store.reschedule(item.id, next, &reason);
-                    let _ = s.store.set_outbound_status(&job.hashgram_message_id, st::status::QUEUED, &reason);
+                    let _ = s.store.set_outbound_status(
+                        &job.hashgram_message_id,
+                        st::status::QUEUED,
+                        &reason,
+                    );
                     s.metrics.message("outbound", "deferred");
                     debug!(domain = %job.domain, attempts, next, reason, "outbound message deferred");
                 }
@@ -1137,7 +1320,12 @@ enum InboundFailure {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
     use crate::mime::inbound::Mailbox as InMbx;
@@ -1190,7 +1378,11 @@ mod tests {
         assert_eq!(t1.thread_id, t1.message_id);
         assert!(t1.in_reply_to.is_empty());
         // Reply from the Internet quoting it.
-        let p2 = parsed(Some("m2@example.com"), Some("m1@example.com"), &["m1@example.com"]);
+        let p2 = parsed(
+            Some("m2@example.com"),
+            Some("m1@example.com"),
+            &["m1@example.com"],
+        );
         let t2 = resolve_thread_ids(&store, &p2, D, 2).unwrap();
         assert_eq!(t2.in_reply_to, t1.message_id);
         assert_eq!(t2.thread_id, t1.thread_id);
@@ -1212,7 +1404,10 @@ mod tests {
         let t4 = resolve_thread_ids(&store, &p4, D, 5).unwrap();
         assert_eq!(t4.message_id.len(), 16);
         assert!(t4.message_id_header.ends_with("@hashgram.io"));
-        assert!(store.thread_by_hashgram_id(&hex::encode(&t4.message_id)).unwrap().is_some());
+        assert!(store
+            .thread_by_hashgram_id(&hex::encode(&t4.message_id))
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -1222,9 +1417,15 @@ mod tests {
         let t1 = resolve_thread_ids(&store, &p1, D, 1).unwrap();
         // A native reply references the derived id; the header we emit is
         // the *original* Internet Message-ID, not our hex form.
-        assert_eq!(header_for_id(&store, &t1.message_id, D).unwrap(), "<m1@example.com>");
+        assert_eq!(
+            header_for_id(&store, &t1.message_id, D).unwrap(),
+            "<m1@example.com>"
+        );
         let fresh = vec![5u8; 16];
-        assert_eq!(header_for_id(&store, &fresh, D).unwrap(), thread::outbound_message_id(&fresh, D));
+        assert_eq!(
+            header_for_id(&store, &fresh, D).unwrap(),
+            thread::outbound_message_id(&fresh, D)
+        );
         assert_eq!(header_for_id(&store, &[], D).unwrap(), "");
     }
 
@@ -1250,16 +1451,30 @@ mod tests {
             source: Some(app::mail_attachment::Source::InlineData(vec![1, 2])),
             ..Default::default()
         };
-        let msg = build_inbound_message(&p, addr(GW, "gateway"), recipients, vec![att], &ids, 1_000_000).unwrap();
+        let msg = build_inbound_message(
+            &p,
+            addr(GW, "gateway"),
+            recipients,
+            vec![att],
+            &ids,
+            1_000_000,
+        )
+        .unwrap();
         assert_eq!(msg.origin, app::MailOrigin::ExternalGateway as i32);
         let ext = msg.external.as_ref().unwrap();
         assert_eq!(ext.gateway, GW);
         assert_eq!(ext.from_header, "Bob <bob@example.com>");
         assert_eq!(ext.message_id_header, "m1@example.com");
-        assert_eq!(ext.auth_results, vec!["spf=none", "dkim=none", "dmarc=none"]);
+        assert_eq!(
+            ext.auth_results,
+            vec!["spf=none", "dkim=none", "dmarc=none"]
+        );
         assert_eq!(ext.spam_score, 120);
         assert_eq!(msg.message_id, ids.message_id);
-        assert_eq!(msg.from.as_ref().unwrap().display_name, "Bob <bob@example.com>");
+        assert_eq!(
+            msg.from.as_ref().unwrap().display_name,
+            "Bob <bob@example.com>"
+        );
         assert_eq!(msg.from.as_ref().unwrap().address, GW);
         assert_eq!(msg.labels, vec![LABEL_EXTERNAL]);
         assert_eq!(msg.created_at_ms, 1_000_000); // no Date header → received time
@@ -1267,7 +1482,18 @@ mod tests {
         // A Date far in the future is not trusted.
         let mut p2 = p.clone();
         p2.date_ms = Some(9_000_000_000_000);
-        let msg2 = build_inbound_message(&p2, addr(GW, "gateway"), place_recipients(&p2, vec![("alice@hashgram.io".into(), addr(ALICE, "alice"))]), vec![], &ids, 1_000_000).unwrap();
+        let msg2 = build_inbound_message(
+            &p2,
+            addr(GW, "gateway"),
+            place_recipients(
+                &p2,
+                vec![("alice@hashgram.io".into(), addr(ALICE, "alice"))],
+            ),
+            vec![],
+            &ids,
+            1_000_000,
+        )
+        .unwrap();
         assert_eq!(msg2.created_at_ms, 1_000_000);
     }
 
@@ -1292,7 +1518,10 @@ mod tests {
         assert_eq!(cc, vec!["carol@example.org"]);
         assert!(external_recipients(&["ext-to:alice@hashgram.io".to_owned()], D).is_err());
         assert!(external_recipients(&["ext-to:garbage".to_owned()], D).is_err());
-        assert_eq!(external_recipients(&["plain".to_owned()], D).unwrap(), (vec![], vec![]));
+        assert_eq!(
+            external_recipients(&["plain".to_owned()], D).unwrap(),
+            (vec![], vec![])
+        );
     }
 
     #[test]
@@ -1337,12 +1566,18 @@ mod tests {
         assert_eq!(rcpts, vec!["bob@example.com"]);
         assert_eq!(mail.from.addr, "alice@hashgram.io");
         assert_eq!(mail.from.name, "Alice");
-        assert_eq!(mail.message_id, format!("<{}@hashgram.io>", "07".repeat(16)));
+        assert_eq!(
+            mail.message_id,
+            format!("<{}@hashgram.io>", "07".repeat(16))
+        );
         assert_eq!(mail.in_reply_to.as_deref(), Some("<m1@example.com>"));
         assert_eq!(mail.references, vec!["<m1@example.com>"]);
         assert_eq!(mail.importance, app::MailImportance::High);
         // The outbound id is now remembered, so an Internet reply maps back.
-        let row = store.thread_by_header(&format!("{}@hashgram.io", "07".repeat(16))).unwrap().unwrap();
+        let row = store
+            .thread_by_header(&format!("{}@hashgram.io", "07".repeat(16)))
+            .unwrap()
+            .unwrap();
         assert_eq!(row.hashgram_id, hex::encode(&native_id));
         assert_eq!(row.thread_id, hex::encode(&t1.thread_id));
         let reply = parsed(Some("m9@example.com"), Some(&mail.message_id), &[]);

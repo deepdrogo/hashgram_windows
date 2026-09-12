@@ -51,7 +51,11 @@ pub fn validate(e: &pb::CircleEvent) -> Result<(), AppError> {
                     require_str("poll option", o, 128)?;
                 }
             }
-            if p.text.is_empty() && p.media.is_empty() && p.drive_refs.is_empty() && p.poll.is_none() {
+            if p.text.is_empty()
+                && p.media.is_empty()
+                && p.drive_refs.is_empty()
+                && p.poll.is_none()
+            {
                 return Err(AppError::Invalid("empty post".into()));
             }
         }
@@ -197,10 +201,16 @@ impl Timeline {
             Some(B::Vote(v)) => {
                 let post = hex::encode(&v.post_id);
                 let key = (post.clone(), author.to_owned());
-                let Some(item) = self.items.iter_mut().find(|i| i.id == post && i.kind == "post") else {
+                let Some(item) = self
+                    .items
+                    .iter_mut()
+                    .find(|i| i.id == post && i.kind == "post")
+                else {
                     return Ok(());
                 };
-                let Some(poll) = &item.poll else { return Ok(()) };
+                let Some(poll) = &item.poll else {
+                    return Ok(());
+                };
                 let n = poll.options.len() as u32;
                 let multi = poll.multiple_choice;
                 if poll.closes_at_ms != 0 && e.at_ms > poll.closes_at_ms {
@@ -213,7 +223,12 @@ impl Timeline {
                         }
                     }
                 }
-                let mut chosen: Vec<u32> = v.option_indexes.iter().copied().filter(|o| *o < n).collect();
+                let mut chosen: Vec<u32> = v
+                    .option_indexes
+                    .iter()
+                    .copied()
+                    .filter(|o| *o < n)
+                    .collect();
                 chosen.sort_unstable();
                 chosen.dedup();
                 if !multi {
@@ -297,28 +312,51 @@ mod tests {
         t.apply("hash1a", &post).unwrap(); // duplicate ignored
         assert_eq!(t.items.len(), 1);
         let pid = post.event_id.clone();
-        let react = |r: &str| build(pb::circle_event::Body::Reaction(pb::CircleReaction { target_id: pid.clone(), reaction: r.into() })).unwrap();
+        let react = |r: &str| {
+            build(pb::circle_event::Body::Reaction(pb::CircleReaction {
+                target_id: pid.clone(),
+                reaction: r.into(),
+            }))
+            .unwrap()
+        };
         t.apply("hash1b", &react("❤")).unwrap();
         t.apply("hash1b", &react("👍")).unwrap(); // replaces
         t.apply("hash1c", &react("👍")).unwrap();
         let p = &t.items[0];
         assert_eq!(p.reactions.get("👍"), Some(&2));
         assert!(!p.reactions.contains_key("❤"));
-        let vote = |o: Vec<u32>| build(pb::circle_event::Body::Vote(pb::CircleVote { post_id: pid.clone(), option_indexes: o })).unwrap();
+        let vote = |o: Vec<u32>| {
+            build(pb::circle_event::Body::Vote(pb::CircleVote {
+                post_id: pid.clone(),
+                option_indexes: o,
+            }))
+            .unwrap()
+        };
         t.apply("hash1b", &vote(vec![0])).unwrap();
         t.apply("hash1b", &vote(vec![1, 1, 9])).unwrap(); // re-vote, dedup, out of range dropped, single choice
         t.apply("hash1c", &vote(vec![1])).unwrap();
         let p = &t.items[0];
         assert_eq!(p.votes.get(&0).copied().unwrap_or(0), 0);
         assert_eq!(p.votes.get(&1), Some(&2));
-        let c = build(pb::circle_event::Body::Comment(pb::CircleComment { post_id: pid.clone(), text: "nice".into(), ..Default::default() })).unwrap();
+        let c = build(pb::circle_event::Body::Comment(pb::CircleComment {
+            post_id: pid.clone(),
+            text: "nice".into(),
+            ..Default::default()
+        }))
+        .unwrap();
         t.apply("hash1c", &c).unwrap();
         assert_eq!(t.comments(&hex::encode(&pid)).len(), 1);
         // Only the author may delete.
-        let del = build(pb::circle_event::Body::Delete(pb::CircleDelete { target_id: pid.clone() })).unwrap();
+        let del = build(pb::circle_event::Body::Delete(pb::CircleDelete {
+            target_id: pid.clone(),
+        }))
+        .unwrap();
         t.apply("hash1b", &del).unwrap();
         assert!(!t.items[0].deleted);
-        let del2 = build(pb::circle_event::Body::Delete(pb::CircleDelete { target_id: pid.clone() })).unwrap();
+        let del2 = build(pb::circle_event::Body::Delete(pb::CircleDelete {
+            target_id: pid.clone(),
+        }))
+        .unwrap();
         t.apply("hash1a", &del2).unwrap();
         assert!(t.items[0].deleted);
         assert_eq!(t.posts(0, 10).len(), 1);
@@ -328,7 +366,11 @@ mod tests {
     fn validation() {
         assert!(build(pb::circle_event::Body::Post(pb::CirclePost::default())).is_err());
         assert!(build(pb::circle_event::Body::Post(pb::CirclePost {
-            poll: Some(pb::Poll { question: "q".into(), options: vec!["one".into()], ..Default::default() }),
+            poll: Some(pb::Poll {
+                question: "q".into(),
+                options: vec!["one".into()],
+                ..Default::default()
+            }),
             ..Default::default()
         }))
         .is_err());

@@ -187,7 +187,9 @@ pub async fn upload_sealed(
     let manifest = manifest_for(ciphertext, "application/octet-stream", true)
         .map_err(|e| SdkError::Invalid(e.to_string()))?;
     let c = cid(&manifest).to_vec();
-    let providers = push_manifest_and_chunks(link, network, device, &manifest, &c, ciphertext, replicas).await?;
+    let providers =
+        push_manifest_and_chunks(link, network, device, &manifest, &c, ciphertext, replicas)
+            .await?;
     Ok(Uploaded {
         cid: hex::encode(&c),
         size: manifest.size,

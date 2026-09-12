@@ -70,10 +70,13 @@ pub struct Contacts {
 impl Contacts {
     fn entry(&mut self, address: &str) -> Result<&mut pb::ContactRecord, AppError> {
         require_address("address", address)?;
-        Ok(self.records.entry(address.to_owned()).or_insert_with(|| pb::ContactRecord {
-            address: address.to_owned(),
-            ..Default::default()
-        }))
+        Ok(self
+            .records
+            .entry(address.to_owned())
+            .or_insert_with(|| pb::ContactRecord {
+                address: address.to_owned(),
+                ..Default::default()
+            }))
     }
 
     fn set(rec: &mut pb::ContactRecord, flag: &str, on: bool) {
@@ -107,7 +110,12 @@ impl Contacts {
     }
 
     /// Records a received request. Returns false if it was dropped (blocked).
-    pub fn request_received(&mut self, address: &str, username: &str, display_name: &str) -> Result<bool, AppError> {
+    pub fn request_received(
+        &mut self,
+        address: &str,
+        username: &str,
+        display_name: &str,
+    ) -> Result<bool, AppError> {
         if self.has(address, BLOCKED) {
             return Ok(false);
         }
@@ -212,7 +220,12 @@ impl Contacts {
     }
 
     /// Updates the cached name fields.
-    pub fn set_names(&mut self, address: &str, username: &str, display_name: &str) -> Result<(), AppError> {
+    pub fn set_names(
+        &mut self,
+        address: &str,
+        username: &str,
+        display_name: &str,
+    ) -> Result<(), AppError> {
         let r = self.entry(address)?;
         r.username = username.to_owned();
         r.display_name = display_name.to_owned();
@@ -228,7 +241,11 @@ impl Contacts {
             is_trusted: self.has(address, TRUSTED),
             is_blocked: self.has(address, BLOCKED),
             is_muted: self.has(address, MUTED),
-            has_username: self.records.get(address).map(|r| !r.username.is_empty()).unwrap_or(false),
+            has_username: self
+                .records
+                .get(address)
+                .map(|r| !r.username.is_empty())
+                .unwrap_or(false),
             ..Default::default()
         }
     }
@@ -236,7 +253,10 @@ impl Contacts {
     /// Records with a flag.
     #[must_use]
     pub fn with_flag(&self, flag: &str) -> Vec<&pb::ContactRecord> {
-        self.records.values().filter(|r| r.states.iter().any(|s| s == flag)).collect()
+        self.records
+            .values()
+            .filter(|r| r.states.iter().any(|s| s == flag))
+            .collect()
     }
 
     /// Snapshot for other devices.

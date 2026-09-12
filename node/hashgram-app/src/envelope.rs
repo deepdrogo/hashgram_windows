@@ -85,7 +85,12 @@ pub fn open(plaintext: &[u8]) -> Result<Opened, AppError> {
         .ok_or_else(|| AppError::Unsupported("CHAT_KIND_APP without an app payload".into()))?;
     // Envelope version 0 is read as 1 (see version::check doc).
     let v = if app.version == 0 { 1 } else { app.version };
-    check("AppMessage", v, app.min_reader_version, APP_ENVELOPE_MAX_READ)?;
+    check(
+        "AppMessage",
+        v,
+        app.min_reader_version,
+        APP_ENVELOPE_MAX_READ,
+    )?;
     require_id("AppMessage.id", &app.id)?;
     if app.body.is_none() {
         return Err(AppError::Unsupported(

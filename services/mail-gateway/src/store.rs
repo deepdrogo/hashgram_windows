@@ -160,7 +160,11 @@ impl Store {
         )
         .map_err(sql_err)?;
         let current: i64 = conn
-            .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| r.get(0))
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |r| r.get(0),
+            )
             .map_err(sql_err)?;
         let latest = MIGRATIONS.len() as i64;
         if current > latest {
@@ -174,9 +178,12 @@ impl Store {
                 continue;
             }
             conn.execute_batch("BEGIN;").map_err(sql_err)?;
-            let applied = conn
-                .execute_batch(sql)
-                .and_then(|()| conn.execute("INSERT INTO schema_version(version) VALUES (?1)", params![v]));
+            let applied = conn.execute_batch(sql).and_then(|()| {
+                conn.execute(
+                    "INSERT INTO schema_version(version) VALUES (?1)",
+                    params![v],
+                )
+            });
             match applied {
                 Ok(_) => conn.execute_batch("COMMIT;").map_err(sql_err)?,
                 Err(e) => {
@@ -190,7 +197,10 @@ impl Store {
         })
     }
 
-    fn with<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T, GatewayError> {
+    fn with<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, GatewayError> {
         let guard = self
             .conn
             .lock()
@@ -200,7 +210,13 @@ impl Store {
 
     /// Current schema version.
     pub fn schema_version(&self) -> Result<i64, GatewayError> {
-        self.with(|c| c.query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| r.get(0)))
+        self.with(|c| {
+            c.query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |r| r.get(0),
+            )
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -229,7 +245,11 @@ impl Store {
     }
 
     /// Updates the status of every inbound row for a HashMail id.
-    pub fn set_inbound_status(&self, hashgram_message_id: &str, status_: &str) -> Result<(), GatewayError> {
+    pub fn set_inbound_status(
+        &self,
+        hashgram_message_id: &str,
+        status_: &str,
+    ) -> Result<(), GatewayError> {
         self.with(|c| {
             c.execute(
                 "UPDATE inbound SET status = ?2 WHERE hashgram_message_id = ?1",
@@ -287,7 +307,12 @@ impl Store {
     }
 
     /// Updates an outbound row after an attempt.
-    pub fn set_outbound_status(&self, hashgram_message_id: &str, status_: &str, last_error: &str) -> Result<(), GatewayError> {
+    pub fn set_outbound_status(
+        &self,
+        hashgram_message_id: &str,
+        status_: &str,
+        last_error: &str,
+    ) -> Result<(), GatewayError> {
         self.with(|c| {
             c.execute(
                 "UPDATE outbound SET status = ?2, attempts = attempts + 1, last_error = ?3 WHERE hashgram_message_id = ?1",
@@ -314,7 +339,13 @@ impl Store {
     // -----------------------------------------------------------------------
 
     /// Enqueues a payload for `kind`, due at `next_attempt_at` (unix secs).
-    pub fn enqueue<T: Serialize>(&self, kind_: &str, payload: &T, now: u64, next_attempt_at: u64) -> Result<i64, GatewayError> {
+    pub fn enqueue<T: Serialize>(
+        &self,
+        kind_: &str,
+        payload: &T,
+        now: u64,
+        next_attempt_at: u64,
+    ) -> Result<i64, GatewayError> {
         let bytes = serde_json::to_vec(payload).map_err(|e| GatewayError::Store(e.to_string()))?;
         self.with(|c| {
             c.execute(
@@ -328,21 +359,34 @@ impl Store {
     /// Due items of a kind, oldest first, at most `limit`. Payloads that
     /// no longer decode (a schema change in the payload struct) are dropped
     /// with their row so they cannot wedge the queue.
-    pub fn due<T: DeserializeOwned>(&self, kind_: &str, now: u64, limit: usize) -> Result<Vec<QueueItem<T>>, GatewayError> {
+    pub fn due<T: DeserializeOwned>(
+        &self,
+        kind_: &str,
+        now: u64,
+        limit: usize,
+    ) -> Result<Vec<QueueItem<T>>, GatewayError> {
         let rows: Vec<(i64, u32, Vec<u8>)> = self.with(|c| {
             let mut st = c.prepare(
                 "SELECT id, attempts, payload FROM queue WHERE kind = ?1 AND next_attempt_at <= ?2
                  ORDER BY next_attempt_at, id LIMIT ?3",
             )?;
             let rows = st.query_map(params![kind_, now as i64, limit as i64], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? as u32, r.get::<_, Vec<u8>>(2)?))
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)? as u32,
+                    r.get::<_, Vec<u8>>(2)?,
+                ))
             })?;
             rows.collect()
         })?;
         let mut out = Vec::with_capacity(rows.len());
         for (id, attempts, bytes) in rows {
             match serde_json::from_slice::<T>(&bytes) {
-                Ok(payload) => out.push(QueueItem { id, attempts, payload }),
+                Ok(payload) => out.push(QueueItem {
+                    id,
+                    attempts,
+                    payload,
+                }),
                 Err(e) => {
                     tracing::warn!(queue_id = id, error = %e, "dropping undecodable queue row");
                     self.dequeue(id)?;
@@ -361,7 +405,12 @@ impl Store {
     }
 
     /// Records a failed attempt and reschedules.
-    pub fn reschedule(&self, id: i64, next_attempt_at: u64, error: &str) -> Result<(), GatewayError> {
+    pub fn reschedule(
+        &self,
+        id: i64,
+        next_attempt_at: u64,
+        error: &str,
+    ) -> Result<(), GatewayError> {
         let error: String = error.chars().take(512).collect();
         self.with(|c| {
             c.execute(
@@ -374,7 +423,13 @@ impl Store {
 
     /// Queue depth per kind.
     pub fn queue_depth(&self, kind_: &str) -> Result<i64, GatewayError> {
-        self.with(|c| c.query_row("SELECT COUNT(*) FROM queue WHERE kind = ?1", params![kind_], |r| r.get(0)))
+        self.with(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM queue WHERE kind = ?1",
+                params![kind_],
+                |r| r.get(0),
+            )
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -395,7 +450,10 @@ impl Store {
     }
 
     /// By HashMail id (hex).
-    pub fn thread_by_hashgram_id(&self, hashgram_id: &str) -> Result<Option<ThreadRow>, GatewayError> {
+    pub fn thread_by_hashgram_id(
+        &self,
+        hashgram_id: &str,
+    ) -> Result<Option<ThreadRow>, GatewayError> {
         self.with(|c| {
             c.query_row(
                 "SELECT hashgram_id, message_id_header, thread_id FROM thread_map WHERE hashgram_id = ?1",
@@ -407,7 +465,10 @@ impl Store {
     }
 
     /// By normalised `Message-ID` value.
-    pub fn thread_by_header(&self, message_id_header: &str) -> Result<Option<ThreadRow>, GatewayError> {
+    pub fn thread_by_header(
+        &self,
+        message_id_header: &str,
+    ) -> Result<Option<ThreadRow>, GatewayError> {
         self.with(|c| {
             c.query_row(
                 "SELECT hashgram_id, message_id_header, thread_id FROM thread_map WHERE message_id_header = ?1",
@@ -426,7 +487,11 @@ impl Store {
     pub fn cursor(&self, name: &str) -> Result<u64, GatewayError> {
         self.with(|c| {
             let v: Option<i64> = c
-                .query_row("SELECT value FROM cursor WHERE name = ?1", params![name], |r| r.get(0))
+                .query_row(
+                    "SELECT value FROM cursor WHERE name = ?1",
+                    params![name],
+                    |r| r.get(0),
+                )
                 .optional()?;
             Ok(v.unwrap_or(0).max(0) as u64)
         })
@@ -449,8 +514,14 @@ impl Store {
     pub fn rate_hit(&self, key: &str, now: u64, window_secs: u64) -> Result<u32, GatewayError> {
         let floor = now.saturating_sub(window_secs) as i64;
         self.with(|c| {
-            c.execute("DELETE FROM rate_events WHERE key = ?1 AND at < ?2", params![key, floor])?;
-            c.execute("INSERT INTO rate_events(key, at) VALUES (?1, ?2)", params![key, now as i64])?;
+            c.execute(
+                "DELETE FROM rate_events WHERE key = ?1 AND at < ?2",
+                params![key, floor],
+            )?;
+            c.execute(
+                "INSERT INTO rate_events(key, at) VALUES (?1, ?2)",
+                params![key, now as i64],
+            )?;
             let n: i64 = c.query_row(
                 "SELECT COUNT(*) FROM rate_events WHERE key = ?1 AND at >= ?2",
                 params![key, floor],
@@ -470,7 +541,12 @@ fn row_to_thread(r: &rusqlite::Row<'_>) -> rusqlite::Result<ThreadRow> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -503,7 +579,10 @@ mod tests {
         };
         s.map_thread(&row, 1).unwrap();
         s.map_thread(&row, 2).unwrap(); // no-op
-        assert_eq!(s.thread_by_hashgram_id(&row.hashgram_id).unwrap().unwrap(), row);
+        assert_eq!(
+            s.thread_by_hashgram_id(&row.hashgram_id).unwrap().unwrap(),
+            row
+        );
         assert_eq!(s.thread_by_header("x@example.com").unwrap().unwrap(), row);
         assert!(s.thread_by_header("nope").unwrap().is_none());
     }
@@ -511,7 +590,9 @@ mod tests {
     #[test]
     fn queue_due_reschedule_dequeue() {
         let s = Store::open_in_memory().unwrap();
-        let id = s.enqueue(kind::INBOUND, &vec![1u8, 2, 3], 100, 100).unwrap();
+        let id = s
+            .enqueue(kind::INBOUND, &vec![1u8, 2, 3], 100, 100)
+            .unwrap();
         s.enqueue(kind::INBOUND, &vec![9u8], 100, 500).unwrap();
         let due: Vec<QueueItem<Vec<u8>>> = s.due(kind::INBOUND, 100, 10).unwrap();
         assert_eq!(due.len(), 1);
@@ -534,14 +615,40 @@ mod tests {
     #[test]
     fn inbound_and_outbound_logs() {
         let s = Store::open_in_memory().unwrap();
-        s.log_inbound(1, "a@example.com", "alice@hashgram.io", "m@example.com", "id1", status::QUEUED).unwrap();
+        s.log_inbound(
+            1,
+            "a@example.com",
+            "alice@hashgram.io",
+            "m@example.com",
+            "id1",
+            status::QUEUED,
+        )
+        .unwrap();
         assert!(s.inbound_seen("id1").unwrap());
         assert!(!s.inbound_seen("id2").unwrap());
         s.set_inbound_status("id1", status::DELIVERED).unwrap();
         let counts = s.inbound_counts().unwrap();
         assert_eq!(counts, vec![(status::DELIVERED.to_owned(), 1)]);
-        assert!(s.log_outbound(1, "o1", "hash1x", "b@example.com", "o1@hashgram.io", status::QUEUED).unwrap());
-        assert!(!s.log_outbound(1, "o1", "hash1x", "b@example.com", "o1@hashgram.io", status::QUEUED).unwrap());
+        assert!(s
+            .log_outbound(
+                1,
+                "o1",
+                "hash1x",
+                "b@example.com",
+                "o1@hashgram.io",
+                status::QUEUED
+            )
+            .unwrap());
+        assert!(!s
+            .log_outbound(
+                1,
+                "o1",
+                "hash1x",
+                "b@example.com",
+                "o1@hashgram.io",
+                status::QUEUED
+            )
+            .unwrap());
         assert!(s.outbound_seen("o1").unwrap());
         s.set_outbound_status("o1", status::FAILED, "550").unwrap();
     }

@@ -96,7 +96,11 @@ pub fn parse_extensions(reply: &Reply) -> Extensions {
             Some("8BITMIME") => ext.eight_bit_mime = true,
             Some("SIZE") => {
                 ext.size_supported = true;
-                if let Some(n) = it.next().and_then(|v| v.parse::<u64>().ok()).filter(|n| *n > 0) {
+                if let Some(n) = it
+                    .next()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .filter(|n| *n > 0)
+                {
                     ext.size = Some(n);
                 }
             }
@@ -143,7 +147,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
         loop {
             if let Some((line, used)) = split_line(&self.buf).map(|(l, n)| (l.to_vec(), n)) {
                 self.buf.drain(..used);
-                return String::from_utf8(line).map_err(|_| DeliveryError::Protocol("non-UTF-8 reply".into()));
+                return String::from_utf8(line)
+                    .map_err(|_| DeliveryError::Protocol("non-UTF-8 reply".into()));
             }
             if self.buf.len() > 64 * 1024 {
                 return Err(DeliveryError::Protocol("reply line too long".into()));
@@ -165,10 +170,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
         let mut code = 0u16;
         loop {
             let line = self.read_line().await?;
-            let (c, last, text) =
-                parse_reply_line(&line).ok_or_else(|| DeliveryError::Protocol(format!("bad reply line {line:?}")))?;
+            let (c, last, text) = parse_reply_line(&line)
+                .ok_or_else(|| DeliveryError::Protocol(format!("bad reply line {line:?}")))?;
             if code != 0 && c != code {
-                return Err(DeliveryError::Protocol("inconsistent multi-line reply codes".into()));
+                return Err(DeliveryError::Protocol(
+                    "inconsistent multi-line reply codes".into(),
+                ));
             }
             code = c;
             lines.push(text.to_owned());
@@ -211,7 +218,10 @@ struct Greeted<S> {
     ext: Extensions,
 }
 
-async fn greet<S: AsyncRead + AsyncWrite + Unpin>(mut conn: Conn<S>, helo: &str) -> Result<Greeted<S>, DeliveryError> {
+async fn greet<S: AsyncRead + AsyncWrite + Unpin>(
+    mut conn: Conn<S>,
+    helo: &str,
+) -> Result<Greeted<S>, DeliveryError> {
     let banner = conn.read_reply().await?;
     classify(banner, 220)?;
     let ehlo = match conn.cmd(&format!("EHLO {helo}"), 250).await {
@@ -242,9 +252,21 @@ async fn transaction<S: AsyncRead + AsyncWrite + Unpin>(
             )));
         }
     }
-    let body_param = if ext.eight_bit_mime { " BODY=8BITMIME" } else { "" };
-    let size_param = if ext.size_supported { format!(" SIZE={}", raw.len()) } else { String::new() };
-    conn.cmd(&format!("MAIL FROM:<{mail_from}>{size_param}{body_param}"), 250).await?;
+    let body_param = if ext.eight_bit_mime {
+        " BODY=8BITMIME"
+    } else {
+        ""
+    };
+    let size_param = if ext.size_supported {
+        format!(" SIZE={}", raw.len())
+    } else {
+        String::new()
+    };
+    conn.cmd(
+        &format!("MAIL FROM:<{mail_from}>{size_param}{body_param}"),
+        250,
+    )
+    .await?;
     let mut rejected = Vec::new();
     let mut accepted = 0usize;
     let mut last_transient: Option<Reply> = None;
@@ -285,7 +307,9 @@ pub async fn deliver_on<S: AsyncRead + AsyncWrite + Unpin>(
     let conn = Conn::new(stream, cfg.timeout);
     let Greeted { mut conn, ext } = greet(conn, &cfg.helo_hostname).await?;
     if cfg.require_tls {
-        return Err(DeliveryError::Tls("TLS required but this transport cannot upgrade".into()));
+        return Err(DeliveryError::Tls(
+            "TLS required but this transport cannot upgrade".into(),
+        ));
     }
     let (reply, rejected) = transaction(&mut conn, &ext, mail_from, rcpts, raw).await?;
     Ok(Delivered {
@@ -298,11 +322,13 @@ pub async fn deliver_on<S: AsyncRead + AsyncWrite + Unpin>(
 fn tls_connector() -> Result<tokio_rustls::TlsConnector, DeliveryError> {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .with_safe_default_protocol_versions()
-        .map_err(|e| DeliveryError::Tls(e.to_string()))?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| DeliveryError::Tls(e.to_string()))?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
     Ok(tokio_rustls::TlsConnector::from(Arc::new(config)))
 }
 
@@ -330,7 +356,9 @@ pub async fn deliver(
 
     if !ext.starttls {
         if cfg.require_tls {
-            return Err(DeliveryError::Tls(format!("{host} does not offer STARTTLS")));
+            return Err(DeliveryError::Tls(format!(
+                "{host} does not offer STARTTLS"
+            )));
         }
         let (reply, rejected) = transaction(&mut conn, &ext, mail_from, rcpts, raw).await?;
         return Ok(Delivered {
@@ -347,8 +375,10 @@ pub async fn deliver(
                 Ok(tls) => {
                     // RFC 3207 §4.2: the client MUST discard knowledge
                     // from before the upgrade and EHLO again.
-                    let Greeted { mut conn, ext } = greet_after_tls(Conn::new(tls, cfg.timeout), &cfg.helo_hostname).await?;
-                    let (reply, rejected) = transaction(&mut conn, &ext, mail_from, rcpts, raw).await?;
+                    let Greeted { mut conn, ext } =
+                        greet_after_tls(Conn::new(tls, cfg.timeout), &cfg.helo_hostname).await?;
+                    let (reply, rejected) =
+                        transaction(&mut conn, &ext, mail_from, rcpts, raw).await?;
                     return Ok(Delivered {
                         reply,
                         tls: true,
@@ -358,14 +388,20 @@ pub async fn deliver(
                 Err(e) => e.to_string(),
             }
         }
-        Err(DeliveryError::Transient(r)) | Err(DeliveryError::Permanent(r)) => format!("STARTTLS refused: {r}"),
+        Err(DeliveryError::Transient(r)) | Err(DeliveryError::Permanent(r)) => {
+            format!("STARTTLS refused: {r}")
+        }
         Err(e) => return Err(e),
     };
 
     if cfg.require_tls {
         return Err(DeliveryError::Tls(tls_failure));
     }
-    debug!(host, reason = tls_failure, "TLS upgrade failed; falling back to plaintext");
+    debug!(
+        host,
+        reason = tls_failure,
+        "TLS upgrade failed; falling back to plaintext"
+    );
     // The old connection is in an undefined state after a failed upgrade:
     // reconnect and do not try STARTTLS again.
     let tcp = connect(host, port, cfg.timeout).await?;
@@ -378,7 +414,11 @@ pub async fn deliver(
     })
 }
 
-async fn upgrade(tcp: TcpStream, host: &str, timeout: Duration) -> Result<tokio_rustls::client::TlsStream<TcpStream>, DeliveryError> {
+async fn upgrade(
+    tcp: TcpStream,
+    host: &str,
+    timeout: Duration,
+) -> Result<tokio_rustls::client::TlsStream<TcpStream>, DeliveryError> {
     let connector = tls_connector()?;
     let name = rustls::pki_types::ServerName::try_from(host.to_owned())
         .map_err(|e| DeliveryError::Tls(format!("server name {host}: {e}")))?;
@@ -389,14 +429,22 @@ async fn upgrade(tcp: TcpStream, host: &str, timeout: Duration) -> Result<tokio_
 }
 
 /// After STARTTLS there is no banner; only EHLO.
-async fn greet_after_tls<S: AsyncRead + AsyncWrite + Unpin>(mut conn: Conn<S>, helo: &str) -> Result<Greeted<S>, DeliveryError> {
+async fn greet_after_tls<S: AsyncRead + AsyncWrite + Unpin>(
+    mut conn: Conn<S>,
+    helo: &str,
+) -> Result<Greeted<S>, DeliveryError> {
     let ehlo = conn.cmd(&format!("EHLO {helo}"), 250).await?;
     let ext = parse_extensions(&ehlo);
     Ok(Greeted { conn, ext })
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -410,7 +458,10 @@ mod tests {
 
     /// A scripted MX: for each client line, the reply to send. Records
     /// everything it received.
-    async fn fake_mx<S: AsyncRead + AsyncWrite + Unpin>(mut s: S, script: Vec<(&'static str, &'static str)>) -> Vec<String> {
+    async fn fake_mx<S: AsyncRead + AsyncWrite + Unpin>(
+        mut s: S,
+        script: Vec<(&'static str, &'static str)>,
+    ) -> Vec<String> {
         let mut seen = Vec::new();
         s.write_all(b"220 mx.example.com ESMTP\r\n").await.unwrap();
         let mut buf = Vec::new();
@@ -446,7 +497,8 @@ mod tests {
                     .next()
                     .map(|(expect, reply)| {
                         assert!(
-                            line.to_ascii_uppercase().starts_with(&expect.to_ascii_uppercase()),
+                            line.to_ascii_uppercase()
+                                .starts_with(&expect.to_ascii_uppercase()),
                             "expected {expect}, got {line}"
                         );
                         reply
@@ -468,7 +520,10 @@ mod tests {
         let mx = tokio::spawn(fake_mx(
             b,
             vec![
-                ("EHLO", "250-mx.example.com\r\n250-SIZE 1000\r\n250 8BITMIME"),
+                (
+                    "EHLO",
+                    "250-mx.example.com\r\n250-SIZE 1000\r\n250 8BITMIME",
+                ),
                 ("MAIL FROM:<alice@hashgram.io> SIZE=", "250 ok"),
                 ("RCPT TO:<bob@example.com>", "250 ok"),
                 ("RCPT TO:<nobody@example.com>", "550 no such user"),
@@ -490,7 +545,10 @@ mod tests {
         assert_eq!(d.rejected[0].0, "nobody@example.com");
         let seen = mx.await.unwrap();
         assert_eq!(seen[0], "EHLO gw.hashgram.io");
-        assert!(seen[1].starts_with("MAIL FROM:<alice@hashgram.io> SIZE=") && seen[1].ends_with(" BODY=8BITMIME"));
+        assert!(
+            seen[1].starts_with("MAIL FROM:<alice@hashgram.io> SIZE=")
+                && seen[1].ends_with(" BODY=8BITMIME")
+        );
         assert!(seen.contains(&"D:..dot".to_owned()));
         assert!(seen.contains(&"D:end".to_owned()));
         assert_eq!(seen.last().unwrap(), "QUIT");
@@ -499,18 +557,55 @@ mod tests {
     #[tokio::test]
     async fn permanent_and_transient_errors_are_classified() {
         let (a, b) = tokio::io::duplex(65536);
-        tokio::spawn(fake_mx(b, vec![("EHLO", "250 mx"), ("MAIL", "550 5.1.8 sender rejected")]));
-        let e = deliver_on(&cfg(), a, "alice@hashgram.io", &["bob@example.com".into()], b"x").await.err().unwrap();
+        tokio::spawn(fake_mx(
+            b,
+            vec![("EHLO", "250 mx"), ("MAIL", "550 5.1.8 sender rejected")],
+        ));
+        let e = deliver_on(
+            &cfg(),
+            a,
+            "alice@hashgram.io",
+            &["bob@example.com".into()],
+            b"x",
+        )
+        .await
+        .err()
+        .unwrap();
         assert!(e.is_permanent());
 
         let (a, b) = tokio::io::duplex(65536);
-        tokio::spawn(fake_mx(b, vec![("EHLO", "250 mx"), ("MAIL", "250 ok"), ("RCPT", "451 greylisted")]));
-        let e = deliver_on(&cfg(), a, "alice@hashgram.io", &["bob@example.com".into()], b"x").await.err().unwrap();
+        tokio::spawn(fake_mx(
+            b,
+            vec![
+                ("EHLO", "250 mx"),
+                ("MAIL", "250 ok"),
+                ("RCPT", "451 greylisted"),
+            ],
+        ));
+        let e = deliver_on(
+            &cfg(),
+            a,
+            "alice@hashgram.io",
+            &["bob@example.com".into()],
+            b"x",
+        )
+        .await
+        .err()
+        .unwrap();
         assert!(matches!(e, DeliveryError::Transient(r) if r.code == 451));
 
         let (a, b) = tokio::io::duplex(65536);
         tokio::spawn(fake_mx(b, vec![("EHLO", "250-mx\r\n250 SIZE 5")]));
-        let e = deliver_on(&cfg(), a, "alice@hashgram.io", &["bob@example.com".into()], b"more than five").await.err().unwrap();
+        let e = deliver_on(
+            &cfg(),
+            a,
+            "alice@hashgram.io",
+            &["bob@example.com".into()],
+            b"more than five",
+        )
+        .await
+        .err()
+        .unwrap();
         assert!(matches!(e, DeliveryError::Permanent(r) if r.code == 552));
     }
 
@@ -520,13 +615,31 @@ mod tests {
         tokio::spawn(fake_mx(b, vec![("EHLO", "250 mx")]));
         let mut c = cfg();
         c.require_tls = true;
-        let e = deliver_on(&c, a, "alice@hashgram.io", &["bob@example.com".into()], b"x").await.err().unwrap();
+        let e = deliver_on(
+            &c,
+            a,
+            "alice@hashgram.io",
+            &["bob@example.com".into()],
+            b"x",
+        )
+        .await
+        .err()
+        .unwrap();
         assert!(matches!(e, DeliveryError::Tls(_)));
     }
 
     #[test]
     fn extension_parsing() {
-        let r = Reply::multi(250, vec!["mx".into(), "SIZE 52428800".into(), "starttls".into(), "8BITMIME".into(), "SIZE".into()]);
+        let r = Reply::multi(
+            250,
+            vec![
+                "mx".into(),
+                "SIZE 52428800".into(),
+                "starttls".into(),
+                "8BITMIME".into(),
+                "SIZE".into(),
+            ],
+        );
         let e = parse_extensions(&r);
         assert!(e.starttls && e.eight_bit_mime && e.size_supported);
         assert_eq!(e.size, Some(52_428_800));

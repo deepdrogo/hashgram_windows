@@ -15,7 +15,9 @@
 //! bodies, list headers — the recipient's client has no use for them and
 //! `ExternalMailMeta` has no room.
 
-use hashgram_app::mail::{MAX_ATTACHMENTS, MAX_BODY_HTML, MAX_BODY_TEXT, MAX_HEADER, MAX_MIME, MAX_SUBJECT};
+use hashgram_app::mail::{
+    MAX_ATTACHMENTS, MAX_BODY_HTML, MAX_BODY_TEXT, MAX_HEADER, MAX_MIME, MAX_SUBJECT,
+};
 use hashgram_app::pb as app;
 use mailparse::{DispositionType, MailAddr, MailHeaderMap, ParsedMail};
 
@@ -96,8 +98,16 @@ pub fn parse(raw: &[u8]) -> Result<InboundMail, GatewayError> {
     m.from_header = bound(&from_raw, MAX_HEADER);
     m.from = parse_mailboxes(&from_raw).into_iter().next();
     m.reply_to = parse_mailboxes(&h.get_first_value("Reply-To").unwrap_or_default());
-    m.to = h.get_all_values("To").iter().flat_map(|v| parse_mailboxes(v)).collect();
-    m.cc = h.get_all_values("Cc").iter().flat_map(|v| parse_mailboxes(v)).collect();
+    m.to = h
+        .get_all_values("To")
+        .iter()
+        .flat_map(|v| parse_mailboxes(v))
+        .collect();
+    m.cc = h
+        .get_all_values("Cc")
+        .iter()
+        .flat_map(|v| parse_mailboxes(v))
+        .collect();
     m.subject = clean_subject(&h.get_first_value("Subject").unwrap_or_default());
     m.message_id = h
         .get_first_value("Message-ID")
@@ -105,7 +115,12 @@ pub fn parse(raw: &[u8]) -> Result<InboundMail, GatewayError> {
         .filter(|v| !v.is_empty() && v.len() <= MAX_HEADER);
     m.in_reply_to = h
         .get_first_value("In-Reply-To")
-        .map(|v| split_references(&v).into_iter().next().unwrap_or_else(|| normalise_message_id(&v)))
+        .map(|v| {
+            split_references(&v)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| normalise_message_id(&v))
+        })
         .filter(|v| !v.is_empty() && v.len() <= MAX_HEADER);
     m.references = h
         .get_all_values("References")
@@ -149,10 +164,23 @@ fn bound(s: &str, max: usize) -> String {
 fn clean_subject(s: &str) -> String {
     let one_line: String = s
         .chars()
-        .map(|c| if c == '\r' || c == '\n' || c == '\t' { ' ' } else { c })
+        .map(|c| {
+            if c == '\r' || c == '\n' || c == '\t' {
+                ' '
+            } else {
+                c
+            }
+        })
         .filter(|c| !c.is_control())
         .collect();
-    bound(one_line.split_whitespace().collect::<Vec<_>>().join(" ").as_str(), MAX_SUBJECT)
+    bound(
+        one_line
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .as_str(),
+        MAX_SUBJECT,
+    )
 }
 
 /// Parses an address header into mailboxes; garbage yields nothing rather
@@ -166,13 +194,19 @@ pub fn parse_mailboxes(value: &str) -> Vec<Mailbox> {
     for a in list.iter() {
         match a {
             MailAddr::Single(s) => out.push(Mailbox {
-                name: bound(s.display_name.as_deref().unwrap_or("").trim(), hashgram_app::mail::MAX_NAME),
+                name: bound(
+                    s.display_name.as_deref().unwrap_or("").trim(),
+                    hashgram_app::mail::MAX_NAME,
+                ),
                 addr: s.addr.trim().to_owned(),
             }),
             MailAddr::Group(g) => {
                 for s in &g.addrs {
                     out.push(Mailbox {
-                        name: bound(s.display_name.as_deref().unwrap_or("").trim(), hashgram_app::mail::MAX_NAME),
+                        name: bound(
+                            s.display_name.as_deref().unwrap_or("").trim(),
+                            hashgram_app::mail::MAX_NAME,
+                        ),
                         addr: s.addr.trim().to_owned(),
                     });
                 }
@@ -194,10 +228,18 @@ pub fn parse_auth_results(value: Option<&str>) -> AuthResults {
             continue; // authserv-id
         }
         let part = part.trim();
-        let Some(first) = part.split_whitespace().next() else { continue };
-        let Some((method, result)) = first.split_once('=') else { continue };
+        let Some(first) = part.split_whitespace().next() else {
+            continue;
+        };
+        let Some((method, result)) = first.split_once('=') else {
+            continue;
+        };
         let result = result.trim().to_ascii_lowercase();
-        let result: String = result.chars().take(32).filter(|c| c.is_ascii_alphanumeric()).collect();
+        let result: String = result
+            .chars()
+            .take(32)
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
         if result.is_empty() {
             continue;
         }
@@ -218,7 +260,10 @@ pub fn parse_spam_score(score: Option<&str>, status: Option<&str>) -> u32 {
     let from_score = score.and_then(|s| s.trim().parse::<f64>().ok());
     let from_status = status.and_then(|s| {
         s.split(|c: char| c.is_whitespace() || c == ',' || c == ';')
-            .find_map(|tok| tok.strip_prefix("score=").and_then(|v| v.parse::<f64>().ok()))
+            .find_map(|tok| {
+                tok.strip_prefix("score=")
+                    .and_then(|v| v.parse::<f64>().ok())
+            })
     });
     let points = from_score.or(from_status).unwrap_or(0.0);
     if !points.is_finite() || points <= 0.0 {
@@ -290,7 +335,11 @@ impl BodyCollector {
                 // A second body of the same kind (e.g. a forwarded
                 // signature block): append to text so nothing is lost.
                 if let Ok(extra) = part.get_body() {
-                    let t = if mime == "text/html" { html_to_text(&extra) } else { extra };
+                    let t = if mime == "text/html" {
+                        html_to_text(&extra)
+                    } else {
+                        extra
+                    };
                     let cur = self.text.get_or_insert_with(String::new);
                     if !t.trim().is_empty() {
                         cur.push_str("\n\n");
@@ -320,7 +369,14 @@ impl BodyCollector {
             .unwrap_or_default();
         self.attachments.push(InboundAttachment {
             name: safe_filename(filename.as_deref().unwrap_or(""), &fallback),
-            mime: bound(if mime.is_empty() { "application/octet-stream" } else { &mime }, MAX_MIME),
+            mime: bound(
+                if mime.is_empty() {
+                    "application/octet-stream"
+                } else {
+                    &mime
+                },
+                MAX_MIME,
+            ),
             content_id,
             data,
         });
@@ -369,7 +425,8 @@ fn finish_body(m: &mut InboundMail, b: BodyCollector) {
             "\n\n[gateway: {} attachment(s) omitted, over the {MAX_ATTACHMENTS} limit]",
             b.dropped_attachments
         ));
-        m.notes.push(format!("{} attachments dropped", b.dropped_attachments));
+        m.notes
+            .push(format!("{} attachments dropped", b.dropped_attachments));
     }
     m.body_text = text;
     m.body_html = html;
@@ -377,7 +434,12 @@ fn finish_body(m: &mut InboundMail, b: BodyCollector) {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -400,7 +462,10 @@ mod tests {
         assert_eq!(m.body_text, "Hello there\nsecond line\n");
         assert!(m.body_html.is_empty());
         assert!(m.attachments.is_empty());
-        assert_eq!(m.auth.as_strings(), vec!["spf=pass", "dkim=pass", "dmarc=pass"]);
+        assert_eq!(
+            m.auth.as_strings(),
+            vec!["spf=pass", "dkim=pass", "dmarc=pass"]
+        );
         assert_eq!(m.spam_score, 150);
         assert_eq!(m.importance, app::MailImportance::High);
     }
@@ -460,13 +525,18 @@ mod tests {
     #[test]
     fn auth_results_and_spam_parsing() {
         assert_eq!(parse_auth_results(None), AuthResults::none());
-        let a = parse_auth_results(Some("mx; spf=softfail (x) smtp.mailfrom=a; dkim=fail header.d=x; dkim=pass header.d=y"));
+        let a = parse_auth_results(Some(
+            "mx; spf=softfail (x) smtp.mailfrom=a; dkim=fail header.d=x; dkim=pass header.d=y",
+        ));
         assert_eq!(a.spf, "softfail");
         assert_eq!(a.dkim, "pass"); // any passing signature counts
         assert_eq!(a.dmarc, "none");
         assert!(a.authenticated());
         assert_eq!(parse_spam_score(Some("7.25"), None), 725);
-        assert_eq!(parse_spam_score(None, Some("Yes, score=12.0 required=5.0 tests=X")), 1000);
+        assert_eq!(
+            parse_spam_score(None, Some("Yes, score=12.0 required=5.0 tests=X")),
+            1000
+        );
         assert_eq!(parse_spam_score(Some("-3"), None), 0);
         assert_eq!(parse_spam_score(Some("nan"), None), 0);
         assert_eq!(parse_spam_score(None, None), 0);
@@ -493,7 +563,9 @@ mod tests {
     fn attachment_limit_is_noted() {
         let mut raw = String::from("From: a@example.com\r\nTo: b@hashgram.io\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nt\r\n");
         for i in 0..(MAX_ATTACHMENTS + 3) {
-            raw.push_str(&format!("--b\r\nContent-Type: application/octet-stream; name=\"f{i}\"\r\n\r\nx\r\n"));
+            raw.push_str(&format!(
+                "--b\r\nContent-Type: application/octet-stream; name=\"f{i}\"\r\n\r\nx\r\n"
+            ));
         }
         raw.push_str("--b--\r\n");
         let m = parse(raw.as_bytes()).unwrap();

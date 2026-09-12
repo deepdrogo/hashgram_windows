@@ -1,5 +1,11 @@
 //! The `app_message` fuzz target as an ordinary test: random and mutated
 //! inputs through every application decoder must never panic.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 
 use hashgram_app::{circle, drive, envelope, mail, pb, space};
 use prost::Message;

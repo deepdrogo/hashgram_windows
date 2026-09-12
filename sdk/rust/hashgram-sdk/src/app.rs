@@ -29,11 +29,11 @@ use hashgram_net::NetworkIdentity;
 use hashgram_proto::chat;
 
 use crate::account::Account;
-use hashgram_identity::vault::KdfCost;
 use crate::link::Link;
 use crate::messaging::{Messaging, Received};
 use crate::store::LocalStore;
 use crate::{ChainClient, Multiaddr, SdkError};
+use hashgram_identity::vault::KdfCost;
 
 /// Where a client keeps its files.
 #[derive(Debug, Clone)]
@@ -139,14 +139,15 @@ impl HashgramOne {
     /// Builds the facade around an already-opened account (used by
     /// onboarding after `Account::create`).
     pub async fn with_account(config: Config, account: Account) -> Result<Self, SdkError> {
-        let bootstrap: Vec<Multiaddr> = if config.bootstrap.is_empty() && config.network.is_mainnet() {
-            hashgram_net::mainnet_bootstrap_peers()
-                .iter()
-                .filter_map(|s| s.parse().ok())
-                .collect()
-        } else {
-            config.bootstrap.clone()
-        };
+        let bootstrap: Vec<Multiaddr> =
+            if config.bootstrap.is_empty() && config.network.is_mainnet() {
+                hashgram_net::mainnet_bootstrap_peers()
+                    .iter()
+                    .filter_map(|s| s.parse().ok())
+                    .collect()
+            } else {
+                config.bootstrap.clone()
+            };
         let link = Arc::new(
             Link::connect(
                 &config.network,
@@ -250,17 +251,24 @@ impl HashgramOne {
 
     /// Tag of a group.
     pub(crate) fn group_kind(&self, gid_hex: &str) -> Option<String> {
-        self.store.get(group_kind::NS, gid_hex.as_bytes()).ok().flatten()
+        self.store
+            .get(group_kind::NS, gid_hex.as_bytes())
+            .ok()
+            .flatten()
     }
 
     pub(crate) fn set_group_kind(&self, gid_hex: &str, kind: &str) -> Result<(), SdkError> {
-        self.store.put(group_kind::NS, gid_hex.as_bytes(), &kind.to_owned())
+        self.store
+            .put(group_kind::NS, gid_hex.as_bytes(), &kind.to_owned())
     }
 
     /// Finds the conversation group whose member address set is exactly
     /// `participants ∪ {me}`, or creates it. Circles and Spaces are never
     /// returned. Returns the group id bytes.
-    pub(crate) async fn conversation_group(&mut self, participants: &[String]) -> Result<Vec<u8>, SdkError> {
+    pub(crate) async fn conversation_group(
+        &mut self,
+        participants: &[String],
+    ) -> Result<Vec<u8>, SdkError> {
         let mut want: Vec<String> = participants.to_vec();
         want.push(self.account.address().to_owned());
         want.sort();
@@ -307,7 +315,11 @@ impl HashgramOne {
     }
 
     /// Sends an application message to a group.
-    pub(crate) async fn send_app(&mut self, group_id: &[u8], body: app::app_message::Body) -> Result<Vec<u8>, SdkError> {
+    pub(crate) async fn send_app(
+        &mut self,
+        group_id: &[u8],
+        body: app::app_message::Body,
+    ) -> Result<Vec<u8>, SdkError> {
         let msg = envelope::wrap(body)?;
         let id = msg.id.clone();
         let chat_msg = envelope::to_chat(msg);

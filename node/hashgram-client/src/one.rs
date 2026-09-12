@@ -676,7 +676,13 @@ fn resolve_folder(one: &mut HashgramOne, folder_path: &str) -> anyhow::Result<St
 }
 
 fn guess_mime(name: &str) -> &'static str {
-    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+    match name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "txt" | "md" => "text/plain",
         "pdf" => "application/pdf",
         "png" => "image/png",
@@ -721,10 +727,18 @@ async fn dispatch(one: &mut HashgramOne, json: bool, cmd: OneCmd) -> anyhow::Res
         },
         OneCmd::Backup { cmd } => match cmd {
             BackupCmd::Export { out: path, light } => {
-                let pass = std::env::var("HASHGRAM_BACKUP_PASSPHRASE").context("set HASHGRAM_BACKUP_PASSPHRASE")?;
+                let pass = std::env::var("HASHGRAM_BACKUP_PASSPHRASE")
+                    .context("set HASHGRAM_BACKUP_PASSPHRASE")?;
                 let cost = if light { Some((8 * 1024, 1, 1)) } else { None };
-                let meta = hashgram_sdk::backup::export_backup(&one.account, Path::new(&path), &pass, cost)?;
-                out(json, &meta, || format!("backup written to {path} (partial={})", meta.partial));
+                let meta = hashgram_sdk::backup::export_backup(
+                    &one.account,
+                    Path::new(&path),
+                    &pass,
+                    cost,
+                )?;
+                out(json, &meta, || {
+                    format!("backup written to {path} (partial={})", meta.partial)
+                });
                 Ok(())
             }
             BackupCmd::Inspect { file } => {
@@ -736,7 +750,17 @@ async fn dispatch(one: &mut HashgramOne, json: bool, cmd: OneCmd) -> anyhow::Res
         },
         OneCmd::Balance => {
             let b = one.wallet().balance(None).await?;
-            out(json, &b, || format!("{}\n{}{}", b.address, b.display, b.verification.as_ref().map(|v| format!("\n{v}")).unwrap_or_default()));
+            out(json, &b, || {
+                format!(
+                    "{}\n{}{}",
+                    b.address,
+                    b.display,
+                    b.verification
+                        .as_ref()
+                        .map(|v| format!("\n{v}"))
+                        .unwrap_or_default()
+                )
+            });
             Ok(())
         }
         OneCmd::Mail { cmd } => mail(one, json, cmd).await,
@@ -792,22 +816,46 @@ async fn mail(one: &mut HashgramOne, json: bool, cmd: MailCmd) -> anyhow::Result
             draft.request_read_receipt = read_receipt;
             for f in &attach {
                 let bytes = std::fs::read(f).with_context(|| format!("reading {f}"))?;
-                let name = Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.clone());
-                draft.attachments.push(one.mail().make_attachment(&name, guess_mime(&name), &bytes).await?);
+                let name = Path::new(f)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| f.clone());
+                draft.attachments.push(
+                    one.mail()
+                        .make_attachment(&name, guess_mime(&name), &bytes)
+                        .await?,
+                );
             }
-            let recipients: Vec<String> = draft.to.iter().chain(draft.cc.iter()).map(|a| a.address.clone()).collect();
+            let recipients: Vec<String> = draft
+                .to
+                .iter()
+                .chain(draft.cc.iter())
+                .map(|a| a.address.clone())
+                .collect();
             for e in &attach_drive {
                 let id = resolve_entry(one, e)?;
-                draft.attachments.push(one.mail().attach_from_drive(&id, &recipients, false).await?);
+                draft.attachments.push(
+                    one.mail()
+                        .attach_from_drive(&id, &recipients, false)
+                        .await?,
+                );
             }
             for e in &attach_drive_live {
                 let id = resolve_entry(one, e)?;
-                draft.attachments.push(one.mail().attach_from_drive(&id, &recipients, true).await?);
+                draft
+                    .attachments
+                    .push(one.mail().attach_from_drive(&id, &recipients, true).await?);
             }
             let id = one.mail().send(draft).await?;
-            out(json, &serde_json::json!({ "message_id": id }), || format!("sent {id}"));
+            out(json, &serde_json::json!({ "message_id": id }), || {
+                format!("sent {id}")
+            });
         }
-        MailCmd::List { folder: f, limit, threads } => {
+        MailCmd::List {
+            folder: f,
+            limit,
+            threads,
+        } => {
             let rows = if threads {
                 one.mail().threads(&f, 0, limit)?
             } else {
@@ -823,10 +871,18 @@ async fn mail(one: &mut HashgramOne, json: bool, cmd: MailCmd) -> anyhow::Result
                             "{} {} {:<44} {:<40} {}{}",
                             if r.read { " " } else { "*" },
                             if r.starred { "★" } else { " " },
-                            if r.from_username.is_empty() { r.from.clone() } else { format!("@{}", r.from_username) },
+                            if r.from_username.is_empty() {
+                                r.from.clone()
+                            } else {
+                                format!("@{}", r.from_username)
+                            },
                             r.subject,
                             r.id,
-                            if r.attachments > 0 { format!(" [{} att]", r.attachments) } else { String::new() }
+                            if r.attachments > 0 {
+                                format!(" [{} att]", r.attachments)
+                            } else {
+                                String::new()
+                            }
                         )
                     })
                     .collect::<Vec<_>>()
@@ -837,7 +893,13 @@ async fn mail(one: &mut HashgramOne, json: bool, cmd: MailCmd) -> anyhow::Result
             let rec = one.mail().get(&id)?.context("no such message")?;
             out(json, &rec, || {
                 let m = &rec.message;
-                let fmt = |a: &app::MailAddress| if a.username.is_empty() { a.address.clone() } else { format!("@{} <{}>", a.username, a.address) };
+                let fmt = |a: &app::MailAddress| {
+                    if a.username.is_empty() {
+                        a.address.clone()
+                    } else {
+                        format!("@{} <{}>", a.username, a.address)
+                    }
+                };
                 format!(
                     "From: {}\nTo: {}\nCc: {}\nSubject: {}\nDate: {}\nFolder: {}{}{}\nAttachments: {}\n\n{}",
                     m.from.as_ref().map(fmt).unwrap_or_default(),
@@ -861,7 +923,16 @@ async fn mail(one: &mut HashgramOne, json: bool, cmd: MailCmd) -> anyhow::Result
                     t.subject,
                     t.messages.len(),
                     t.unread,
-                    t.messages.iter().map(|m| format!("  {} {} — {}", m.message.created_at_ms, m.authenticated_sender, m.message.body_text.chars().take(80).collect::<String>())).collect::<Vec<_>>().join("\n")
+                    t.messages
+                        .iter()
+                        .map(|m| format!(
+                            "  {} {} — {}",
+                            m.message.created_at_ms,
+                            m.authenticated_sender,
+                            m.message.body_text.chars().take(80).collect::<String>()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 )
             });
         }
@@ -895,15 +966,34 @@ async fn mail(one: &mut HashgramOne, json: bool, cmd: MailCmd) -> anyhow::Result
         }
         MailCmd::Search { query, limit } => {
             let rows = one.mail().search(&query, limit)?;
-            out(json, &rows, || rows.iter().map(|r| format!("{} {} {}", r.folder, r.subject, r.id)).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|r| format!("{} {} {}", r.folder, r.subject, r.id))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         MailCmd::Counts => {
             let c = one.mail().counts();
-            out(json, &c, || c.iter().map(|(f, n)| format!("{f:<9} {:>5} total {:>5} unread", n.total, n.unread)).collect::<Vec<_>>().join("\n"));
+            out(json, &c, || {
+                c.iter()
+                    .map(|(f, n)| format!("{f:<9} {:>5} total {:>5} unread", n.total, n.unread))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
-        MailCmd::Attachment { id, index, out: path } => {
+        MailCmd::Attachment {
+            id,
+            index,
+            out: path,
+        } => {
             let rec = one.mail().get(&id)?.context("no such message")?;
-            let a = rec.message.attachments.get(index).context("no such attachment")?.clone();
+            let a = rec
+                .message
+                .attachments
+                .get(index)
+                .context("no such attachment")?
+                .clone();
             let bytes = one.mail().attachment_bytes(&a).await?;
             std::fs::write(&path, &bytes)?;
             println!("wrote {} bytes to {path}", bytes.len());
@@ -930,27 +1020,58 @@ async fn drive(one: &mut HashgramOne, json: bool, cmd: DriveCmd) -> anyhow::Resu
                     return "(empty)".into();
                 }
                 rows.iter()
-                    .map(|e| format!("{:<6} {:>10} {} {}{}", e.kind, e.size, e.id, e.name, if e.starred { " ★" } else { "" }))
+                    .map(|e| {
+                        format!(
+                            "{:<6} {:>10} {} {}{}",
+                            e.kind,
+                            e.size,
+                            e.id,
+                            e.name,
+                            if e.starred { " ★" } else { "" }
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("\n")
             });
         }
         DriveCmd::Mkdir { path } => {
-            let (parent, name) = path.trim_end_matches('/').rsplit_once('/').map(|(p, n)| (p.to_owned(), n.to_owned())).unwrap_or((String::new(), path.clone()));
+            let (parent, name) = path
+                .trim_end_matches('/')
+                .rsplit_once('/')
+                .map(|(p, n)| (p.to_owned(), n.to_owned()))
+                .unwrap_or((String::new(), path.clone()));
             let parent_id = resolve_folder(one, if parent.is_empty() { "/" } else { &parent })?;
             let id = one.drive().mkdir(&parent_id, &name)?;
             println!("{id}");
         }
-        DriveCmd::Put { file, folder: f, mime, name } => {
+        DriveCmd::Put {
+            file,
+            folder: f,
+            mime,
+            name,
+        } => {
             let bytes = std::fs::read(&file).with_context(|| format!("reading {file}"))?;
-            let name = name.unwrap_or_else(|| Path::new(&file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(file.clone()));
+            let name = name.unwrap_or_else(|| {
+                Path::new(&file)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or(file.clone())
+            });
             let mime = mime.unwrap_or_else(|| guess_mime(&name).to_owned());
             let parent = resolve_folder(one, &f)?;
             let id = one.drive().upload(&parent, &name, &mime, &bytes).await?;
             let rev = one.drive().commit().await?;
-            out(json, &serde_json::json!({"entry_id": id, "revision": rev}), || format!("{id} (manifest revision {rev})"));
+            out(
+                json,
+                &serde_json::json!({"entry_id": id, "revision": rev}),
+                || format!("{id} (manifest revision {rev})"),
+            );
         }
-        DriveCmd::Get { entry, out: path, version } => {
+        DriveCmd::Get {
+            entry,
+            out: path,
+            version,
+        } => {
             let id = resolve_entry(one, &entry)?;
             let bytes = match version {
                 Some(v) => one.drive().download_version(&id, v).await?,
@@ -997,7 +1118,12 @@ async fn drive(one: &mut HashgramOne, json: bool, cmd: DriveCmd) -> anyhow::Resu
         }
         DriveCmd::Trash => {
             let rows = one.drive().trash_list();
-            out(json, &rows, || rows.iter().map(|e| format!("{:<6} {} {}", e.kind, e.id, e.path)).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|e| format!("{:<6} {} {}", e.kind, e.id, e.path))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         DriveCmd::EmptyTrash => {
             let n = one.drive().empty_trash()?;
@@ -1007,7 +1133,20 @@ async fn drive(one: &mut HashgramOne, json: bool, cmd: DriveCmd) -> anyhow::Resu
         DriveCmd::Versions { entry } => {
             let id = resolve_entry(one, &entry)?;
             let v = one.drive().versions(&id)?;
-            out(json, &v, || v.iter().map(|x| format!("v{} {} bytes {} {}", x.version_no, x.object.as_ref().map(|o| o.size).unwrap_or(0), x.created_at_ms, x.note)).collect::<Vec<_>>().join("\n"));
+            out(json, &v, || {
+                v.iter()
+                    .map(|x| {
+                        format!(
+                            "v{} {} bytes {} {}",
+                            x.version_no,
+                            x.object.as_ref().map(|o| o.size).unwrap_or(0),
+                            x.created_at_ms,
+                            x.note
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         DriveCmd::RestoreVersion { entry, version } => {
             let id = resolve_entry(one, &entry)?;
@@ -1026,12 +1165,26 @@ async fn drive(one: &mut HashgramOne, json: bool, cmd: DriveCmd) -> anyhow::Resu
             one.drive().star(&id, !off)?;
             println!("ok");
         }
-        DriveCmd::Share { entry, grantees, live, note } => {
+        DriveCmd::Share {
+            entry,
+            grantees,
+            live,
+            note,
+        } => {
             let id = resolve_entry(one, &entry)?;
-            let mode = if live { app::DriveShareMode::Live } else { app::DriveShareMode::Snapshot };
-            let cap = one.drive().share(&id, &grantees, mode, app::DrivePermission::Read, &note).await?;
+            let mode = if live {
+                app::DriveShareMode::Live
+            } else {
+                app::DriveShareMode::Snapshot
+            };
+            let cap = one
+                .drive()
+                .share(&id, &grantees, mode, app::DrivePermission::Read, &note)
+                .await?;
             one.drive().commit().await?;
-            out(json, &cap, || format!("share {} ({:?}) sent", hex::encode(&cap.share_id), mode));
+            out(json, &cap, || {
+                format!("share {} ({:?}) sent", hex::encode(&cap.share_id), mode)
+            });
         }
         DriveCmd::Revoke { share_id } => {
             one.drive().revoke(&share_id).await?;
@@ -1040,22 +1193,68 @@ async fn drive(one: &mut HashgramOne, json: bool, cmd: DriveCmd) -> anyhow::Resu
         }
         DriveCmd::Shares => {
             let s = one.drive().shares();
-            out(json, &s, || s.iter().map(|r| format!("{} entry {} → {} {}{}", hex::encode(&r.share_id), hex::encode(&r.entry_id), r.grantee, if r.mode == app::DriveShareMode::Live as i32 { "live" } else { "snapshot" }, if r.revoked { " (revoked)" } else { "" })).collect::<Vec<_>>().join("\n"));
+            out(json, &s, || {
+                s.iter()
+                    .map(|r| {
+                        format!(
+                            "{} entry {} → {} {}{}",
+                            hex::encode(&r.share_id),
+                            hex::encode(&r.entry_id),
+                            r.grantee,
+                            if r.mode == app::DriveShareMode::Live as i32 {
+                                "live"
+                            } else {
+                                "snapshot"
+                            },
+                            if r.revoked { " (revoked)" } else { "" }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         DriveCmd::SharedWithMe => {
             let s = one.drive().shared_with_me()?;
-            out(json, &s, || s.iter().map(|r| format!("{} from {} {} ({} bytes, v{}){}{}", hex::encode(&r.capability.share_id), r.from, r.capability.name, r.capability.size, r.capability.version_no, if r.capability.folder { " [folder]" } else { "" }, if r.revoked { " (revoked)" } else { "" })).collect::<Vec<_>>().join("\n"));
+            out(json, &s, || {
+                s.iter()
+                    .map(|r| {
+                        format!(
+                            "{} from {} {} ({} bytes, v{}){}{}",
+                            hex::encode(&r.capability.share_id),
+                            r.from,
+                            r.capability.name,
+                            r.capability.size,
+                            r.capability.version_no,
+                            if r.capability.folder { " [folder]" } else { "" },
+                            if r.revoked { " (revoked)" } else { "" }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
-        DriveCmd::GetShared { share_id, out: path } => {
+        DriveCmd::GetShared {
+            share_id,
+            out: path,
+        } => {
             let s = one.drive().shared_with_me()?;
-            let rec = s.into_iter().find(|r| hex::encode(&r.capability.share_id) == share_id).context("no such share")?;
+            let rec = s
+                .into_iter()
+                .find(|r| hex::encode(&r.capability.share_id) == share_id)
+                .context("no such share")?;
             let bytes = one.drive().download_capability(&rec.capability).await?;
             std::fs::write(&path, &bytes)?;
             println!("wrote {} bytes to {path}", bytes.len());
         }
-        DriveCmd::SaveShared { share_id, folder: f } => {
+        DriveCmd::SaveShared {
+            share_id,
+            folder: f,
+        } => {
             let s = one.drive().shared_with_me()?;
-            let rec = s.into_iter().find(|r| hex::encode(&r.capability.share_id) == share_id).context("no such share")?;
+            let rec = s
+                .into_iter()
+                .find(|r| hex::encode(&r.capability.share_id) == share_id)
+                .context("no such share")?;
             let parent = resolve_folder(one, &f)?;
             let id = one.drive().save_capability(&rec.capability, &parent)?;
             one.drive().commit().await?;
@@ -1071,7 +1270,12 @@ async fn drive(one: &mut HashgramOne, json: bool, cmd: DriveCmd) -> anyhow::Resu
         }
         DriveCmd::Search { query } => {
             let rows = one.drive().search(&query, 50);
-            out(json, &rows, || rows.iter().map(|e| format!("{:<6} {} {}", e.kind, e.id, e.path)).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|e| format!("{:<6} {} {}", e.kind, e.id, e.path))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
     }
     Ok(())
@@ -1131,14 +1335,33 @@ async fn people(one: &mut HashgramOne, json: bool, cmd: PeopleCmd) -> anyhow::Re
                 "blocked" => one.people().blocked(),
                 _ => one.people().all(),
             };
-            out(json, &rows, || rows.iter().map(|r| format!("{} {} {} [{}]", r.address, r.username, r.display_name, r.states.join(","))).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|r| {
+                        format!(
+                            "{} {} {} [{}]",
+                            r.address,
+                            r.username,
+                            r.display_name,
+                            r.states.join(",")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         PeopleCmd::Name { name } => {
             one.people().set_my_display_name(&name)?;
             println!("ok");
         }
-        PeopleCmd::Card { address, bio, disclose_wallet } => {
-            one.people().send_card(&address, &bio, disclose_wallet).await?;
+        PeopleCmd::Card {
+            address,
+            bio,
+            disclose_wallet,
+        } => {
+            one.people()
+                .send_card(&address, &bio, disclose_wallet)
+                .await?;
             println!("card sent");
         }
     }
@@ -1152,69 +1375,180 @@ async fn feed(one: &mut HashgramOne, json: bool, cmd: FeedCmd) -> anyhow::Result
             println!("{id}");
         }
         FeedCmd::Comment { post, text } => println!("{}", one.feed().comment(&post, &text).await?),
-        FeedCmd::React { target, reaction } => println!("{}", one.feed().react(&target, &reaction).await?),
-        FeedCmd::Repost { post, comment } => println!("{}", one.feed().repost(&post, &comment).await?),
+        FeedCmd::React { target, reaction } => {
+            println!("{}", one.feed().react(&target, &reaction).await?)
+        }
+        FeedCmd::Repost { post, comment } => {
+            println!("{}", one.feed().repost(&post, &comment).await?)
+        }
         FeedCmd::Following { limit } => {
             one.feed().refresh().await?;
             let rows = one.feed().following(0, limit)?;
-            out(json, &rows, || rows.iter().map(|i| format!("{} {} {} {}", i.timestamp, i.author, i.kind, i.payload.get("text").and_then(|t| t.as_str()).unwrap_or(""))).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|i| {
+                        format!(
+                            "{} {} {} {}",
+                            i.timestamp,
+                            i.author,
+                            i.kind,
+                            i.payload.get("text").and_then(|t| t.as_str()).unwrap_or("")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         FeedCmd::Friends { limit } => {
             one.feed().refresh().await?;
             let rows = one.feed().friends(0, limit)?;
-            out(json, &rows, || rows.iter().map(|i| format!("{} {} {}", i.timestamp, i.author, i.payload.get("text").and_then(|t| t.as_str()).unwrap_or(""))).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|i| {
+                        format!(
+                            "{} {} {}",
+                            i.timestamp,
+                            i.author,
+                            i.payload.get("text").and_then(|t| t.as_str()).unwrap_or("")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         FeedCmd::Author { address, limit } => {
             one.feed().refresh_author(&address, 100).await?;
             let rows = one.feed().author(&address, 0, limit)?;
-            out(json, &rows, || rows.iter().map(|i| format!("{} {} {} {}", i.timestamp, i.kind, i.id, i.payload.get("text").and_then(|t| t.as_str()).unwrap_or(""))).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|i| {
+                        format!(
+                            "{} {} {} {}",
+                            i.timestamp,
+                            i.kind,
+                            i.id,
+                            i.payload.get("text").and_then(|t| t.as_str()).unwrap_or("")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         FeedCmd::Thread { post } => {
-            let t = one.feed().thread(&post)?.context("post not cached; refresh its author first")?;
+            let t = one
+                .feed()
+                .thread(&post)?
+                .context("post not cached; refresh its author first")?;
             out(json, &t, || format!("{t:#?}"));
         }
         FeedCmd::Refresh => println!("{} new events", one.feed().refresh().await?),
-        FeedCmd::Profile { name, bio } => println!("{}", one.feed().update_profile(&name, &bio, "").await?),
+        FeedCmd::Profile { name, bio } => {
+            println!("{}", one.feed().update_profile(&name, &bio, "").await?)
+        }
     }
     Ok(())
 }
 
 async fn circle(one: &mut HashgramOne, json: bool, cmd: CircleCmd) -> anyhow::Result<()> {
     match cmd {
-        CircleCmd::Create { name, description, members } => println!("{}", one.circles().create(&name, &description, &members).await?),
+        CircleCmd::Create {
+            name,
+            description,
+            members,
+        } => println!(
+            "{}",
+            one.circles().create(&name, &description, &members).await?
+        ),
         CircleCmd::List => {
             let rows = one.circles().list()?;
-            out(json, &rows, || rows.iter().map(|c| format!("{} {} ({} members)", c.id, c.name, c.members.len())).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|c| format!("{} {} ({} members)", c.id, c.name, c.members.len()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         CircleCmd::Add { circle, address } => {
             one.circles().add_member(&circle, &address).await?;
             println!("ok");
         }
-        CircleCmd::Remove { circle, address } => println!("removed {} devices", one.circles().remove_member(&circle, &address).await?),
+        CircleCmd::Remove { circle, address } => println!(
+            "removed {} devices",
+            one.circles().remove_member(&circle, &address).await?
+        ),
         CircleCmd::Leave { circle } => {
             one.circles().leave(&circle).await?;
             println!("left");
         }
-        CircleCmd::Post { circle, text } => println!("{}", one.circles().post(&circle, &text, vec![], vec![], None).await?),
-        CircleCmd::Poll { circle, question, options } => {
+        CircleCmd::Post { circle, text } => println!(
+            "{}",
+            one.circles()
+                .post(&circle, &text, vec![], vec![], None)
+                .await?
+        ),
+        CircleCmd::Poll {
+            circle,
+            question,
+            options,
+        } => {
             let poll = app::Poll {
                 question,
                 options,
                 multiple_choice: false,
                 closes_at_ms: 0,
             };
-            println!("{}", one.circles().post(&circle, "", vec![], vec![], Some(poll)).await?)
+            println!(
+                "{}",
+                one.circles()
+                    .post(&circle, "", vec![], vec![], Some(poll))
+                    .await?
+            )
         }
-        CircleCmd::Comment { circle, post, text } => println!("{}", one.circles().comment(&circle, &post, &text).await?),
-        CircleCmd::React { circle, target, reaction } => println!("{}", one.circles().react(&circle, &target, &reaction).await?),
-        CircleCmd::Vote { circle, post, choices } => println!("{}", one.circles().vote(&circle, &post, choices).await?),
+        CircleCmd::Comment { circle, post, text } => {
+            println!("{}", one.circles().comment(&circle, &post, &text).await?)
+        }
+        CircleCmd::React {
+            circle,
+            target,
+            reaction,
+        } => println!(
+            "{}",
+            one.circles().react(&circle, &target, &reaction).await?
+        ),
+        CircleCmd::Vote {
+            circle,
+            post,
+            choices,
+        } => println!("{}", one.circles().vote(&circle, &post, choices).await?),
         CircleCmd::Posts { circle, limit } => {
             let rows = one.circles().posts(&circle, 0, limit)?;
-            out(json, &rows, || rows.iter().map(|i| format!("{} {} {} {}{}", i.at_ms, i.author, i.id, i.text, i.poll.as_ref().map(|p| format!(" [poll: {} votes {:?}]", p.question, i.votes)).unwrap_or_default())).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|i| {
+                        format!(
+                            "{} {} {} {}{}",
+                            i.at_ms,
+                            i.author,
+                            i.id,
+                            i.text,
+                            i.poll
+                                .as_ref()
+                                .map(|p| format!(" [poll: {} votes {:?}]", p.question, i.votes))
+                                .unwrap_or_default()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         CircleCmd::Comments { circle, post } => {
             let rows = one.circles().comments(&circle, &post)?;
-            out(json, &rows, || rows.iter().map(|i| format!("{} {} {}", i.at_ms, i.author, i.text)).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|i| format!("{} {} {}", i.at_ms, i.author, i.text))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
     }
     Ok(())
@@ -1222,45 +1556,134 @@ async fn circle(one: &mut HashgramOne, json: bool, cmd: CircleCmd) -> anyhow::Re
 
 async fn space(one: &mut HashgramOne, json: bool, cmd: SpaceCmd) -> anyhow::Result<()> {
     match cmd {
-        SpaceCmd::Create { name, description } => println!("{}", one.spaces().create(&name, &description).await?),
+        SpaceCmd::Create { name, description } => {
+            println!("{}", one.spaces().create(&name, &description).await?)
+        }
         SpaceCmd::List => {
             let rows = one.spaces().list()?;
-            out(json, &rows, || rows.iter().map(|s| format!("{} {} role={} members={}", s.id, s.name, s.my_role, s.members)).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|s| {
+                        format!(
+                            "{} {} role={} members={}",
+                            s.id, s.name, s.my_role, s.members
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         SpaceCmd::Show { space: s } => {
             let st = one.spaces().state(&s)?;
-            out(json, &st, || format!("{} — {}\nmembers: {:?}\ncontent: {} items\ndrive: {} entries", st.name, st.description, st.members_sorted().iter().map(|m| format!("{}:{}", m.address, m.role)).collect::<Vec<_>>(), st.content.len(), st.drive.len()));
+            out(json, &st, || {
+                format!(
+                    "{} — {}\nmembers: {:?}\ncontent: {} items\ndrive: {} entries",
+                    st.name,
+                    st.description,
+                    st.members_sorted()
+                        .iter()
+                        .map(|m| format!("{}:{}", m.address, m.role))
+                        .collect::<Vec<_>>(),
+                    st.content.len(),
+                    st.drive.len()
+                )
+            });
         }
-        SpaceCmd::Invite { space: s, address, role: r } => {
+        SpaceCmd::Invite {
+            space: s,
+            address,
+            role: r,
+        } => {
             one.spaces().invite(&s, &address, role(&r)?).await?;
             println!("invited");
         }
-        SpaceCmd::Remove { space: s, address, reason } => {
+        SpaceCmd::Remove {
+            space: s,
+            address,
+            reason,
+        } => {
             one.spaces().remove(&s, &address, &reason).await?;
             println!("removed");
         }
-        SpaceCmd::Role { space: s, address, role: r } => println!("{}", one.spaces().set_role(&s, &address, role(&r)?).await?),
-        SpaceCmd::Announce { space: s, title, text } => println!("{}", one.spaces().announce(&s, &title, &text, vec![]).await?),
-        SpaceCmd::Post { space: s, text } => println!("{}", one.spaces().post(&s, &text, vec![], vec![]).await?),
-        SpaceCmd::Comment { space: s, post, text } => println!("{}", one.spaces().comment(&s, &post, &text).await?),
+        SpaceCmd::Role {
+            space: s,
+            address,
+            role: r,
+        } => println!("{}", one.spaces().set_role(&s, &address, role(&r)?).await?),
+        SpaceCmd::Announce {
+            space: s,
+            title,
+            text,
+        } => println!(
+            "{}",
+            one.spaces().announce(&s, &title, &text, vec![]).await?
+        ),
+        SpaceCmd::Post { space: s, text } => {
+            println!("{}", one.spaces().post(&s, &text, vec![], vec![]).await?)
+        }
+        SpaceCmd::Comment {
+            space: s,
+            post,
+            text,
+        } => println!("{}", one.spaces().comment(&s, &post, &text).await?),
         SpaceCmd::Content { space: s, limit } => {
             let rows = one.spaces().content(&s, 0, limit)?;
-            out(json, &rows, || rows.iter().map(|c| format!("{} {} {} {}{}", c.at_ms, c.kind, c.actor, c.title, c.text)).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|c| format!("{} {} {} {}{}", c.at_ms, c.kind, c.actor, c.title, c.text))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         SpaceCmd::Members { space: s } => {
             let rows = one.spaces().members(&s)?;
-            out(json, &rows, || rows.iter().map(|m| format!("{} role={}", m.address, m.role)).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|m| format!("{} role={}", m.address, m.role))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
-        SpaceCmd::ShareDrive { space: s, entry, path, snapshot } => {
+        SpaceCmd::ShareDrive {
+            space: s,
+            entry,
+            path,
+            snapshot,
+        } => {
             let id = resolve_entry(one, &entry)?;
-            println!("{}", one.spaces().share_drive(&s, &id, &path, !snapshot).await?);
+            println!(
+                "{}",
+                one.spaces().share_drive(&s, &id, &path, !snapshot).await?
+            );
         }
         SpaceCmd::Drive { space: s } => {
             let rows = one.spaces().drive_entries(&s)?;
-            out(json, &rows, || rows.iter().map(|e| format!("{} {}/{} ({} bytes) by {}", hex::encode(&e.capability.share_id), e.path, e.capability.name, e.capability.size, e.by)).collect::<Vec<_>>().join("\n"));
+            out(json, &rows, || {
+                rows.iter()
+                    .map(|e| {
+                        format!(
+                            "{} {}/{} ({} bytes) by {}",
+                            hex::encode(&e.capability.share_id),
+                            e.path,
+                            e.capability.name,
+                            e.capability.size,
+                            e.by
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
-        SpaceCmd::Mail { space: s, subject, body } => println!("{}", one.spaces().mail(&s, &subject, &body).await?),
-        SpaceCmd::Info { space: s, name, description } => println!("{}", one.spaces().set_info(&s, &name, &description).await?),
+        SpaceCmd::Mail {
+            space: s,
+            subject,
+            body,
+        } => println!("{}", one.spaces().mail(&s, &subject, &body).await?),
+        SpaceCmd::Info {
+            space: s,
+            name,
+            description,
+        } => println!("{}", one.spaces().set_info(&s, &name, &description).await?),
     }
     Ok(())
 }
@@ -1269,7 +1692,21 @@ async fn devices(one: &mut HashgramOne, json: bool, cmd: DevicesCmd) -> anyhow::
     match cmd {
         DevicesCmd::List => {
             let d = one.devices().list().await?;
-            out(json, &d, || d.iter().map(|x| format!("{} {} {} {}{}", x.device_id, x.device_pubkey, x.label, x.platform, if x.revoked { " (revoked)" } else { "" })).collect::<Vec<_>>().join("\n"));
+            out(json, &d, || {
+                d.iter()
+                    .map(|x| {
+                        format!(
+                            "{} {} {} {}{}",
+                            x.device_id,
+                            x.device_pubkey,
+                            x.label,
+                            x.platform,
+                            if x.revoked { " (revoked)" } else { "" }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         DevicesCmd::This => {
             let (id, pk) = one.devices().this_device()?;
@@ -1279,7 +1716,14 @@ async fn devices(one: &mut HashgramOne, json: bool, cmd: DevicesCmd) -> anyhow::
             let r = one.devices().reconcile().await?;
             out(json, &r, || format!("{r:#?}"));
         }
-        DevicesCmd::Bootstrap => println!("{}", if one.devices().bootstrap_new_device().await? { "sent to self group" } else { "single device; nothing to sync" }),
+        DevicesCmd::Bootstrap => println!(
+            "{}",
+            if one.devices().bootstrap_new_device().await? {
+                "sent to self group"
+            } else {
+                "single device; nothing to sync"
+            }
+        ),
     }
     Ok(())
 }
@@ -1288,19 +1732,53 @@ async fn provider(one: &mut HashgramOne, json: bool, cmd: ProviderCmd) -> anyhow
     match cmd {
         ProviderCmd::Status { operator } => {
             let s = one.provider().status(operator.as_deref()).await?;
-            out(json, &s, || format!("{} {:?} roles={:?} bond={} uhash fraud={}", s.operator, s.lifecycle, s.roles, s.bond_uhash, s.fraud_score));
+            out(json, &s, || {
+                format!(
+                    "{} {:?} roles={:?} bond={} uhash fraud={}",
+                    s.operator, s.lifecycle, s.roles, s.bond_uhash, s.fraud_score
+                )
+            });
         }
         ProviderCmd::Earnings { operator } => {
             let e = one.provider().earnings(operator.as_deref()).await?;
-            out(json, &e, || format!("paid {} uhash, pending credit {}, epoch {}, reserve {}", e.total_paid_uhash, e.pending_credit, e.epoch, e.reserve_remaining_uhash));
+            out(json, &e, || {
+                format!(
+                    "paid {} uhash, pending credit {}, epoch {}, reserve {}",
+                    e.total_paid_uhash, e.pending_credit, e.epoch, e.reserve_remaining_uhash
+                )
+            });
         }
         ProviderCmd::List => {
             let l = one.provider().list().await?;
-            out(json, &l, || l.iter().map(|s| format!("{} {:?} {:?}", s.operator, s.lifecycle, s.roles)).collect::<Vec<_>>().join("\n"));
+            out(json, &l, || {
+                l.iter()
+                    .map(|s| format!("{} {:?} {:?}", s.operator, s.lifecycle, s.roles))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
-        ProviderCmd::Register { reward_address, node_pubkey, roles, bond_uhash, storage_bytes, moniker } => {
+        ProviderCmd::Register {
+            reward_address,
+            node_pubkey,
+            roles,
+            bond_uhash,
+            storage_bytes,
+            moniker,
+        } => {
             let r: Vec<&str> = roles.iter().map(String::as_str).collect();
-            println!("{}", one.provider().register(&reward_address, &node_pubkey, &r, bond_uhash, storage_bytes, &moniker).await?);
+            println!(
+                "{}",
+                one.provider()
+                    .register(
+                        &reward_address,
+                        &node_pubkey,
+                        &r,
+                        bond_uhash,
+                        storage_bytes,
+                        &moniker
+                    )
+                    .await?
+            );
         }
         ProviderCmd::Unbond => println!("{}", one.provider().unbond().await?),
         ProviderCmd::Withdraw => println!("{}", one.provider().withdraw().await?),
@@ -1312,21 +1790,64 @@ async fn network(one: &mut HashgramOne, json: bool, cmd: NetworkCmd) -> anyhow::
     match cmd {
         NetworkCmd::Overview => {
             let o = one.network_api().overview().await?;
-            out(json, &o, || format!("{} / {} genesis {}\nheight {:?} {}\npeers:\n{}", o.network_id, o.chain_id, o.genesis_hash, o.height, o.verification.clone().unwrap_or_default(), o.peers.iter().map(|p| format!("  {} {:?} {}", p.peer, p.roles, p.operator)).collect::<Vec<_>>().join("\n")));
+            out(json, &o, || {
+                format!(
+                    "{} / {} genesis {}\nheight {:?} {}\npeers:\n{}",
+                    o.network_id,
+                    o.chain_id,
+                    o.genesis_hash,
+                    o.height,
+                    o.verification.clone().unwrap_or_default(),
+                    o.peers
+                        .iter()
+                        .map(|p| format!("  {} {:?} {}", p.peer, p.roles, p.operator))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            });
         }
         NetworkCmd::Validators => {
             let v = one.network_api().validators().await?;
-            out(json, &v, || v.iter().map(|x| format!("{} {} {}", x.get("operator_address").and_then(|s| s.as_str()).unwrap_or(""), x.get("description").and_then(|d| d.get("moniker")).and_then(|s| s.as_str()).unwrap_or(""), x.get("tokens").and_then(|s| s.as_str()).unwrap_or(""))).collect::<Vec<_>>().join("\n"));
+            out(json, &v, || {
+                v.iter()
+                    .map(|x| {
+                        format!(
+                            "{} {} {}",
+                            x.get("operator_address")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or(""),
+                            x.get("description")
+                                .and_then(|d| d.get("moniker"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or(""),
+                            x.get("tokens").and_then(|s| s.as_str()).unwrap_or("")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
         }
         NetworkCmd::Supply => {
             let s = one.network_api().supply().await?;
             println!("{}", serde_json::to_string_pretty(&s)?);
         }
-        NetworkCmd::Top { what, indexer, limit } => {
+        NetworkCmd::Top {
+            what,
+            indexer,
+            limit,
+        } => {
             let v = match what.as_str() {
                 "holders" => one.network_api().top_holders(Some(&indexer), limit).await?,
-                "validators" => one.network_api().top_validators(Some(&indexer), limit).await?,
-                "providers" => one.network_api().top_providers(Some(&indexer), limit).await?,
+                "validators" => {
+                    one.network_api()
+                        .top_validators(Some(&indexer), limit)
+                        .await?
+                }
+                "providers" => {
+                    one.network_api()
+                        .top_providers(Some(&indexer), limit)
+                        .await?
+                }
                 "stats" => one.network_api().stats(Some(&indexer)).await?,
                 other => anyhow::bail!("unknown leaderboard {other}"),
             };

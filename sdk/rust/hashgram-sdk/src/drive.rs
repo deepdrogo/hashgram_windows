@@ -216,12 +216,22 @@ impl<'a> Drive<'a> {
     /// One entry.
     pub fn entry(&self, id_hex: &str) -> Result<Option<d::EntryView>, SdkError> {
         let id = hex::decode(id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
-        Ok(self.one.drive_state.manifest.get(&id).map(|e| self.one.drive_state.manifest.view(e)))
+        Ok(self
+            .one
+            .drive_state
+            .manifest
+            .get(&id)
+            .map(|e| self.one.drive_state.manifest.view(e)))
     }
     /// Versions of a file.
     pub fn versions(&self, id_hex: &str) -> Result<Vec<app::DriveVersion>, SdkError> {
         let id = hex::decode(id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
-        let e = self.one.drive_state.manifest.get(&id).ok_or_else(|| SdkError::NotFound("entry".into()))?;
+        let e = self
+            .one
+            .drive_state
+            .manifest
+            .get(&id)
+            .ok_or_else(|| SdkError::NotFound("entry".into()))?;
         let mut v = e.versions.clone();
         if let Some(c) = &e.current {
             v.push(app::DriveVersion {
@@ -236,14 +246,26 @@ impl<'a> Drive<'a> {
     }
     /// Resolve a path.
     pub fn resolve_path(&self, path: &str) -> Option<String> {
-        self.one.drive_state.manifest.resolve_path(path).map(hex::encode)
+        self.one
+            .drive_state
+            .manifest
+            .resolve_path(path)
+            .map(hex::encode)
     }
     /// Usage.
     pub fn usage(&self) -> DriveUsage {
         let m = &self.one.drive_state.manifest;
         DriveUsage {
-            files: m.entries().iter().filter(|e| !e.trashed && e.kind == app::DriveEntryKind::File as i32).count(),
-            folders: m.entries().iter().filter(|e| !e.trashed && e.kind == app::DriveEntryKind::Folder as i32).count(),
+            files: m
+                .entries()
+                .iter()
+                .filter(|e| !e.trashed && e.kind == app::DriveEntryKind::File as i32)
+                .count(),
+            folders: m
+                .entries()
+                .iter()
+                .filter(|e| !e.trashed && e.kind == app::DriveEntryKind::Folder as i32)
+                .count(),
             trashed: m.entries().iter().filter(|e| e.trashed).count(),
             bytes: m.used_bytes(),
             revision: m.revision(),
@@ -267,26 +289,47 @@ impl<'a> Drive<'a> {
 
     /// Uploads a file: seals, pushes to store nodes, adds to the manifest.
     /// Returns the entry id (hex).
-    pub async fn upload(&mut self, parent_hex: &str, name: &str, mime: &str, bytes: &[u8]) -> Result<String, SdkError> {
+    pub async fn upload(
+        &mut self,
+        parent_hex: &str,
+        name: &str,
+        mime: &str,
+        bytes: &[u8],
+    ) -> Result<String, SdkError> {
         let parent = hex::decode(parent_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
         let (ct, r) = d::seal_object(bytes)?;
         let device = self.one.account.device()?;
-        crate::blob::upload_sealed(&self.one.link, &self.one.network, &device, &ct, REPLICAS).await?;
+        crate::blob::upload_sealed(&self.one.link, &self.one.network, &device, &ct, REPLICAS)
+            .await?;
         let dev = device.public_key().to_vec();
-        let id = self.one.drive_state.manifest.add_file(&parent, name, mime, r, &dev)?;
+        let id = self
+            .one
+            .drive_state
+            .manifest
+            .add_file(&parent, name, mime, r, &dev)?;
         self.save_manifest_locally()?;
         Ok(hex::encode(id))
     }
 
     /// Replaces a file's content with a new version and pushes live-share
     /// updates.
-    pub async fn update(&mut self, id_hex: &str, bytes: &[u8], note: &str) -> Result<u64, SdkError> {
+    pub async fn update(
+        &mut self,
+        id_hex: &str,
+        bytes: &[u8],
+        note: &str,
+    ) -> Result<u64, SdkError> {
         let id = hex::decode(id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
         let (ct, r) = d::seal_object(bytes)?;
         let device = self.one.account.device()?;
-        crate::blob::upload_sealed(&self.one.link, &self.one.network, &device, &ct, REPLICAS).await?;
+        crate::blob::upload_sealed(&self.one.link, &self.one.network, &device, &ct, REPLICAS)
+            .await?;
         let dev = device.public_key().to_vec();
-        let no = self.one.drive_state.manifest.update_file(&id, r.clone(), &dev, note)?;
+        let no = self
+            .one
+            .drive_state
+            .manifest
+            .update_file(&id, r.clone(), &dev, note)?;
         self.save_manifest_locally()?;
         // Live shares.
         let shares: Vec<app::DriveShareRecord> = self
@@ -305,7 +348,9 @@ impl<'a> Drive<'a> {
             .map(|e| (e.name.clone(), e.size))
             .unwrap_or_default();
         for s in shares {
-            let Ok(gid) = hex::decode(&s.group_id) else { continue };
+            let Ok(gid) = hex::decode(&s.group_id) else {
+                continue;
+            };
             let upd = app::DriveShareUpdate {
                 version: hashgram_app::version::CAPABILITY_VERSION,
                 share_id: s.share_id.clone(),
@@ -315,7 +360,11 @@ impl<'a> Drive<'a> {
                 size,
                 at_ms: hashgram_app::ids::now_ms(),
             };
-            if let Err(e) = self.one.send_app(&gid, app::app_message::Body::DriveShareUpdate(upd)).await {
+            if let Err(e) = self
+                .one
+                .send_app(&gid, app::app_message::Body::DriveShareUpdate(upd))
+                .await
+            {
                 warn!(error = %e, "live share update not delivered");
             }
         }
@@ -354,7 +403,9 @@ impl<'a> Drive<'a> {
             .manifest
             .entries()
             .iter()
-            .filter(|e| !e.trashed && e.kind == app::DriveEntryKind::File as i32 && e.current.is_some())
+            .filter(|e| {
+                !e.trashed && e.kind == app::DriveEntryKind::File as i32 && e.current.is_some()
+            })
             .map(|e| hex::encode(&e.id))
             .collect();
         let mut n = 0;
@@ -369,7 +420,10 @@ impl<'a> Drive<'a> {
     pub async fn restore_version(&mut self, id_hex: &str, version_no: u64) -> Result<(), SdkError> {
         let id = hex::decode(id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
         let dev = self.device_key()?;
-        self.one.drive_state.manifest.restore_version(&id, version_no, &dev)?;
+        self.one
+            .drive_state
+            .manifest
+            .restore_version(&id, version_no, &dev)?;
         self.save_manifest_locally()
     }
     /// Rename.
@@ -388,11 +442,20 @@ impl<'a> Drive<'a> {
         self.save_manifest_locally()
     }
     /// Copy a file (no re-upload).
-    pub fn copy(&mut self, id_hex: &str, new_parent_hex: &str, name: &str) -> Result<String, SdkError> {
+    pub fn copy(
+        &mut self,
+        id_hex: &str,
+        new_parent_hex: &str,
+        name: &str,
+    ) -> Result<String, SdkError> {
         let id = hex::decode(id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
         let p = hex::decode(new_parent_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
         let dev = self.device_key()?;
-        let n = self.one.drive_state.manifest.copy_file(&id, &p, name, &dev)?;
+        let n = self
+            .one
+            .drive_state
+            .manifest
+            .copy_file(&id, &p, name, &dev)?;
         self.save_manifest_locally()?;
         Ok(hex::encode(n))
     }
@@ -451,7 +514,11 @@ impl<'a> Drive<'a> {
     }
 
     /// Downloads a specific version.
-    pub async fn download_version(&mut self, id_hex: &str, version_no: u64) -> Result<Vec<u8>, SdkError> {
+    pub async fn download_version(
+        &mut self,
+        id_hex: &str,
+        version_no: u64,
+    ) -> Result<Vec<u8>, SdkError> {
         let v = self.versions(id_hex)?;
         let r = v
             .into_iter()
@@ -477,36 +544,65 @@ impl<'a> Drive<'a> {
 
     /// Downloads the object behind a capability (file bytes, or the sealed
     /// folder manifest for a folder capability).
-    pub async fn download_capability(&mut self, cap: &app::DriveCapability) -> Result<Vec<u8>, SdkError> {
+    pub async fn download_capability(
+        &mut self,
+        cap: &app::DriveCapability,
+    ) -> Result<Vec<u8>, SdkError> {
         d::validate_capability(cap)?;
-        let r = cap.object.as_ref().ok_or_else(|| SdkError::Invalid("capability has no object".into()))?;
+        let r = cap
+            .object
+            .as_ref()
+            .ok_or_else(|| SdkError::Invalid("capability has no object".into()))?;
         self.download_object(r).await
     }
 
     /// Lists a shared folder capability's entries.
-    pub async fn shared_folder_entries(&mut self, cap: &app::DriveCapability) -> Result<app::DriveFolderManifest, SdkError> {
+    pub async fn shared_folder_entries(
+        &mut self,
+        cap: &app::DriveCapability,
+    ) -> Result<app::DriveFolderManifest, SdkError> {
         if !cap.folder {
             return Err(SdkError::Invalid("not a folder capability".into()));
         }
         let bytes = self.download_capability(cap).await?;
         use prost::Message;
-        app::DriveFolderManifest::decode(bytes.as_slice()).map_err(|e| SdkError::Corrupt(e.to_string()))
+        app::DriveFolderManifest::decode(bytes.as_slice())
+            .map_err(|e| SdkError::Corrupt(e.to_string()))
     }
 
     /// Saves a received capability's current content into our own Drive
     /// (no re-upload: the object ref is copied; the recipient now holds
     /// the key like any other entry).
-    pub fn save_capability(&mut self, cap: &app::DriveCapability, parent_hex: &str) -> Result<String, SdkError> {
+    pub fn save_capability(
+        &mut self,
+        cap: &app::DriveCapability,
+        parent_hex: &str,
+    ) -> Result<String, SdkError> {
         d::validate_capability(cap)?;
         if cap.folder {
-            return Err(SdkError::Invalid("save individual files from a folder share".into()));
+            return Err(SdkError::Invalid(
+                "save individual files from a folder share".into(),
+            ));
         }
         let parent = hex::decode(parent_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
         let dev = self.device_key()?;
         let obj = cap.object.clone().unwrap_or_default();
-        let id = self.one.drive_state.manifest.add_file(&parent, &cap.name, &cap.mime, obj, &dev)?;
-        let _ = self.one.drive_state.manifest.set_attr(&id, "origin", &format!("share:{}", hex::encode(&cap.share_id)), &dev);
-        let _ = self.one.drive_state.manifest.set_attr(&id, "owner", &cap.owner, &dev);
+        let id = self
+            .one
+            .drive_state
+            .manifest
+            .add_file(&parent, &cap.name, &cap.mime, obj, &dev)?;
+        let _ = self.one.drive_state.manifest.set_attr(
+            &id,
+            "origin",
+            &format!("share:{}", hex::encode(&cap.share_id)),
+            &dev,
+        );
+        let _ = self
+            .one
+            .drive_state
+            .manifest
+            .set_attr(&id, "owner", &cap.owner, &dev);
         self.save_manifest_locally()?;
         Ok(hex::encode(id))
     }
@@ -535,7 +631,9 @@ impl<'a> Drive<'a> {
             return Err(SdkError::Invalid("no grantee".into()));
         }
         let gid = self.one.conversation_group(&addrs).await?;
-        let cap = self.grant_in_group(&id, grantees, &gid, mode, permission).await?;
+        let cap = self
+            .grant_in_group(&id, grantees, &gid, mode, permission)
+            .await?;
         self.one
             .send_app(
                 &gid,
@@ -571,7 +669,8 @@ impl<'a> Drive<'a> {
             let fm = self.one.drive_state.manifest.folder_manifest(id)?;
             let (ct, r) = d::seal_object(&fm.encode_to_vec())?;
             let device = self.one.account.device()?;
-            crate::blob::upload_sealed(&self.one.link, &self.one.network, &device, &ct, REPLICAS).await?;
+            crate::blob::upload_sealed(&self.one.link, &self.one.network, &device, &ct, REPLICAS)
+                .await?;
             Some(r)
         } else {
             None
@@ -620,17 +719,30 @@ impl<'a> Drive<'a> {
 
     /// Capabilities shared with us.
     pub fn shared_with_me(&self) -> Result<Vec<SharedWithMe>, SdkError> {
-        let mut v: Vec<SharedWithMe> = self.one.store.scan::<SharedWithMe>(NS_SHARED)?.into_iter().map(|(_, s)| s).collect();
+        let mut v: Vec<SharedWithMe> = self
+            .one
+            .store
+            .scan::<SharedWithMe>(NS_SHARED)?
+            .into_iter()
+            .map(|(_, s)| s)
+            .collect();
         v.sort_by_key(|s| std::cmp::Reverse(s.received_at_ms));
         Ok(v)
     }
 
     /// Handles Drive application messages.
-    pub(crate) fn handle_incoming(&mut self, r: &Received, appmsg: &app::AppMessage) -> Result<bool, SdkError> {
+    pub(crate) fn handle_incoming(
+        &mut self,
+        r: &Received,
+        appmsg: &app::AppMessage,
+    ) -> Result<bool, SdkError> {
         use app::app_message::Body as B;
         match &appmsg.body {
             Some(B::DriveShare(s)) => {
-                let cap = s.capability.clone().ok_or_else(|| SdkError::Invalid("share without capability".into()))?;
+                let cap = s
+                    .capability
+                    .clone()
+                    .ok_or_else(|| SdkError::Invalid("share without capability".into()))?;
                 d::validate_capability(&cap)?;
                 if cap.owner != r.sender {
                     warn!("drive share whose owner is not the MLS sender; ignored");
@@ -649,7 +761,8 @@ impl<'a> Drive<'a> {
                 Ok(true)
             }
             Some(B::DriveShareUpdate(u)) => {
-                let Some(mut rec) = self.one.store.get::<SharedWithMe>(NS_SHARED, &u.share_id)? else {
+                let Some(mut rec) = self.one.store.get::<SharedWithMe>(NS_SHARED, &u.share_id)?
+                else {
                     return Ok(false);
                 };
                 if rec.from != r.sender || rec.revoked {
@@ -700,7 +813,8 @@ impl<'a> Drive<'a> {
         let key = self.one.drive_state.keyring.object_key()?;
         let (ct, r) = self.one.drive_state.manifest.seal(&key)?;
         let device = self.one.account.device()?;
-        crate::blob::upload_sealed(&self.one.link, &self.one.network, &device, &ct, REPLICAS).await?;
+        crate::blob::upload_sealed(&self.one.link, &self.one.network, &device, &ct, REPLICAS)
+            .await?;
         let rev = self.one.drive_state.manifest.revision();
         self.one.drive_state.keyring.manifest_cid = hex::encode(&r.cid);
         self.one.drive_state.keyring.manifest_ref = Some(r);
@@ -713,7 +827,9 @@ impl<'a> Drive<'a> {
 
     /// Sends the keyring to the self group (no-op on single-device accounts).
     pub(crate) async fn announce_keyring(&mut self) {
-        let Ok(Some(gid)) = self.one.self_group().await else { return };
+        let Ok(Some(gid)) = self.one.self_group().await else {
+            return;
+        };
         let k = &self.one.drive_state.keyring;
         let body = app::DeviceSync {
             version: hashgram_app::version::DEVICE_SYNC_VERSION,
@@ -727,7 +843,11 @@ impl<'a> Drive<'a> {
                 revision: k.revision,
             })),
         };
-        if let Err(e) = self.one.send_app(&gid, app::app_message::Body::DeviceSync(body)).await {
+        if let Err(e) = self
+            .one
+            .send_app(&gid, app::app_message::Body::DeviceSync(body))
+            .await
+        {
             debug!(error = %e, "drive keyring announce skipped");
         }
     }
@@ -735,10 +855,13 @@ impl<'a> Drive<'a> {
     /// Applies a keyring from another of our devices: adopts the key if we
     /// had none, and fetches + merges a newer manifest.
     pub(crate) async fn apply_keyring(&mut self, k: &app::DriveKeyring) -> Result<bool, SdkError> {
-        let Some(mk) = &k.manifest_key else { return Ok(false) };
+        let Some(mk) = &k.manifest_key else {
+            return Ok(false);
+        };
         let incoming_id = hex::encode(&k.drive_id);
         let mine = &self.one.drive_state.keyring;
-        let have_content = !mine.manifest_cid.is_empty() || !self.one.drive_state.manifest.entries().is_empty();
+        let have_content =
+            !mine.manifest_cid.is_empty() || !self.one.drive_state.manifest.entries().is_empty();
         if mine.drive_id != incoming_id {
             if have_content {
                 // Two devices created separate Drives before ever syncing.
@@ -763,7 +886,9 @@ impl<'a> Drive<'a> {
         let (ct, _m, _p) = crate::blob::download(&self.one.link, &k.manifest_cid, None).await?;
         let pt = d::open_object_with_key(&ct, key)?;
         let theirs = d::Manifest::decode(&pt)?;
-        let merged = if self.one.drive_state.manifest.entries().is_empty() && self.one.drive_state.manifest.revision() <= 1 {
+        let merged = if self.one.drive_state.manifest.entries().is_empty()
+            && self.one.drive_state.manifest.revision() <= 1
+        {
             theirs
         } else {
             d::merge(&self.one.drive_state.manifest, &theirs)?
@@ -779,7 +904,13 @@ impl<'a> Drive<'a> {
 
     /// Pending uploads (crash recovery bookkeeping).
     pub fn pending_uploads(&self) -> Result<Vec<PendingUpload>, SdkError> {
-        Ok(self.one.store.scan::<PendingUpload>(NS_UPLOADS)?.into_iter().map(|(_, v)| v).collect())
+        Ok(self
+            .one
+            .store
+            .scan::<PendingUpload>(NS_UPLOADS)?
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect())
     }
 }
 

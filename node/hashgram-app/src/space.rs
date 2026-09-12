@@ -19,7 +19,10 @@ use hashgram_net::{CanonicalBuf, NetworkIdentity};
 use hashgram_proto::keys::Ed25519Signer;
 use prost::Message;
 
-use crate::ids::{now_ms, random_id, require_address, require_id, require_id_or_empty, require_str, require_str_max};
+use crate::ids::{
+    now_ms, random_id, require_address, require_id, require_id_or_empty, require_str,
+    require_str_max,
+};
 use crate::pb;
 use crate::signing::{self, AppPurpose};
 use crate::version::{check_body, SPACE_VERSION};
@@ -105,7 +108,11 @@ fn body_bytes(e: &pb::SpaceEvent) -> Vec<u8> {
 }
 
 /// Signs an event in place.
-pub fn sign(network: &NetworkIdentity, device: &Ed25519Signer, e: &mut pb::SpaceEvent) -> Result<(), AppError> {
+pub fn sign(
+    network: &NetworkIdentity,
+    device: &Ed25519Signer,
+    e: &mut pb::SpaceEvent,
+) -> Result<(), AppError> {
     e.device_pubkey = device.public_key().to_vec();
     let payload = canonical_payload(e)?;
     e.signature = signing::sign(network, AppPurpose::SpaceEvent, device, &payload).to_vec();
@@ -117,8 +124,14 @@ pub fn sign(network: &NetworkIdentity, device: &Ed25519Signer, e: &mut pb::Space
 pub fn verify(network: &NetworkIdentity, e: &pb::SpaceEvent) -> Result<(), AppError> {
     validate(e)?;
     let payload = canonical_payload(e)?;
-    signing::verify(network, AppPurpose::SpaceEvent, &e.device_pubkey, &payload, &e.signature)
-        .map_err(|err| AppError::Unauthorised(format!("space event signature: {err}")))
+    signing::verify(
+        network,
+        AppPurpose::SpaceEvent,
+        &e.device_pubkey,
+        &payload,
+        &e.signature,
+    )
+    .map_err(|err| AppError::Unauthorised(format!("space event signature: {err}")))
 }
 
 /// Structural validation.
@@ -141,7 +154,9 @@ pub fn validate(e: &pb::SpaceEvent) -> Result<(), AppError> {
             require_str_max("description", &b.description, MAX_TEXT)?;
             require_address("owner", &b.owner)?;
             if e.space_id != e.event_id {
-                return Err(AppError::Invalid("Create must have space_id == event_id".into()));
+                return Err(AppError::Invalid(
+                    "Create must have space_id == event_id".into(),
+                ));
             }
         }
         Some(B::Info(b)) => {
@@ -151,7 +166,9 @@ pub fn validate(e: &pb::SpaceEvent) -> Result<(), AppError> {
         Some(B::MemberAdd(b)) => {
             require_address("address", &b.address)?;
             if matches!(role(b.role), pb::SpaceRole::None | pb::SpaceRole::Owner) {
-                return Err(AppError::Invalid("MemberAdd role must be Guest, Member or Admin".into()));
+                return Err(AppError::Invalid(
+                    "MemberAdd role must be Guest, Member or Admin".into(),
+                ));
             }
         }
         Some(B::MemberRemove(b)) => {
@@ -161,7 +178,9 @@ pub fn validate(e: &pb::SpaceEvent) -> Result<(), AppError> {
         Some(B::RoleChange(b)) => {
             require_address("address", &b.address)?;
             if role(b.role) == pb::SpaceRole::None {
-                return Err(AppError::Invalid("RoleChange to None; use MemberRemove".into()));
+                return Err(AppError::Invalid(
+                    "RoleChange to None; use MemberRemove".into(),
+                ));
             }
         }
         Some(B::Announcement(b)) => {
@@ -172,7 +191,10 @@ pub fn validate(e: &pb::SpaceEvent) -> Result<(), AppError> {
             }
         }
         Some(B::DriveShare(b)) => {
-            let c = b.capability.as_ref().ok_or_else(|| AppError::Invalid("capability missing".into()))?;
+            let c = b
+                .capability
+                .as_ref()
+                .ok_or_else(|| AppError::Invalid("capability missing".into()))?;
             crate::drive::validate_capability(c)?;
             require_str_max("path", &b.path, 1024)?;
         }
@@ -348,7 +370,10 @@ impl State {
     /// Role of an address.
     #[must_use]
     pub fn role_of(&self, address: &str) -> pb::SpaceRole {
-        self.members.get(address).map(|m| role(m.role)).unwrap_or(pb::SpaceRole::None)
+        self.members
+            .get(address)
+            .map(|m| role(m.role))
+            .unwrap_or(pb::SpaceRole::None)
     }
 
     /// Whether the space has been created (saw its Create event).
@@ -372,7 +397,12 @@ impl State {
     /// Verifies and applies a received event, then retries pending ones.
     /// The MLS sender address must be passed so an actor cannot claim to be
     /// someone else: `e.actor` must equal it.
-    pub fn apply(&mut self, network: &NetworkIdentity, e: &pb::SpaceEvent, mls_sender: &str) -> Result<(), Rejected> {
+    pub fn apply(
+        &mut self,
+        network: &NetworkIdentity,
+        e: &pb::SpaceEvent,
+        mls_sender: &str,
+    ) -> Result<(), Rejected> {
         if hex::encode(&e.space_id) != self.space_id {
             return Err(Rejected::WrongSpace);
         }
@@ -467,7 +497,9 @@ impl State {
                     return Err(forbid("add members"));
                 }
                 let new_role = role(b.role);
-                if rank(new_role) > rank(actor_role) || (new_role == pb::SpaceRole::Admin && actor_role != pb::SpaceRole::Owner) {
+                if rank(new_role) > rank(actor_role)
+                    || (new_role == pb::SpaceRole::Admin && actor_role != pb::SpaceRole::Owner)
+                {
                     return Err(forbid("add a member above own rank / add admins"));
                 }
                 if self.members.contains_key(&b.address) {
@@ -491,7 +523,10 @@ impl State {
                     return Err(Rejected::Pending("remove of an unknown member"));
                 }
                 let self_leave = b.address == e.actor && actor_role != pb::SpaceRole::Owner;
-                if !self_leave && (rank(actor_role) < rank(pb::SpaceRole::Admin) || rank(target) >= rank(actor_role)) {
+                if !self_leave
+                    && (rank(actor_role) < rank(pb::SpaceRole::Admin)
+                        || rank(target) >= rank(actor_role))
+                {
                     return Err(forbid("remove this member"));
                 }
                 self.members.remove(&b.address);
@@ -508,7 +543,10 @@ impl State {
                         // ownership (then the previous owner becomes admin).
                         true
                     }
-                    pb::SpaceRole::Admin => rank(target) < rank(pb::SpaceRole::Admin) && rank(new_role) <= rank(pb::SpaceRole::Member),
+                    pb::SpaceRole::Admin => {
+                        rank(target) < rank(pb::SpaceRole::Admin)
+                            && rank(new_role) <= rank(pb::SpaceRole::Member)
+                    }
                     _ => false,
                 };
                 if !allowed || b.address == e.actor && actor_role != pb::SpaceRole::Owner {
@@ -585,7 +623,11 @@ impl State {
                     return Err(forbid("comment"));
                 }
                 let pid = hex::encode(&b.post_id);
-                if !self.content.iter().any(|c| c.id == pid && c.kind != "comment") {
+                if !self
+                    .content
+                    .iter()
+                    .any(|c| c.id == pid && c.kind != "comment")
+                {
                     return Err(Rejected::Pending("comment on an unknown post"));
                 }
                 self.push_content(Content {
@@ -620,7 +662,11 @@ impl State {
     #[must_use]
     pub fn members_sorted(&self) -> Vec<Member> {
         let mut v: Vec<Member> = self.members.values().cloned().collect();
-        v.sort_by(|a, b| rank(role(b.role)).cmp(&rank(role(a.role))).then_with(|| a.address.cmp(&b.address)));
+        v.sort_by(|a, b| {
+            rank(role(b.role))
+                .cmp(&rank(role(a.role)))
+                .then_with(|| a.address.cmp(&b.address))
+        });
         v
     }
 
@@ -693,40 +739,133 @@ mod tests {
         assert_eq!(st.role_of(OWNER), pb::SpaceRole::Owner);
         // Non-member cannot post.
         assert!(matches!(
-            send(&mut st, &alice, pb::space_event::Body::Post(pb::SpacePost { text: "hi".into(), ..Default::default() })),
+            send(
+                &mut st,
+                &alice,
+                pb::space_event::Body::Post(pb::SpacePost {
+                    text: "hi".into(),
+                    ..Default::default()
+                })
+            ),
             Err(Rejected::Forbidden { .. })
         ));
         // Owner adds alice as admin, bob as guest.
-        send(&mut st, &owner, pb::space_event::Body::MemberAdd(pb::SpaceMemberAdd { address: ALICE.into(), role: pb::SpaceRole::Admin as i32 })).unwrap();
-        send(&mut st, &owner, pb::space_event::Body::MemberAdd(pb::SpaceMemberAdd { address: BOB.into(), role: pb::SpaceRole::Guest as i32 })).unwrap();
+        send(
+            &mut st,
+            &owner,
+            pb::space_event::Body::MemberAdd(pb::SpaceMemberAdd {
+                address: ALICE.into(),
+                role: pb::SpaceRole::Admin as i32,
+            }),
+        )
+        .unwrap();
+        send(
+            &mut st,
+            &owner,
+            pb::space_event::Body::MemberAdd(pb::SpaceMemberAdd {
+                address: BOB.into(),
+                role: pb::SpaceRole::Guest as i32,
+            }),
+        )
+        .unwrap();
         // Guest cannot post; member can.
         assert!(matches!(
-            send(&mut st, &bob, pb::space_event::Body::Post(pb::SpacePost { text: "hi".into(), ..Default::default() })),
+            send(
+                &mut st,
+                &bob,
+                pb::space_event::Body::Post(pb::SpacePost {
+                    text: "hi".into(),
+                    ..Default::default()
+                })
+            ),
             Err(Rejected::Forbidden { .. })
         ));
-        send(&mut st, &alice, pb::space_event::Body::RoleChange(pb::SpaceRoleChange { address: BOB.into(), role: pb::SpaceRole::Member as i32 })).unwrap();
-        send(&mut st, &bob, pb::space_event::Body::Post(pb::SpacePost { text: "hi".into(), ..Default::default() })).unwrap();
+        send(
+            &mut st,
+            &alice,
+            pb::space_event::Body::RoleChange(pb::SpaceRoleChange {
+                address: BOB.into(),
+                role: pb::SpaceRole::Member as i32,
+            }),
+        )
+        .unwrap();
+        send(
+            &mut st,
+            &bob,
+            pb::space_event::Body::Post(pb::SpacePost {
+                text: "hi".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
         assert_eq!(st.content.len(), 1);
         // Admin cannot add another admin or remove the owner.
         assert!(matches!(
-            send(&mut st, &alice, pb::space_event::Body::MemberAdd(pb::SpaceMemberAdd { address: "hash1newadm00000000000000000000000000000000".into(), role: pb::SpaceRole::Admin as i32 })),
+            send(
+                &mut st,
+                &alice,
+                pb::space_event::Body::MemberAdd(pb::SpaceMemberAdd {
+                    address: "hash1newadm00000000000000000000000000000000".into(),
+                    role: pb::SpaceRole::Admin as i32
+                })
+            ),
             Err(Rejected::Forbidden { .. })
         ));
         assert!(matches!(
-            send(&mut st, &alice, pb::space_event::Body::MemberRemove(pb::SpaceMemberRemove { address: OWNER.into(), reason: String::new() })),
+            send(
+                &mut st,
+                &alice,
+                pb::space_event::Body::MemberRemove(pb::SpaceMemberRemove {
+                    address: OWNER.into(),
+                    reason: String::new()
+                })
+            ),
             Err(Rejected::Forbidden { .. })
         ));
         // Admin can announce; member cannot.
-        send(&mut st, &alice, pb::space_event::Body::Announcement(pb::SpaceAnnouncement { title: "T".into(), text: "x".into(), attachments: vec![] })).unwrap();
+        send(
+            &mut st,
+            &alice,
+            pb::space_event::Body::Announcement(pb::SpaceAnnouncement {
+                title: "T".into(),
+                text: "x".into(),
+                attachments: vec![],
+            }),
+        )
+        .unwrap();
         assert!(matches!(
-            send(&mut st, &bob, pb::space_event::Body::Announcement(pb::SpaceAnnouncement { title: "T".into(), text: "x".into(), attachments: vec![] })),
+            send(
+                &mut st,
+                &bob,
+                pb::space_event::Body::Announcement(pb::SpaceAnnouncement {
+                    title: "T".into(),
+                    text: "x".into(),
+                    attachments: vec![]
+                })
+            ),
             Err(Rejected::Forbidden { .. })
         ));
         // Bob leaves on his own.
-        send(&mut st, &bob, pb::space_event::Body::MemberRemove(pb::SpaceMemberRemove { address: BOB.into(), reason: String::new() })).unwrap();
+        send(
+            &mut st,
+            &bob,
+            pb::space_event::Body::MemberRemove(pb::SpaceMemberRemove {
+                address: BOB.into(),
+                reason: String::new(),
+            }),
+        )
+        .unwrap();
         assert_eq!(st.role_of(BOB), pb::SpaceRole::None);
         // Ownership transfer.
-        send(&mut st, &owner, pb::space_event::Body::RoleChange(pb::SpaceRoleChange { address: ALICE.into(), role: pb::SpaceRole::Owner as i32 })).unwrap();
+        send(
+            &mut st,
+            &owner,
+            pb::space_event::Body::RoleChange(pb::SpaceRoleChange {
+                address: ALICE.into(),
+                role: pb::SpaceRole::Owner as i32,
+            }),
+        )
+        .unwrap();
         assert_eq!(st.role_of(ALICE), pb::SpaceRole::Owner);
         assert_eq!(st.role_of(OWNER), pb::SpaceRole::Admin);
     }
@@ -737,20 +876,49 @@ mod tests {
         let alice = actor(ALICE, 2);
         let mut st = create(&owner);
         let sid = hex::decode(&st.space_id).unwrap();
-        let mut e = build(&sid, OWNER, st.next_sequence(OWNER), &st.head_id(), pb::space_event::Body::Info(pb::SpaceInfoUpdate { name: "New".into(), ..Default::default() })).unwrap();
+        let mut e = build(
+            &sid,
+            OWNER,
+            st.next_sequence(OWNER),
+            &st.head_id(),
+            pb::space_event::Body::Info(pb::SpaceInfoUpdate {
+                name: "New".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
         sign(&net(), &owner.key, &mut e).unwrap();
         st.apply(&net(), &e, OWNER).unwrap();
         // Replay.
-        assert!(matches!(st.apply(&net(), &e, OWNER), Err(Rejected::Duplicate)));
+        assert!(matches!(
+            st.apply(&net(), &e, OWNER),
+            Err(Rejected::Duplicate)
+        ));
         // Same sequence, different id.
         let mut e2 = e.clone();
         e2.event_id = random_id().unwrap();
         sign(&net(), &owner.key, &mut e2).unwrap();
-        assert!(matches!(st.apply(&net(), &e2, OWNER), Err(Rejected::Sequence { .. })));
+        assert!(matches!(
+            st.apply(&net(), &e2, OWNER),
+            Err(Rejected::Sequence { .. })
+        ));
         // Alice signs an event claiming to be the owner: MLS sender mismatch.
-        let mut e3 = build(&sid, OWNER, 10, &[], pb::space_event::Body::Info(pb::SpaceInfoUpdate { name: "Evil".into(), ..Default::default() })).unwrap();
+        let mut e3 = build(
+            &sid,
+            OWNER,
+            10,
+            &[],
+            pb::space_event::Body::Info(pb::SpaceInfoUpdate {
+                name: "Evil".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
         sign(&net(), &alice.key, &mut e3).unwrap();
-        assert!(matches!(st.apply(&net(), &e3, ALICE), Err(Rejected::Forbidden { .. })));
+        assert!(matches!(
+            st.apply(&net(), &e3, ALICE),
+            Err(Rejected::Forbidden { .. })
+        ));
         // Tampered body.
         let mut e4 = e.clone();
         e4.event_id = random_id().unwrap();
@@ -759,7 +927,10 @@ mod tests {
         if let Some(pb::space_event::Body::Info(i)) = &mut e4.body {
             i.name = "Tampered".into();
         }
-        assert!(matches!(st.apply(&net(), &e4, OWNER), Err(Rejected::Invalid(_))));
+        assert!(matches!(
+            st.apply(&net(), &e4, OWNER),
+            Err(Rejected::Invalid(_))
+        ));
         assert_eq!(st.name, "New");
     }
 
@@ -770,21 +941,69 @@ mod tests {
         let mut st = create(&owner);
         let sid = hex::decode(&st.space_id).unwrap();
         // Alice's post arrives before her MemberAdd.
-        let mut post = build(&sid, ALICE, 1, &[], pb::space_event::Body::Post(pb::SpacePost { text: "early".into(), ..Default::default() })).unwrap();
+        let mut post = build(
+            &sid,
+            ALICE,
+            1,
+            &[],
+            pb::space_event::Body::Post(pb::SpacePost {
+                text: "early".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
         sign(&net(), &alice.key, &mut post).unwrap();
         // Forbidden now (she is not a member) — but it is not Pending: a
         // non-member posting is a definitive rejection at this state.
-        assert!(matches!(st.apply(&net(), &post, ALICE), Err(Rejected::Forbidden { .. })));
+        assert!(matches!(
+            st.apply(&net(), &post, ALICE),
+            Err(Rejected::Forbidden { .. })
+        ));
         // A comment on an unknown post is pending and resolves later.
-        send(&mut st, &owner, pb::space_event::Body::MemberAdd(pb::SpaceMemberAdd { address: ALICE.into(), role: pb::SpaceRole::Member as i32 })).unwrap();
+        send(
+            &mut st,
+            &owner,
+            pb::space_event::Body::MemberAdd(pb::SpaceMemberAdd {
+                address: ALICE.into(),
+                role: pb::SpaceRole::Member as i32,
+            }),
+        )
+        .unwrap();
         let post_id = random_id().unwrap();
-        let mut comment = build(&sid, ALICE, 1, &[], pb::space_event::Body::Comment(pb::SpaceComment { post_id: post_id.clone(), text: "nice".into() })).unwrap();
+        let mut comment = build(
+            &sid,
+            ALICE,
+            1,
+            &[],
+            pb::space_event::Body::Comment(pb::SpaceComment {
+                post_id: post_id.clone(),
+                text: "nice".into(),
+            }),
+        )
+        .unwrap();
         sign(&net(), &alice.key, &mut comment).unwrap();
-        assert!(matches!(st.apply(&net(), &comment, ALICE), Err(Rejected::Pending(_))));
-        let mut p = build(&sid, OWNER, st.next_sequence(OWNER), &[], pb::space_event::Body::Post(pb::SpacePost { text: "the post".into(), ..Default::default() })).unwrap();
+        assert!(matches!(
+            st.apply(&net(), &comment, ALICE),
+            Err(Rejected::Pending(_))
+        ));
+        let mut p = build(
+            &sid,
+            OWNER,
+            st.next_sequence(OWNER),
+            &[],
+            pb::space_event::Body::Post(pb::SpacePost {
+                text: "the post".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
         p.event_id = post_id;
         sign(&net(), &owner.key, &mut p).unwrap();
         st.apply(&net(), &p, OWNER).unwrap();
-        assert_eq!(st.content.len(), 2, "pending comment applied after its post");
+        assert_eq!(
+            st.content.len(),
+            2,
+            "pending comment applied after its post"
+        );
     }
 }

@@ -65,10 +65,18 @@ impl Verdict {
 pub trait InboundHandler: Send + Sync + 'static {
     /// Called for each `RCPT TO`. Return `Reject` for unknown local users
     /// (SMTP `550`) or relaying attempts.
-    fn check_recipient(&self, rcpt: &str, envelope: &Envelope) -> impl Future<Output = Verdict> + Send;
+    fn check_recipient(
+        &self,
+        rcpt: &str,
+        envelope: &Envelope,
+    ) -> impl Future<Output = Verdict> + Send;
     /// Called once the full message is in. `Accept` means we now own it
     /// (it is queued durably); the client receives `250`.
-    fn accept_message(&self, envelope: Envelope, raw: Vec<u8>) -> impl Future<Output = Verdict> + Send;
+    fn accept_message(
+        &self,
+        envelope: Envelope,
+        raw: Vec<u8>,
+    ) -> impl Future<Output = Verdict> + Send;
 }
 
 /// Server bounds.
@@ -150,7 +158,10 @@ impl Session {
     /// The greeting.
     #[must_use]
     pub fn banner(&self) -> Reply {
-        Reply::new(220, format!("{} ESMTP hashgram-mail-gateway", self.hostname))
+        Reply::new(
+            220,
+            format!("{} ESMTP hashgram-mail-gateway", self.hostname),
+        )
     }
 
     /// Whether the next line is message data rather than a command.
@@ -193,7 +204,10 @@ impl Session {
     fn error(&mut self, reply: Reply) -> Action {
         self.errors += 1;
         if self.errors >= MAX_ERRORS {
-            return Action::Close(Reply::new(421, format!("{} too many errors, closing", self.hostname)));
+            return Action::Close(Reply::new(
+                421,
+                format!("{} too many errors, closing", self.hostname),
+            ));
         }
         Action::Reply(reply)
     }
@@ -208,7 +222,10 @@ impl Session {
         };
         let text = text.trim_end();
         let (verb, arg) = match text.find(' ') {
-            Some(i) => (text.get(..i).unwrap_or(""), text.get(i + 1..).unwrap_or("").trim()),
+            Some(i) => (
+                text.get(..i).unwrap_or(""),
+                text.get(i + 1..).unwrap_or("").trim(),
+            ),
             None => (text, ""),
         };
         let action = match verb.to_ascii_uppercase().as_str() {
@@ -222,17 +239,33 @@ impl Session {
                 Action::Reply(Reply::new(250, "OK"))
             }
             "NOOP" => Action::Reply(Reply::new(250, "OK")),
-            "QUIT" => Action::Close(Reply::new(221, format!("{} closing connection", self.hostname))),
-            "VRFY" | "EXPN" => Action::Reply(Reply::new(252, "Cannot VRFY user, but will accept message and attempt delivery")),
-            "HELP" => Action::Reply(Reply::new(214, "https://github.com/hashgram/hashgram docs/MAIL_GATEWAY.md")),
-            "STARTTLS" => self.error(Reply::new(502, "STARTTLS not offered; TLS is terminated upstream")),
-            "AUTH" => self.error(Reply::new(502, "AUTH not offered; this gateway does not relay for authenticated users")),
+            "QUIT" => Action::Close(Reply::new(
+                221,
+                format!("{} closing connection", self.hostname),
+            )),
+            "VRFY" | "EXPN" => Action::Reply(Reply::new(
+                252,
+                "Cannot VRFY user, but will accept message and attempt delivery",
+            )),
+            "HELP" => Action::Reply(Reply::new(
+                214,
+                "https://github.com/hashgram/hashgram docs/MAIL_GATEWAY.md",
+            )),
+            "STARTTLS" => self.error(Reply::new(
+                502,
+                "STARTTLS not offered; TLS is terminated upstream",
+            )),
+            "AUTH" => self.error(Reply::new(
+                502,
+                "AUTH not offered; this gateway does not relay for authenticated users",
+            )),
             "" => self.error(Reply::new(500, "empty command")),
             _ => self.error(Reply::new(500, "command not recognized")),
         };
         // The error budget is for *consecutive* garbage; a client that
         // recovers is not the attacker this protects against.
-        let recovered = matches!(&action, Action::Reply(r) if r.code < 400) || matches!(action, Action::CheckRecipient(_));
+        let recovered = matches!(&action, Action::Reply(r) if r.code < 400)
+            || matches!(action, Action::CheckRecipient(_));
         if recovered {
             self.errors = 0;
         }
@@ -258,26 +291,37 @@ impl Session {
                 ],
             ))
         } else {
-            Action::Reply(Reply::new(250, format!("{} greets {}", self.hostname, self.envelope.helo)))
+            Action::Reply(Reply::new(
+                250,
+                format!("{} greets {}", self.hostname, self.envelope.helo),
+            ))
         }
     }
 
     fn mail(&mut self, arg: &str) -> Action {
         match self.phase {
             Phase::Connected => return self.error(Reply::new(503, "5.5.1 send HELO/EHLO first")),
-            Phase::Mail | Phase::Rcpt => return self.error(Reply::new(503, "5.5.1 nested MAIL command")),
+            Phase::Mail | Phase::Rcpt => {
+                return self.error(Reply::new(503, "5.5.1 nested MAIL command"))
+            }
             Phase::Data => return self.error(Reply::new(503, "5.5.1 bad sequence")),
             Phase::Ready => {}
         }
         let Some((path, params)) = parse_path_arg(arg, "FROM:") else {
-            return self.error(Reply::new(501, "5.5.4 syntax: MAIL FROM:<address> [SIZE=n]"));
+            return self.error(Reply::new(
+                501,
+                "5.5.4 syntax: MAIL FROM:<address> [SIZE=n]",
+            ));
         };
         for p in params {
             let (k, v) = p.split_once('=').unwrap_or((p, ""));
             match k.to_ascii_uppercase().as_str() {
                 "SIZE" => match v.parse::<u64>() {
                     Ok(n) if n > self.limits.max_message_bytes => {
-                        return self.error(Reply::new(552, "5.3.4 message exceeds fixed maximum message size"));
+                        return self.error(Reply::new(
+                            552,
+                            "5.3.4 message exceeds fixed maximum message size",
+                        ));
                     }
                     Ok(_) => {}
                     Err(_) => return self.error(Reply::new(501, "5.5.4 bad SIZE parameter")),
@@ -357,7 +401,10 @@ impl Session {
             self.phase = Phase::Rcpt;
             if self.oversize {
                 self.reset_transaction();
-                return self.error(Reply::new(552, "5.3.4 message exceeds fixed maximum message size"));
+                return self.error(Reply::new(
+                    552,
+                    "5.3.4 message exceeds fixed maximum message size",
+                ));
             }
             let raw = std::mem::take(&mut self.data);
             return Action::Message(self.envelope.clone(), raw);
@@ -433,7 +480,9 @@ where
     H: InboundHandler,
 {
     let mut session = Session::new(hostname, limits, peer);
-    stream.write_all(session.banner().to_wire().as_bytes()).await?;
+    stream
+        .write_all(session.banner().to_wire().as_bytes())
+        .await?;
     let mut buf: Vec<u8> = Vec::with_capacity(8192);
     let mut chunk = vec![0u8; 16 * 1024];
     loop {
@@ -488,7 +537,11 @@ where
             Ok(Err(e)) => return Err(e),
             Err(_) => {
                 let _ = stream
-                    .write_all(Reply::new(421, "4.4.2 idle timeout, closing").to_wire().as_bytes())
+                    .write_all(
+                        Reply::new(421, "4.4.2 idle timeout, closing")
+                            .to_wire()
+                            .as_bytes(),
+                    )
                     .await;
                 return Ok(());
             }
@@ -534,7 +587,10 @@ pub async fn serve_listener<H: InboundHandler>(
     shutdown: impl Future<Output = ()>,
 ) -> Result<(), std::io::Error> {
     let sem = Arc::new(tokio::sync::Semaphore::new(cfg.max_connections));
-    let limiter = Arc::new(IpLimiter::new(Duration::from_secs(60), cfg.connections_per_ip_per_minute));
+    let limiter = Arc::new(IpLimiter::new(
+        Duration::from_secs(60),
+        cfg.connections_per_ip_per_minute,
+    ));
     let mut shutdown = std::pin::pin!(shutdown);
     loop {
         let (stream, peer) = tokio::select! {
@@ -547,13 +603,25 @@ pub async fn serve_listener<H: InboundHandler>(
         let Ok(permit) = sem.clone().try_acquire_owned() else {
             warn!(%peer, "connection cap reached; refusing");
             let mut s = stream;
-            let _ = s.write_all(Reply::new(421, "4.3.2 too many connections, try later").to_wire().as_bytes()).await;
+            let _ = s
+                .write_all(
+                    Reply::new(421, "4.3.2 too many connections, try later")
+                        .to_wire()
+                        .as_bytes(),
+                )
+                .await;
             continue;
         };
         if !limiter.allow(peer.ip()) {
             debug!(%peer, "per-ip connection rate exceeded");
             let mut s = stream;
-            let _ = s.write_all(Reply::new(421, "4.7.0 too many connections from your address").to_wire().as_bytes()).await;
+            let _ = s
+                .write_all(
+                    Reply::new(421, "4.7.0 too many connections from your address")
+                        .to_wire()
+                        .as_bytes(),
+                )
+                .await;
             continue;
         }
         let handler = handler.clone();
@@ -563,7 +631,9 @@ pub async fn serve_listener<H: InboundHandler>(
         tokio::spawn(async move {
             let _permit = permit;
             let peer_s = peer.to_string();
-            if let Err(e) = serve_connection(stream, &peer_s, &hostname, limits, idle, handler).await {
+            if let Err(e) =
+                serve_connection(stream, &peer_s, &hostname, limits, idle, handler).await
+            {
                 debug!(peer = %peer_s, error = %e, "smtp connection ended with error");
             }
         });
@@ -571,7 +641,12 @@ pub async fn serve_listener<H: InboundHandler>(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -606,9 +681,19 @@ mod tests {
             }
             _ => panic!(),
         }
-        assert_eq!(reply_code(&s.command(b"MAIL FROM:<bob@example.com> SIZE=100")), 250);
-        assert_eq!(s.command(b"RCPT TO:<alice@hashgram.io>"), Action::CheckRecipient("alice@hashgram.io".into()));
-        assert_eq!(s.recipient_verdict("alice@hashgram.io".into(), Verdict::Accept).code, 250);
+        assert_eq!(
+            reply_code(&s.command(b"MAIL FROM:<bob@example.com> SIZE=100")),
+            250
+        );
+        assert_eq!(
+            s.command(b"RCPT TO:<alice@hashgram.io>"),
+            Action::CheckRecipient("alice@hashgram.io".into())
+        );
+        assert_eq!(
+            s.recipient_verdict("alice@hashgram.io".into(), Verdict::Accept)
+                .code,
+            250
+        );
         assert_eq!(reply_code(&s.command(b"DATA")), 354);
         assert!(s.in_data());
         assert_eq!(s.data_line(b"Subject: hi"), Action::Continue);
@@ -627,7 +712,10 @@ mod tests {
         assert_eq!(s.message_verdict(Verdict::Accept).code, 250);
         assert!(!s.in_data());
         // A second transaction on the same connection works.
-        assert_eq!(reply_code(&s.command(b"mail from: <carol@example.com>")), 250);
+        assert_eq!(
+            reply_code(&s.command(b"mail from: <carol@example.com>")),
+            250
+        );
         assert_eq!(reply_code(&s.command(b"QUIT")), 221);
     }
 
@@ -690,7 +778,10 @@ mod tests {
         s.command(b"EHLO x");
         s.command(b"MAIL FROM:<a@b.c>");
         s.command(b"RCPT TO:<nobody@hashgram.io>");
-        let r = s.recipient_verdict("nobody@hashgram.io".into(), Verdict::reject("5.1.1 no such user"));
+        let r = s.recipient_verdict(
+            "nobody@hashgram.io".into(),
+            Verdict::reject("5.1.1 no such user"),
+        );
         assert_eq!(r.code, 550);
         assert_eq!(reply_code(&s.command(b"DATA")), 503); // rejected rcpt does not count
         for name in ["a1", "a2"] {
@@ -704,7 +795,11 @@ mod tests {
             Action::Message(env, _) => assert_eq!(env.rcpt_to.len(), 2),
             _ => panic!(),
         }
-        assert_eq!(s.message_verdict(Verdict::temp_fail("4.3.0 try later")).code, 451);
+        assert_eq!(
+            s.message_verdict(Verdict::temp_fail("4.3.0 try later"))
+                .code,
+            451
+        );
     }
 
     #[test]
@@ -719,10 +814,19 @@ mod tests {
 
     #[test]
     fn path_arg_parsing() {
-        assert_eq!(parse_path_arg("FROM:<a@b.c>", "FROM:"), Some(("a@b.c", vec![])));
-        assert_eq!(parse_path_arg("from: <a@b.c> SIZE=5", "FROM:"), Some(("a@b.c", vec!["SIZE=5"])));
+        assert_eq!(
+            parse_path_arg("FROM:<a@b.c>", "FROM:"),
+            Some(("a@b.c", vec![]))
+        );
+        assert_eq!(
+            parse_path_arg("from: <a@b.c> SIZE=5", "FROM:"),
+            Some(("a@b.c", vec!["SIZE=5"]))
+        );
         assert_eq!(parse_path_arg("TO:a@b.c", "TO:"), Some(("a@b.c", vec![])));
-        assert_eq!(parse_path_arg("TO:<@r1,@r2:a@b.c>", "TO:"), Some(("a@b.c", vec![])));
+        assert_eq!(
+            parse_path_arg("TO:<@r1,@r2:a@b.c>", "TO:"),
+            Some(("a@b.c", vec![]))
+        );
         assert_eq!(parse_path_arg("FROM:<>", "FROM:"), Some(("", vec![])));
         assert_eq!(parse_path_arg("FROM:<a@b.c", "FROM:"), None);
         assert_eq!(parse_path_arg("TO:<a@b.c>", "FROM:"), None);
@@ -782,7 +886,10 @@ mod tests {
             .filter(|l| l.len() >= 4 && &l[3..4] == " ")
             .map(|l| &l[..3])
             .collect();
-        assert_eq!(codes, vec!["220", "250", "250", "250", "550", "354", "250", "221"]);
+        assert_eq!(
+            codes,
+            vec!["220", "250", "250", "250", "550", "354", "250", "221"]
+        );
         srv.await.unwrap().unwrap();
     }
 
@@ -802,9 +909,14 @@ mod tests {
             connections_per_ip_per_minute: 2,
         };
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        let srv = tokio::spawn(serve_listener(listener, cfg, Arc::new(EchoHandler), async move {
-            let _ = rx.await;
-        }));
+        let srv = tokio::spawn(serve_listener(
+            listener,
+            cfg,
+            Arc::new(EchoHandler),
+            async move {
+                let _ = rx.await;
+            },
+        ));
         async fn talk(addr: SocketAddr, script: &[u8]) -> String {
             let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
             s.write_all(script).await.unwrap();

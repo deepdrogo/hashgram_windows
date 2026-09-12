@@ -117,7 +117,10 @@ impl<'a> People<'a> {
                 String::new()
             }
         };
-        self.one.people_state.cache.insert(address.to_owned(), (name.clone(), now));
+        self.one
+            .people_state
+            .cache
+            .insert(address.to_owned(), (name.clone(), now));
         Ok(name)
     }
 
@@ -225,9 +228,21 @@ impl<'a> People<'a> {
         for ev in events.iter().rev() {
             if ev.r#type == "PROFILE_UPDATE" {
                 let j = crate::social::payload_json(ev);
-                prof.display_name = j.get("display_name").and_then(|x| x.as_str()).unwrap_or("").to_owned();
-                prof.bio = j.get("bio").and_then(|x| x.as_str()).unwrap_or("").to_owned();
-                prof.avatar_cid = j.get("avatar_cid").and_then(|x| x.as_str()).unwrap_or("").to_owned();
+                prof.display_name = j
+                    .get("display_name")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                prof.bio = j
+                    .get("bio")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                prof.avatar_cid = j
+                    .get("avatar_cid")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_owned();
                 break;
             }
         }
@@ -254,8 +269,15 @@ impl<'a> People<'a> {
             return Err(SdkError::Invalid("that is you".into()));
         }
         self.one.people_state.contacts.request_sent(&r.address)?;
-        let _ = self.one.people_state.contacts.set_names(&r.address, &r.username, &r.display_name);
-        let gid = self.one.conversation_group(std::slice::from_ref(&r.address)).await?;
+        let _ = self
+            .one
+            .people_state
+            .contacts
+            .set_names(&r.address, &r.username, &r.display_name);
+        let gid = self
+            .one
+            .conversation_group(std::slice::from_ref(&r.address))
+            .await?;
         let me_user = self.my_username().await.unwrap_or_default();
         self.one
             .send_app(
@@ -329,23 +351,53 @@ impl<'a> People<'a> {
 
     /// Friends.
     pub fn friends(&self) -> Vec<app::ContactRecord> {
-        self.one.people_state.contacts.with_flag(p::FRIEND).into_iter().cloned().collect()
+        self.one
+            .people_state
+            .contacts
+            .with_flag(p::FRIEND)
+            .into_iter()
+            .cloned()
+            .collect()
     }
     /// Incoming requests.
     pub fn incoming_requests(&self) -> Vec<app::ContactRecord> {
-        self.one.people_state.contacts.with_flag(p::PENDING_IN).into_iter().cloned().collect()
+        self.one
+            .people_state
+            .contacts
+            .with_flag(p::PENDING_IN)
+            .into_iter()
+            .cloned()
+            .collect()
     }
     /// Outgoing requests.
     pub fn outgoing_requests(&self) -> Vec<app::ContactRecord> {
-        self.one.people_state.contacts.with_flag(p::PENDING_OUT).into_iter().cloned().collect()
+        self.one
+            .people_state
+            .contacts
+            .with_flag(p::PENDING_OUT)
+            .into_iter()
+            .cloned()
+            .collect()
     }
     /// Blocked.
     pub fn blocked(&self) -> Vec<app::ContactRecord> {
-        self.one.people_state.contacts.with_flag(p::BLOCKED).into_iter().cloned().collect()
+        self.one
+            .people_state
+            .contacts
+            .with_flag(p::BLOCKED)
+            .into_iter()
+            .cloned()
+            .collect()
     }
     /// Everyone in the book.
     pub fn all(&self) -> Vec<app::ContactRecord> {
-        self.one.people_state.contacts.records.values().cloned().collect()
+        self.one
+            .people_state
+            .contacts
+            .records
+            .values()
+            .cloned()
+            .collect()
     }
     /// Local search over the contact book.
     pub fn search_local(&self, q: &str) -> Vec<app::ContactRecord> {
@@ -355,14 +407,23 @@ impl<'a> People<'a> {
             .contacts
             .records
             .values()
-            .filter(|r| r.address.contains(&q) || r.username.to_lowercase().contains(&q) || r.display_name.to_lowercase().contains(&q))
+            .filter(|r| {
+                r.address.contains(&q)
+                    || r.username.to_lowercase().contains(&q)
+                    || r.display_name.to_lowercase().contains(&q)
+            })
             .cloned()
             .collect()
     }
 
     /// Sends our private profile card to a contact (optionally disclosing
     /// our wallet address to them).
-    pub async fn send_card(&mut self, address: &str, bio: &str, disclose_wallet: bool) -> Result<(), SdkError> {
+    pub async fn send_card(
+        &mut self,
+        address: &str,
+        bio: &str,
+        disclose_wallet: bool,
+    ) -> Result<(), SdkError> {
         if !self.one.people_state.contacts.has(address, p::FRIEND) {
             return Err(SdkError::Invalid("cards go to contacts only".into()));
         }
@@ -380,23 +441,33 @@ impl<'a> People<'a> {
             at_ms: hashgram_app::ids::now_ms(),
         };
         p::validate_card(&card)?;
-        self.one.send_app(&gid, app::app_message::Body::ProfileCard(card)).await?;
+        self.one
+            .send_app(&gid, app::app_message::Body::ProfileCard(card))
+            .await?;
         Ok(())
     }
 
     /// Handles People application messages.
-    pub(crate) fn handle_incoming(&mut self, r: &Received, appmsg: &app::AppMessage) -> Result<bool, SdkError> {
+    pub(crate) fn handle_incoming(
+        &mut self,
+        r: &Received,
+        appmsg: &app::AppMessage,
+    ) -> Result<bool, SdkError> {
         use app::app_message::Body as B;
         let changed = match &appmsg.body {
             Some(B::ContactRequest(req)) => {
                 p::validate_request(req)?;
+                self.one.people_state.contacts.request_received(
+                    &r.sender,
+                    &req.username,
+                    &req.display_name,
+                )?
+            }
+            Some(B::ContactResponse(resp)) => {
                 self.one
                     .people_state
                     .contacts
-                    .request_received(&r.sender, &req.username, &req.display_name)?
-            }
-            Some(B::ContactResponse(resp)) => {
-                self.one.people_state.contacts.response_received(&r.sender, resp.accepted)?;
+                    .response_received(&r.sender, resp.accepted)?;
                 true
             }
             Some(B::ProfileCard(card)) => {
@@ -410,8 +481,14 @@ impl<'a> People<'a> {
                         .get(&r.sender)
                         .map(|x| x.username.clone())
                         .unwrap_or_default();
-                    self.one.people_state.contacts.set_names(&r.sender, &username, &card.display_name)?;
-                    self.one.store.put(NS, format!("card/{}", r.sender).as_bytes(), card)?;
+                    self.one.people_state.contacts.set_names(
+                        &r.sender,
+                        &username,
+                        &card.display_name,
+                    )?;
+                    self.one
+                        .store
+                        .put(NS, format!("card/{}", r.sender).as_bytes(), card)?;
                     true
                 } else {
                     false

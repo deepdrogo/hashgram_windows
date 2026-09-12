@@ -307,17 +307,24 @@ impl GatewayConfig {
             )));
         }
         if self.smtp.max_message_bytes < 1024 {
-            return Err(GatewayError::Config("smtp.max_message_bytes is too small".into()));
+            return Err(GatewayError::Config(
+                "smtp.max_message_bytes is too small".into(),
+            ));
         }
-        if self.smtp.max_recipients == 0 || self.smtp.max_recipients > hashgram_app::mail::MAX_RECIPIENTS {
+        if self.smtp.max_recipients == 0
+            || self.smtp.max_recipients > hashgram_app::mail::MAX_RECIPIENTS
+        {
             return Err(GatewayError::Config(format!(
                 "smtp.max_recipients must be 1..={}",
                 hashgram_app::mail::MAX_RECIPIENTS
             )));
         }
         let d = self.domain.name.trim();
-        if d.is_empty() || !d.contains('.') || d.contains('@') || d.chars().any(char::is_whitespace) {
-            return Err(GatewayError::Config(format!("domain.name {d:?} is not a hostname")));
+        if d.is_empty() || !d.contains('.') || d.contains('@') || d.chars().any(char::is_whitespace)
+        {
+            return Err(GatewayError::Config(format!(
+                "domain.name {d:?} is not a hostname"
+            )));
         }
         if self.domain.dkim_selector.is_some() != self.domain.dkim_private_key_file.is_some() {
             return Err(GatewayError::Config(
@@ -325,18 +332,34 @@ impl GatewayConfig {
             ));
         }
         if let Some(sel) = &self.domain.dkim_selector {
-            if sel.is_empty() || !sel.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
-                return Err(GatewayError::Config(format!("domain.dkim_selector {sel:?} is not a DNS label")));
+            if sel.is_empty()
+                || !sel
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+            {
+                return Err(GatewayError::Config(format!(
+                    "domain.dkim_selector {sel:?} is not a DNS label"
+                )));
             }
         }
         if self.policy.reject_spam_score_over > 1000 {
-            return Err(GatewayError::Config("policy.reject_spam_score_over must be 0..=1000".into()));
+            return Err(GatewayError::Config(
+                "policy.reject_spam_score_over must be 0..=1000".into(),
+            ));
         }
         match self.hashgram.network.as_str() {
             "mainnet" => {}
             "devnet" => {
-                if self.hashgram.genesis_hash.as_deref().unwrap_or("").is_empty() {
-                    return Err(GatewayError::Config("hashgram.genesis_hash is required on devnet".into()));
+                if self
+                    .hashgram
+                    .genesis_hash
+                    .as_deref()
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    return Err(GatewayError::Config(
+                        "hashgram.genesis_hash is required on devnet".into(),
+                    ));
                 }
             }
             other => {
@@ -347,7 +370,9 @@ impl GatewayConfig {
         }
         if let Some(h) = &self.hashgram.genesis_hash {
             if h.len() != 64 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
-                return Err(GatewayError::Config("hashgram.genesis_hash must be 64 hex characters".into()));
+                return Err(GatewayError::Config(
+                    "hashgram.genesis_hash must be 64 hex characters".into(),
+                ));
             }
         }
         if !self.http.listen.is_empty() {
@@ -358,17 +383,25 @@ impl GatewayConfig {
                 .map_err(|e| GatewayError::Config(format!("http.listen: {e}")))?;
             if !a.ip().is_loopback() {
                 return Err(GatewayError::Config(
-                    "http.listen must be a loopback address; expose metrics through your own proxy".into(),
+                    "http.listen must be a loopback address; expose metrics through your own proxy"
+                        .into(),
                 ));
             }
         }
         if let Some(s) = &self.outbound.smarthost {
-            if s.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok()).is_none() {
-                return Err(GatewayError::Config("outbound.smarthost must be host:port".into()));
+            if s.rsplit_once(':')
+                .and_then(|(_, p)| p.parse::<u16>().ok())
+                .is_none()
+            {
+                return Err(GatewayError::Config(
+                    "outbound.smarthost must be host:port".into(),
+                ));
             }
         }
         if self.outbound.max_attempts == 0 {
-            return Err(GatewayError::Config("outbound.max_attempts must be at least 1".into()));
+            return Err(GatewayError::Config(
+                "outbound.max_attempts must be at least 1".into(),
+            ));
         }
         Ok(())
     }
@@ -418,7 +451,11 @@ impl GatewayConfig {
             paths: hashgram_sdk::Paths::new(&self.hashgram.home),
             network: self.network_identity()?,
             bootstrap,
-            chain_api: self.hashgram.chain_api.clone().filter(|s| !s.trim().is_empty()),
+            chain_api: self
+                .hashgram
+                .chain_api
+                .clone()
+                .filter(|s| !s.trim().is_empty()),
             kdf: if self.hashgram.light_kdf {
                 hashgram_sdk::KdfCost::light()
             } else {
@@ -438,7 +475,12 @@ impl GatewayConfig {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -471,7 +513,10 @@ sqlite_path = "/var/lib/hashgram-mail-gateway/gateway.sqlite"
         let text = MINIMAL.replace("[domain]", "[smtp]\nlisten = \"0.0.0.0:25\"\n\n[domain]");
         let err = GatewayConfig::from_toml(&text).expect_err("refused");
         assert!(err.to_string().contains("privileged"));
-        let text = text.replace("listen = \"0.0.0.0:25\"", "listen = \"0.0.0.0:25\"\nallow_privileged = true");
+        let text = text.replace(
+            "listen = \"0.0.0.0:25\"",
+            "listen = \"0.0.0.0:25\"\nallow_privileged = true",
+        );
         assert!(GatewayConfig::from_toml(&text).is_ok());
     }
 
@@ -484,15 +529,27 @@ sqlite_path = "/var/lib/hashgram-mail-gateway/gateway.sqlite"
             "network = \"devnet\"\ngenesis_hash = \"0000000000000000000000000000000000000000000000000000000000000000\"",
         );
         assert!(GatewayConfig::from_toml(&text).is_ok());
-        let text = MINIMAL.replace("name = \"hashgram.io\"", "name = \"hashgram.io\"\ndkim_selector = \"s1\"");
+        let text = MINIMAL.replace(
+            "name = \"hashgram.io\"",
+            "name = \"hashgram.io\"\ndkim_selector = \"s1\"",
+        );
         assert!(GatewayConfig::from_toml(&text).is_err());
     }
 
     #[test]
     fn unknown_keys_and_bad_values_are_refused() {
         assert!(GatewayConfig::from_toml(&format!("{MINIMAL}\n[policy]\nbogus = 1\n")).is_err());
-        assert!(GatewayConfig::from_toml(&format!("{MINIMAL}\n[policy]\nreject_spam_score_over = 2000\n")).is_err());
-        assert!(GatewayConfig::from_toml(&format!("{MINIMAL}\n[http]\nlisten = \"0.0.0.0:9725\"\n")).is_err());
-        assert!(GatewayConfig::from_toml(&format!("{MINIMAL}\n[outbound]\nsmarthost = \"nohost\"\n")).is_err());
+        assert!(GatewayConfig::from_toml(&format!(
+            "{MINIMAL}\n[policy]\nreject_spam_score_over = 2000\n"
+        ))
+        .is_err());
+        assert!(GatewayConfig::from_toml(&format!(
+            "{MINIMAL}\n[http]\nlisten = \"0.0.0.0:9725\"\n"
+        ))
+        .is_err());
+        assert!(GatewayConfig::from_toml(&format!(
+            "{MINIMAL}\n[outbound]\nsmarthost = \"nohost\"\n"
+        ))
+        .is_err());
     }
 }

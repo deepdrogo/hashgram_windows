@@ -80,7 +80,9 @@ impl SigningKey {
         let t = text.trim();
         if let Some(der) = pem_body(t, "PRIVATE KEY") {
             if let Some(seed) = ed25519_seed_from_pkcs8(&der) {
-                return Ok(Self::Ed25519(Box::new(ed25519_dalek::SigningKey::from_bytes(&seed))));
+                return Ok(Self::Ed25519(Box::new(
+                    ed25519_dalek::SigningKey::from_bytes(&seed),
+                )));
             }
             #[cfg(feature = "dkim-rsa")]
             {
@@ -91,7 +93,8 @@ impl SigningKey {
             }
             #[cfg(not(feature = "dkim-rsa"))]
             return Err(GatewayError::Dkim(
-                "PKCS#8 key is not Ed25519 and this build has no RSA support (feature dkim-rsa)".into(),
+                "PKCS#8 key is not Ed25519 and this build has no RSA support (feature dkim-rsa)"
+                    .into(),
             ));
         }
         if let Some(der) = pem_body(t, "RSA PRIVATE KEY") {
@@ -105,18 +108,28 @@ impl SigningKey {
             #[cfg(not(feature = "dkim-rsa"))]
             {
                 let _ = der;
-                return Err(GatewayError::Dkim("RSA key but this build has no RSA support (feature dkim-rsa)".into()));
+                return Err(GatewayError::Dkim(
+                    "RSA key but this build has no RSA support (feature dkim-rsa)".into(),
+                ));
             }
         }
         if t.len() == 64 && t.chars().all(|c| c.is_ascii_hexdigit()) {
             let bytes = hex::decode(t).map_err(|e| GatewayError::Dkim(e.to_string()))?;
-            let seed: [u8; 32] = bytes.try_into().map_err(|_| GatewayError::Dkim("seed length".into()))?;
-            return Ok(Self::Ed25519(Box::new(ed25519_dalek::SigningKey::from_bytes(&seed))));
+            let seed: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| GatewayError::Dkim("seed length".into()))?;
+            return Ok(Self::Ed25519(Box::new(
+                ed25519_dalek::SigningKey::from_bytes(&seed),
+            )));
         }
         if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(t) {
             if bytes.len() == 32 {
-                let seed: [u8; 32] = bytes.try_into().map_err(|_| GatewayError::Dkim("seed length".into()))?;
-                return Ok(Self::Ed25519(Box::new(ed25519_dalek::SigningKey::from_bytes(&seed))));
+                let seed: [u8; 32] = bytes
+                    .try_into()
+                    .map_err(|_| GatewayError::Dkim("seed length".into()))?;
+                return Ok(Self::Ed25519(Box::new(
+                    ed25519_dalek::SigningKey::from_bytes(&seed),
+                )));
             }
         }
         Err(GatewayError::Dkim(
@@ -171,7 +184,11 @@ fn pem_body(text: &str, label: &str) -> Option<Vec<u8>> {
     let end = format!("-----END {label}-----");
     let start = text.find(&begin)? + begin.len();
     let stop = text.get(start..)?.find(&end)? + start;
-    let b64: String = text.get(start..stop)?.chars().filter(|c| !c.is_whitespace()).collect();
+    let b64: String = text
+        .get(start..stop)?
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
     base64::engine::general_purpose::STANDARD.decode(b64).ok()
 }
 
@@ -181,13 +198,16 @@ fn pem_body(text: &str, label: &str) -> Option<Vec<u8>> {
 /// through to the RSA parser.
 fn ed25519_seed_from_pkcs8(der: &[u8]) -> Option<[u8; 32]> {
     const PREFIX: [u8; 16] = [
-        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
+        0x20,
     ];
     if der.len() < 48 || der.get(..16)? != PREFIX {
         // Also accept v2 (0x30 0x51 …) by locating the OID and seed.
         let oid_at = der.windows(3).position(|w| w == [0x2b, 0x65, 0x70])?;
         let rest = der.get(oid_at + 3..)?;
-        let seed_at = rest.windows(4).position(|w| w == [0x04, 0x22, 0x04, 0x20])?;
+        let seed_at = rest
+            .windows(4)
+            .position(|w| w == [0x04, 0x22, 0x04, 0x20])?;
         let seed = rest.get(seed_at + 4..seed_at + 36)?;
         return seed.try_into().ok();
     }
@@ -269,10 +289,19 @@ fn collapse_wsp(v: &[u8]) -> Vec<u8> {
 pub fn relaxed_header(raw: &[u8]) -> Option<(String, Vec<u8>)> {
     let colon = raw.iter().position(|&b| b == b':')?;
     let name = raw.get(..colon)?;
-    let name: Vec<u8> = name.iter().filter(|b| !is_wsp(**b)).map(u8::to_ascii_lowercase).collect();
+    let name: Vec<u8> = name
+        .iter()
+        .filter(|b| !is_wsp(**b))
+        .map(u8::to_ascii_lowercase)
+        .collect();
     let name = String::from_utf8(name).ok()?;
     // Unfold: remove CRLF, keep the WSP that followed (it collapses).
-    let value: Vec<u8> = raw.get(colon + 1..)?.iter().copied().filter(|&b| b != b'\r' && b != b'\n').collect();
+    let value: Vec<u8> = raw
+        .get(colon + 1..)?
+        .iter()
+        .copied()
+        .filter(|&b| b != b'\r' && b != b'\n')
+        .collect();
     let value = collapse_wsp(&value);
     let mut out = name.clone().into_bytes();
     out.push(b':');
@@ -352,9 +381,16 @@ pub struct SignatureInput {
 
 impl Signer {
     /// Builds the signing input for a rendered message (CRLF lines).
-    pub fn signature_input(&self, message: &[u8], timestamp: u64) -> Result<SignatureInput, GatewayError> {
+    pub fn signature_input(
+        &self,
+        message: &[u8],
+        timestamp: u64,
+    ) -> Result<SignatureInput, GatewayError> {
         let (raw_headers, body) = split_message(message);
-        let canon: Vec<(String, Vec<u8>)> = raw_headers.iter().filter_map(|h| relaxed_header(h)).collect();
+        let canon: Vec<(String, Vec<u8>)> = raw_headers
+            .iter()
+            .filter_map(|h| relaxed_header(h))
+            .collect();
         if !canon.iter().any(|(n, _)| n == "from") {
             return Err(GatewayError::Dkim("message has no From header".into()));
         }
@@ -369,8 +405,10 @@ impl Signer {
                 header_data.extend_from_slice(c);
             }
         }
-        let body_hash_b64 = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(relaxed_body(body)));
-        let header_without_signature = self.header_text(&signed_headers, &body_hash_b64, timestamp, "");
+        let body_hash_b64 =
+            base64::engine::general_purpose::STANDARD.encode(Sha256::digest(relaxed_body(body)));
+        let header_without_signature =
+            self.header_text(&signed_headers, &body_hash_b64, timestamp, "");
         let mut raw_sig_header = b"DKIM-Signature:".to_vec();
         raw_sig_header.extend_from_slice(header_without_signature.as_bytes());
         let (_, mut canon_sig) = relaxed_header(&raw_sig_header)
@@ -435,7 +473,12 @@ impl Signer {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -460,10 +503,14 @@ mod tests {
         assert_eq!(relaxed_body(b""), b"");
         assert_eq!(relaxed_body(b"\r\n\r\n"), b"");
         assert_eq!(relaxed_body(b"x"), b"x\r\n");
-        assert_eq!(relaxed_body(b"a  b\t\tc \r\n\r\nd\r\n\r\n\r\n"), b"a b c\r\n\r\nd\r\n");
+        assert_eq!(
+            relaxed_body(b"a  b\t\tc \r\n\r\nd\r\n\r\n\r\n"),
+            b"a b c\r\n\r\nd\r\n"
+        );
         assert_eq!(relaxed_body(b"  lead\r\n"), b" lead\r\n");
         // §3.4.4 body hash of the empty body is the well-known value.
-        let bh = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(relaxed_body(b"")));
+        let bh =
+            base64::engine::general_purpose::STANDARD.encode(Sha256::digest(relaxed_body(b"")));
         assert_eq!(bh, "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=");
     }
 
@@ -495,27 +542,53 @@ mod tests {
     /// message exactly as a receiver would (strip `b=`, canonicalise).
     fn reconstruct(signed: &[u8]) -> (Vec<u8>, Vec<u8>, String) {
         let (headers, body) = split_message(signed);
-        let sig_raw = headers.iter().find(|h| h.to_ascii_lowercase().starts_with(b"dkim-signature:")).unwrap();
+        let sig_raw = headers
+            .iter()
+            .find(|h| h.to_ascii_lowercase().starts_with(b"dkim-signature:"))
+            .unwrap();
         let (_, canon_sig) = relaxed_header(sig_raw).unwrap();
         let canon_str = String::from_utf8(canon_sig).unwrap();
         // `; b=` cannot occur inside base64, unlike a bare `b=`.
         let b_at = canon_str.find("; b=").unwrap() + 2;
         // Receivers ignore FWS inside the b= value (it was folded).
-        let b_value: String = canon_str[b_at + 2..].chars().filter(|c| !c.is_whitespace()).collect();
+        let b_value: String = canon_str[b_at + 2..]
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
         let without_b = format!("{}b=", &canon_str[..b_at]);
-        let h_tag = canon_str.split(';').find_map(|t| t.trim().strip_prefix("h=")).unwrap().to_owned();
-        let bh_tag = canon_str.split(';').find_map(|t| t.trim().strip_prefix("bh=")).unwrap().to_owned();
-        let canon: Vec<(String, Vec<u8>)> = headers.iter().filter_map(|h| relaxed_header(h)).collect();
+        let h_tag = canon_str
+            .split(';')
+            .find_map(|t| t.trim().strip_prefix("h="))
+            .unwrap()
+            .to_owned();
+        let bh_tag = canon_str
+            .split(';')
+            .find_map(|t| t.trim().strip_prefix("bh="))
+            .unwrap()
+            .to_owned();
+        let canon: Vec<(String, Vec<u8>)> =
+            headers.iter().filter_map(|h| relaxed_header(h)).collect();
         let mut data = Vec::new();
         for name in h_tag.split(':') {
-            if let Some((_, c)) = canon.iter().rev().find(|(n, _)| n == name && n != "dkim-signature") {
+            if let Some((_, c)) = canon
+                .iter()
+                .rev()
+                .find(|(n, _)| n == name && n != "dkim-signature")
+            {
                 data.extend_from_slice(c);
             }
         }
         data.extend_from_slice(without_b.as_bytes());
-        let body_hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(relaxed_body(body)));
+        let body_hash =
+            base64::engine::general_purpose::STANDARD.encode(Sha256::digest(relaxed_body(body)));
         assert_eq!(body_hash, bh_tag);
-        (data, base64::engine::general_purpose::STANDARD.decode(b_value).unwrap(), h_tag)
+        (
+            data,
+            base64::engine::general_purpose::STANDARD
+                .decode(b_value)
+                .unwrap(),
+            h_tag,
+        )
     }
 
     #[test]
@@ -528,13 +601,24 @@ mod tests {
         let input = s.signature_input(MESSAGE, 1_789_237_500).unwrap();
         assert_eq!(
             input.signed_headers,
-            vec!["from", "to", "subject", "date", "message-id", "mime-version", "content-type"]
+            vec![
+                "from",
+                "to",
+                "subject",
+                "date",
+                "message-id",
+                "mime-version",
+                "content-type"
+            ]
         );
         let signed = s.sign_message(MESSAGE, 1_789_237_500).unwrap();
         assert!(signed.starts_with(b"DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed; d=hashgram.io; s=s1; t=1789237500;\r\n\th=from:to:subject:date:message-id:mime-version:content-type;\r\n\tbh="));
         let (data, sig, h) = reconstruct(&signed);
         assert_eq!(data, input.data);
-        assert_eq!(h, "from:to:subject:date:message-id:mime-version:content-type");
+        assert_eq!(
+            h,
+            "from:to:subject:date:message-id:mime-version:content-type"
+        );
         let vk = match &s.key {
             SigningKey::Ed25519(k) => k.verifying_key(),
             #[cfg(feature = "dkim-rsa")]
@@ -544,7 +628,9 @@ mod tests {
         let sig = ed25519_dalek::Signature::from_slice(&sig).unwrap();
         vk.verify(&Sha256::digest(&data), &sig).unwrap();
         // Tampering with a signed header breaks the reconstruction.
-        let tampered = String::from_utf8(signed.clone()).unwrap().replace("Subject: test", "Subject: pwned");
+        let tampered = String::from_utf8(signed.clone())
+            .unwrap()
+            .replace("Subject: test", "Subject: pwned");
         let (data2, _, _) = reconstruct(tampered.as_bytes());
         assert_ne!(data2, input.data);
         // Every line of the signature header is short enough.
@@ -562,7 +648,10 @@ mod tests {
         assert_eq!(k1.dns_record().unwrap(), k2.dns_record().unwrap());
         assert_eq!(k1.dns_record().unwrap(), k3.dns_record().unwrap());
         assert!(SigningKey::parse("garbage").is_err());
-        assert!(SigningKey::parse("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----").is_err());
+        assert!(
+            SigningKey::parse("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----")
+                .is_err()
+        );
     }
 
     #[test]
@@ -596,13 +685,17 @@ ATNo/dCYu/bKLgYw+9M3Fn67jMJarbjoU/YCyzFKESVkZgIcYeqXiKPIuFYHXG3B
         use rsa::signature::Verifier;
         let key = SigningKey::parse(RSA_PEM).unwrap();
         assert_eq!(key.algorithm(), "rsa-sha256");
-        assert!(key.dns_record().unwrap().starts_with("v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSTQrrsIyhTaJ+"));
+        assert!(key
+            .dns_record()
+            .unwrap()
+            .starts_with("v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCSTQrrsIyhTaJ+"));
         let s = signer(key);
         let signed = s.sign_message(MESSAGE, 42).unwrap();
         assert!(signed.starts_with(b"DKIM-Signature: v=1; a=rsa-sha256;"));
         let (data, sig, _) = reconstruct(&signed);
         let SigningKey::Rsa(k) = &s.key else { panic!() };
         let vk = VerifyingKey::<Sha256>::new(k.to_public_key());
-        vk.verify(&data, &Signature::try_from(sig.as_slice()).unwrap()).unwrap();
+        vk.verify(&data, &Signature::try_from(sig.as_slice()).unwrap())
+            .unwrap();
     }
 }

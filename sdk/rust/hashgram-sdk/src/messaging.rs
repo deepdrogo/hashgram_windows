@@ -280,7 +280,8 @@ impl Messaging {
         kind: pb::EnvelopeKind,
         ciphertext: &[u8],
     ) -> Result<(), SdkError> {
-        self.deliver(link, network, device_pubkey, kind, ciphertext).await
+        self.deliver(link, network, device_pubkey, kind, ciphertext)
+            .await
     }
 
     /// Publishes key packages to every store peer, and so registers this
@@ -714,7 +715,13 @@ impl Messaging {
                 // second-resolution timestamp, and the message can only be
                 // processed once the group exists.
                 let mut ordered: Vec<&pb::Envelope> = page.envelopes.iter().collect();
-                ordered.sort_by_key(|e| (e.kind != pb::EnvelopeKind::MlsWelcome as i32, e.created_at, e.id.clone()));
+                ordered.sort_by_key(|e| {
+                    (
+                        e.kind != pb::EnvelopeKind::MlsWelcome as i32,
+                        e.created_at,
+                        e.id.clone(),
+                    )
+                });
                 // Envelopes that fail are retried within the page after the
                 // others (a Welcome may arrive later in the same page than
                 // its message would suggest) and are NOT acknowledged, so

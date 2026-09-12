@@ -80,7 +80,12 @@ impl<'a> Feed<'a> {
         Social::open(&self.one.account)
     }
 
-    async fn publish(&mut self, kind: &str, payload: &impl Message, media: Vec<pb::MediaReference>) -> Result<String, SdkError> {
+    async fn publish(
+        &mut self,
+        kind: &str,
+        payload: &impl Message,
+        media: Vec<pb::MediaReference>,
+    ) -> Result<String, SdkError> {
         let mut s = self.social()?;
         let ev = s.build(&self.one.network, kind, payload, media)?;
         let id = s.publish(&self.one.link, ev.clone()).await?;
@@ -90,7 +95,13 @@ impl<'a> Feed<'a> {
     }
 
     /// Creates a public post. `media` are already-uploaded public blobs.
-    pub async fn post(&mut self, text: &str, hashtags: Vec<String>, media: Vec<pb::MediaReference>, sensitive: bool) -> Result<String, SdkError> {
+    pub async fn post(
+        &mut self,
+        text: &str,
+        hashtags: Vec<String>,
+        media: Vec<pb::MediaReference>,
+        sensitive: bool,
+    ) -> Result<String, SdkError> {
         self.publish(
             "POST_CREATE",
             &pb::PostCreate {
@@ -165,11 +176,17 @@ impl<'a> Feed<'a> {
     /// Deletes our own post (tombstone event).
     pub async fn delete_post(&mut self, post_id_hex: &str) -> Result<String, SdkError> {
         let post = hex::decode(post_id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
-        self.publish("POST_DELETE", &pb::PostDelete { post }, vec![]).await
+        self.publish("POST_DELETE", &pb::PostDelete { post }, vec![])
+            .await
     }
 
     /// Updates our public profile.
-    pub async fn update_profile(&mut self, display_name: &str, bio: &str, avatar_cid_hex: &str) -> Result<String, SdkError> {
+    pub async fn update_profile(
+        &mut self,
+        display_name: &str,
+        bio: &str,
+        avatar_cid_hex: &str,
+    ) -> Result<String, SdkError> {
         let avatar_cid = hex::decode(avatar_cid_hex).unwrap_or_default();
         self.publish(
             "PROFILE_UPDATE",
@@ -187,9 +204,23 @@ impl<'a> Feed<'a> {
     /// Follow / unfollow (public).
     pub async fn set_follow(&mut self, address: &str, on: bool) -> Result<String, SdkError> {
         let id = if on {
-            self.publish("FOLLOW", &pb::Follow { target: address.to_owned() }, vec![]).await?
+            self.publish(
+                "FOLLOW",
+                &pb::Follow {
+                    target: address.to_owned(),
+                },
+                vec![],
+            )
+            .await?
         } else {
-            self.publish("UNFOLLOW", &pb::Unfollow { target: address.to_owned() }, vec![]).await?
+            self.publish(
+                "UNFOLLOW",
+                &pb::Unfollow {
+                    target: address.to_owned(),
+                },
+                vec![],
+            )
+            .await?
         };
         let mut follows = self.follows();
         if on {
@@ -203,23 +234,40 @@ impl<'a> Feed<'a> {
 
     /// Addresses we follow (local mirror).
     pub fn follows(&self) -> BTreeSet<String> {
-        self.one.store.get(NS_FOLLOWS, b"set").ok().flatten().unwrap_or_default()
+        self.one
+            .store
+            .get(NS_FOLLOWS, b"set")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
     }
 
     /// Fetches and caches an author's recent events (verified).
     pub async fn refresh_author(&mut self, author: &str, limit: u32) -> Result<usize, SdkError> {
         let s = self.social()?;
         let cursor_key = format!("cursor/{author}");
-        let from: u64 = self.one.store.get(NS_EVENTS, cursor_key.as_bytes())?.unwrap_or(0);
+        let from: u64 = self
+            .one
+            .store
+            .get(NS_EVENTS, cursor_key.as_bytes())?
+            .unwrap_or(0);
         let events = s
-            .fetch_author(&self.one.link, &self.one.network, author, from, limit.min(200))
+            .fetch_author(
+                &self.one.link,
+                &self.one.network,
+                author,
+                from,
+                limit.min(200),
+            )
             .await?;
         let mut max_seq = from;
         for ev in &events {
             self.one.store.put(NS_EVENTS, &ev.id, ev)?;
             max_seq = max_seq.max(ev.sequence + 1);
         }
-        self.one.store.put(NS_EVENTS, cursor_key.as_bytes(), &max_seq)?;
+        self.one
+            .store
+            .put(NS_EVENTS, cursor_key.as_bytes(), &max_seq)?;
         Ok(events.len())
     }
 
@@ -237,7 +285,13 @@ impl<'a> Feed<'a> {
     /// Chronological page over cached events from the given authors (or
     /// everyone cached when `authors` is empty). `before` is a timestamp
     /// (s), 0 = now.
-    pub fn timeline(&self, authors: &BTreeSet<String>, kinds: &[&str], before: u64, limit: usize) -> Result<Vec<FeedItem>, SdkError> {
+    pub fn timeline(
+        &self,
+        authors: &BTreeSet<String>,
+        kinds: &[&str],
+        before: u64,
+        limit: usize,
+    ) -> Result<Vec<FeedItem>, SdkError> {
         let mut deleted: BTreeSet<Vec<u8>> = BTreeSet::new();
         let mut items: Vec<FeedItem> = Vec::new();
         let events: Vec<(Vec<u8>, pb::SocialEvent)> = self
@@ -295,7 +349,12 @@ impl<'a> Feed<'a> {
     }
 
     /// One author's posts.
-    pub fn author(&self, address: &str, before: u64, limit: usize) -> Result<Vec<FeedItem>, SdkError> {
+    pub fn author(
+        &self,
+        address: &str,
+        before: u64,
+        limit: usize,
+    ) -> Result<Vec<FeedItem>, SdkError> {
         let mut a = BTreeSet::new();
         a.insert(address.to_owned());
         self.timeline(&a, &["POST_CREATE", "REPOST"], before, limit)
@@ -310,7 +369,11 @@ impl<'a> Feed<'a> {
         let mut reactions: BTreeMap<String, u32> = BTreeMap::new();
         let mut reacted: BTreeMap<String, String> = BTreeMap::new();
         let events: Vec<(Vec<u8>, pb::SocialEvent)> = self.one.store.scan(NS_EVENTS)?;
-        let mut evs: Vec<pb::SocialEvent> = events.into_iter().filter(|(k, _)| !k.starts_with(b"cursor/")).map(|(_, e)| e).collect();
+        let mut evs: Vec<pb::SocialEvent> = events
+            .into_iter()
+            .filter(|(k, _)| !k.starts_with(b"cursor/"))
+            .map(|(_, e)| e)
+            .collect();
         evs.sort_by_key(|e| e.timestamp);
         for ev in evs {
             match ev.r#type.as_str() {
@@ -362,9 +425,23 @@ impl<'a> Feed<'a> {
     }
 
     /// Uploads a public media blob for a post and returns its reference.
-    pub async fn upload_media(&mut self, bytes: &[u8], mime: &str, kind: &str) -> Result<pb::MediaReference, SdkError> {
+    pub async fn upload_media(
+        &mut self,
+        bytes: &[u8],
+        mime: &str,
+        kind: &str,
+    ) -> Result<pb::MediaReference, SdkError> {
         let device = self.one.account.device()?;
-        let up = crate::blob::upload(&self.one.link, &self.one.network, &device, bytes, mime, false, 2).await?;
+        let up = crate::blob::upload(
+            &self.one.link,
+            &self.one.network,
+            &device,
+            bytes,
+            mime,
+            false,
+            2,
+        )
+        .await?;
         Ok(pb::MediaReference {
             cid: hex::decode(&up.cid).unwrap_or_default(),
             mime: mime.to_owned(),

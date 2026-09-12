@@ -23,8 +23,28 @@ struct Converter {
 }
 
 const BLOCKS: &[&str] = &[
-    "p", "div", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "table", "ul", "ol", "hr",
-    "section", "article", "header", "footer", "dd", "dt",
+    "p",
+    "div",
+    "tr",
+    "li",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "pre",
+    "table",
+    "ul",
+    "ol",
+    "hr",
+    "section",
+    "article",
+    "header",
+    "footer",
+    "dd",
+    "dt",
 ];
 
 impl Converter {
@@ -84,7 +104,10 @@ impl Converter {
                 "td" | "th" if closing => self.out.push(' '),
                 "a" if !closing => {
                     if let Some(href) = attr(tag, "href") {
-                        if !href.starts_with('#') && !href.starts_with("mailto:") && !href.starts_with("javascript:") {
+                        if !href.starts_with('#')
+                            && !href.starts_with("mailto:")
+                            && !href.starts_with("javascript:")
+                        {
                             self.pending_link = Some(href);
                         }
                     }
@@ -138,7 +161,11 @@ fn attr(tag: &str, name: &str) -> Option<String> {
     while let Some(i) = lower.get(search..)?.find(name) {
         let at = search + i;
         let after = lower.get(at + name.len()..)?.trim_start();
-        let boundary_ok = at == 0 || lower.as_bytes().get(at - 1).is_some_and(|b| b.is_ascii_whitespace());
+        let boundary_ok = at == 0
+            || lower
+                .as_bytes()
+                .get(at - 1)
+                .is_some_and(|b| b.is_ascii_whitespace());
         if boundary_ok && after.starts_with('=') {
             let value_start = tag.len() - after.len() + 1;
             let v = tag.get(value_start..)?.trim_start();
@@ -219,7 +246,10 @@ fn collapse(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut blank_lines = 0;
     for line in s.lines() {
-        let words: Vec<&str> = line.split([' ', '\t', '\r', '\u{a0}']).filter(|w| !w.is_empty()).collect();
+        let words: Vec<&str> = line
+            .split([' ', '\t', '\r', '\u{a0}'])
+            .filter(|w| !w.is_empty())
+            .collect();
         if words.is_empty() {
             blank_lines += 1;
             if blank_lines <= 1 && !out.is_empty() {
@@ -235,7 +265,12 @@ fn collapse(s: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -245,13 +280,19 @@ mod tests {
 <body><p>Hello&nbsp;<b>World</b>&amp; friends</p><script>alert(1)</script>
 <ul><li>one</li><li>two</li></ul><a href="https://example.com/x">link</a><br>bye &#x1F600; &#169;</body></html>"#;
         let t = html_to_text(html);
-        assert_eq!(t, "Hello World& friends\n- one\n- two\nlink <https://example.com/x>\nbye 😀 ©");
+        assert_eq!(
+            t,
+            "Hello World& friends\n- one\n- two\nlink <https://example.com/x>\nbye 😀 ©"
+        );
     }
 
     #[test]
     fn robust_against_garbage() {
         assert_eq!(html_to_text("plain text"), "plain text");
-        assert_eq!(html_to_text("a < b and <unterminated"), "a < b and <unterminated");
+        assert_eq!(
+            html_to_text("a < b and <unterminated"),
+            "a < b and <unterminated"
+        );
         assert_eq!(html_to_text("<!-- c --><p>x</p><!-- unterminated"), "x");
         assert_eq!(html_to_text("<script>never closed"), "");
         assert_eq!(html_to_text("&bogus; &#xZZ; &amp"), "&bogus; &#xZZ; &amp");
@@ -268,7 +309,10 @@ mod tests {
 
     #[test]
     fn attributes() {
-        assert_eq!(attr(r#"a class="x" href='https://e.com/?a=1&b=2'"#, "href").unwrap(), "https://e.com/?a=1&b=2");
+        assert_eq!(
+            attr(r#"a class="x" href='https://e.com/?a=1&b=2'"#, "href").unwrap(),
+            "https://e.com/?a=1&b=2"
+        );
         assert_eq!(attr("a href=plain", "href").unwrap(), "plain");
         assert!(attr("a data-href=\"x\"", "href").is_none());
     }

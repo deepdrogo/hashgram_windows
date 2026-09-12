@@ -46,7 +46,10 @@ impl IpLimiter {
         // Bound the table: a scan attack from many addresses must not
         // grow it without limit.
         if map.len() > 10_000 {
-            map.retain(|_, v| v.last().is_some_and(|t| now.duration_since(*t) < self.window));
+            map.retain(|_, v| {
+                v.last()
+                    .is_some_and(|t| now.duration_since(*t) < self.window)
+            });
             if map.len() > 10_000 {
                 map.clear();
             }
@@ -62,7 +65,12 @@ impl IpLimiter {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 

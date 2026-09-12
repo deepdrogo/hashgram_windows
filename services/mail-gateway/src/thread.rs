@@ -27,7 +27,10 @@ pub const ID_LEN: usize = 16;
 #[must_use]
 pub fn normalise_message_id(raw: &str) -> String {
     let s = raw.trim();
-    let s = s.strip_prefix('<').and_then(|x| x.strip_suffix('>')).unwrap_or(s);
+    let s = s
+        .strip_prefix('<')
+        .and_then(|x| x.strip_suffix('>'))
+        .unwrap_or(s);
     match s.rsplit_once('@') {
         Some((l, d)) => format!("{l}@{}", d.to_ascii_lowercase()),
         None => s.to_owned(),
@@ -87,7 +90,12 @@ pub fn parse_outbound_message_id(header: &str, domain: &str) -> Option<Vec<u8>> 
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -101,7 +109,10 @@ mod tests {
         assert!(derive_id("").is_none());
         assert!(derive_id("<>").is_none());
         // Known answer so a future change to the derivation is noticed.
-        assert_eq!(hex::encode(&a), hex::encode(&blake3::hash(b"abc@example.com").as_bytes()[..16]));
+        assert_eq!(
+            hex::encode(&a),
+            hex::encode(&blake3::hash(b"abc@example.com").as_bytes()[..16])
+        );
     }
 
     #[test]

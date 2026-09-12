@@ -41,7 +41,11 @@ impl Reply {
     /// Multi-line reply.
     #[must_use]
     pub fn multi(code: u16, lines: Vec<String>) -> Self {
-        let lines = if lines.is_empty() { vec![String::new()] } else { lines };
+        let lines = if lines.is_empty() {
+            vec![String::new()]
+        } else {
+            lines
+        };
         Self { code, lines }
     }
 
@@ -70,7 +74,12 @@ impl Reply {
         let last = self.lines.len().saturating_sub(1);
         for (i, l) in self.lines.iter().enumerate() {
             let sep = if i == last { ' ' } else { '-' };
-            out.push_str(&format!("{}{}{}\r\n", self.code, sep, sanitise_reply_text(l)));
+            out.push_str(&format!(
+                "{}{}{}\r\n",
+                self.code,
+                sep,
+                sanitise_reply_text(l)
+            ));
         }
         out
     }
@@ -150,7 +159,12 @@ pub fn parse_reply_line(line: &str) -> Option<(u16, bool, &str)> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -181,7 +195,10 @@ mod tests {
 
     #[test]
     fn reply_line_parsing() {
-        assert_eq!(parse_reply_line("250-mx.example.com"), Some((250, false, "mx.example.com")));
+        assert_eq!(
+            parse_reply_line("250-mx.example.com"),
+            Some((250, false, "mx.example.com"))
+        );
         assert_eq!(parse_reply_line("250 OK"), Some((250, true, "OK")));
         assert_eq!(parse_reply_line("220"), Some((220, true, "")));
         assert_eq!(parse_reply_line("25x OK"), None);

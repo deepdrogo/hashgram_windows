@@ -85,7 +85,11 @@ fn boundary(seed: &[u8], tag: &str) -> String {
     // Deterministic from caller-provided randomness so rendering is a
     // pure function; the seed itself is fresh per message.
     let h = blake3::hash(&[seed, tag.as_bytes()].concat());
-    format!("=_hg_{}_{}", tag, hex::encode(h.as_bytes().get(..12).unwrap_or(&[])))
+    format!(
+        "=_hg_{}_{}",
+        tag,
+        hex::encode(h.as_bytes().get(..12).unwrap_or(&[]))
+    )
 }
 
 fn mailbox_list(list: &[Mailbox]) -> String {
@@ -138,7 +142,11 @@ fn param(name: &str, value: &str) -> String {
     }
     let mut enc = String::with_capacity(value.len() * 3);
     for b in value.bytes() {
-        let attr_char = b.is_ascii_alphanumeric() || matches!(b, b'!' | b'#' | b'$' | b'&' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~');
+        let attr_char = b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'!' | b'#' | b'$' | b'&' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
+            );
         if attr_char {
             enc.push(b as char);
         } else {
@@ -149,10 +157,24 @@ fn param(name: &str, value: &str) -> String {
 }
 
 fn attachment_part(out: &mut String, a: &Attachment) {
-    let mime = if a.mime.is_empty() { "application/octet-stream" } else { &a.mime };
-    out.push_str(&format!("Content-Type: {mime}; {}\r\n", param("name", &a.name)));
-    let disposition = if a.content_id.is_empty() { "attachment" } else { "inline" };
-    out.push_str(&format!("Content-Disposition: {disposition}; {}\r\n", param("filename", &a.name)));
+    let mime = if a.mime.is_empty() {
+        "application/octet-stream"
+    } else {
+        &a.mime
+    };
+    out.push_str(&format!(
+        "Content-Type: {mime}; {}\r\n",
+        param("name", &a.name)
+    ));
+    let disposition = if a.content_id.is_empty() {
+        "attachment"
+    } else {
+        "inline"
+    };
+    out.push_str(&format!(
+        "Content-Disposition: {disposition}; {}\r\n",
+        param("filename", &a.name)
+    ));
     if !a.content_id.is_empty() {
         out.push_str(&format!("Content-ID: <{}>\r\n", a.content_id));
     }
@@ -172,20 +194,40 @@ impl OutboundMail {
                 push_header(&mut out, &mut names, k, &encode_header_value(v));
             }
         }
-        push_header(&mut out, &mut names, "From", &format_mailbox(&self.from.name, &self.from.addr));
+        push_header(
+            &mut out,
+            &mut names,
+            "From",
+            &format_mailbox(&self.from.name, &self.from.addr),
+        );
         push_header(&mut out, &mut names, "To", &mailbox_list(&self.to));
         push_header(&mut out, &mut names, "Cc", &mailbox_list(&self.cc));
         if let Some(r) = &self.reply_to {
-            push_header(&mut out, &mut names, "Reply-To", &format_mailbox(&r.name, &r.addr));
+            push_header(
+                &mut out,
+                &mut names,
+                "Reply-To",
+                &format_mailbox(&r.name, &r.addr),
+            );
         }
-        push_header(&mut out, &mut names, "Subject", &encode_header_value(&self.subject));
+        push_header(
+            &mut out,
+            &mut names,
+            "Subject",
+            &encode_header_value(&self.subject),
+        );
         push_header(&mut out, &mut names, "Date", &rfc5322_date(self.date_ms));
         push_header(&mut out, &mut names, "Message-ID", &self.message_id);
         if let Some(irt) = &self.in_reply_to {
             push_header(&mut out, &mut names, "In-Reply-To", irt);
         }
         if !self.references.is_empty() {
-            push_header(&mut out, &mut names, "References", &fold_ids(&self.references));
+            push_header(
+                &mut out,
+                &mut names,
+                "References",
+                &fold_ids(&self.references),
+            );
         }
         match self.importance {
             app::MailImportance::High => {
@@ -209,19 +251,31 @@ impl OutboundMail {
             }
             (true, false) => {
                 let b = boundary(seed, "alt");
-                push_header(&mut out, &mut names, "Content-Type", &format!("multipart/alternative; boundary=\"{b}\""));
+                push_header(
+                    &mut out,
+                    &mut names,
+                    "Content-Type",
+                    &format!("multipart/alternative; boundary=\"{b}\""),
+                );
                 out.push_str("\r\n");
                 self.alternative_body(&mut out, &b);
                 out.push_str(&format!("--{b}--\r\n"));
             }
             (_, true) => {
                 let outer = boundary(seed, "mix");
-                push_header(&mut out, &mut names, "Content-Type", &format!("multipart/mixed; boundary=\"{outer}\""));
+                push_header(
+                    &mut out,
+                    &mut names,
+                    "Content-Type",
+                    &format!("multipart/mixed; boundary=\"{outer}\""),
+                );
                 out.push_str("\r\n");
                 out.push_str(&format!("--{outer}\r\n"));
                 if has_html {
                     let inner = boundary(seed, "alt");
-                    out.push_str(&format!("Content-Type: multipart/alternative; boundary=\"{inner}\"\r\n\r\n"));
+                    out.push_str(&format!(
+                        "Content-Type: multipart/alternative; boundary=\"{inner}\"\r\n\r\n"
+                    ));
                     self.alternative_body(&mut out, &inner);
                     out.push_str(&format!("--{inner}--\r\n"));
                 } else {
@@ -255,7 +309,9 @@ pub fn well_formed(bytes: &[u8]) -> bool {
     let mut start = 0;
     let n = bytes.len();
     while start < n {
-        let rel = bytes.get(start..).and_then(|s| s.iter().position(|&b| b == b'\n'));
+        let rel = bytes
+            .get(start..)
+            .and_then(|s| s.iter().position(|&b| b == b'\n'));
         let Some(rel) = rel else {
             return false; // no trailing CRLF
         };
@@ -269,7 +325,12 @@ pub fn well_formed(bytes: &[u8]) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
     use mailparse::MailHeaderMap;
@@ -322,13 +383,23 @@ mod tests {
     fn round_trips_through_mailparse() {
         let m = sample();
         let r = m.render(&[1u8; 16]);
-        assert!(well_formed(&r.bytes), "{}", String::from_utf8_lossy(&r.bytes));
+        assert!(
+            well_formed(&r.bytes),
+            "{}",
+            String::from_utf8_lossy(&r.bytes)
+        );
         let parsed = mailparse::parse_mail(&r.bytes).unwrap();
         let h = &parsed.headers;
         assert_eq!(h.get_first_value("Subject").unwrap(), m.subject);
         assert_eq!(h.get_first_value("Message-ID").unwrap(), m.message_id);
-        assert_eq!(h.get_first_value("In-Reply-To").unwrap(), "<parent@example.com>");
-        assert_eq!(h.get_first_value("Date").unwrap(), "Sat, 12 Sep 2026 18:25:00 +0000");
+        assert_eq!(
+            h.get_first_value("In-Reply-To").unwrap(),
+            "<parent@example.com>"
+        );
+        assert_eq!(
+            h.get_first_value("Date").unwrap(),
+            "Sat, 12 Sep 2026 18:25:00 +0000"
+        );
         assert_eq!(h.get_first_value("X-Hashgram-Origin").unwrap(), "native");
         assert_eq!(h.get_first_value("Importance").unwrap(), "high");
         let refs = h.get_first_value("References").unwrap();
@@ -344,7 +415,9 @@ mod tests {
         let to = mailparse::addrparse(&h.get_first_value("To").unwrap()).unwrap();
         assert_eq!(to.count_addrs(), 2);
         match &to[0] {
-            mailparse::MailAddr::Single(s) => assert_eq!(s.display_name.as_deref(), Some("Bob \"B\" Example")),
+            mailparse::MailAddr::Single(s) => {
+                assert_eq!(s.display_name.as_deref(), Some("Bob \"B\" Example"))
+            }
             _ => panic!(),
         }
 
@@ -355,7 +428,10 @@ mod tests {
         assert_eq!(alt.ctype.mimetype, "multipart/alternative");
         assert_eq!(alt.subparts[0].ctype.mimetype, "text/plain");
         // Bodies come back with CRLF line endings (the wire form).
-        assert_eq!(alt.subparts[0].get_body().unwrap(), m.body_text.replace('\n', "\r\n"));
+        assert_eq!(
+            alt.subparts[0].get_body().unwrap(),
+            m.body_text.replace('\n', "\r\n")
+        );
         assert_eq!(alt.subparts[1].ctype.mimetype, "text/html");
         assert_eq!(alt.subparts[1].get_body().unwrap(), m.body_html);
         let pdf = &parsed.subparts[1];
@@ -366,14 +442,23 @@ mod tests {
         assert_eq!(disp.params.get("filename").unwrap(), "report ინვოისი.pdf");
         let png = &parsed.subparts[2];
         assert_eq!(png.get_body_raw().unwrap(), m.attachments[1].data);
-        assert_eq!(png.headers.get_first_value("Content-ID").unwrap(), "<logo@hashgram.io>");
-        assert_eq!(png.get_content_disposition().disposition, mailparse::DispositionType::Inline);
+        assert_eq!(
+            png.headers.get_first_value("Content-ID").unwrap(),
+            "<logo@hashgram.io>"
+        );
+        assert_eq!(
+            png.get_content_disposition().disposition,
+            mailparse::DispositionType::Inline
+        );
 
         // Our inbound parser understands our own output too.
         let back = super::super::inbound::parse(&r.bytes).unwrap();
         assert_eq!(back.body_text, m.body_text);
         assert_eq!(back.attachments.len(), 2);
-        assert_eq!(back.message_id.as_deref(), Some("00112233445566778899aabbccddeeff@hashgram.io"));
+        assert_eq!(
+            back.message_id.as_deref(),
+            Some("00112233445566778899aabbccddeeff@hashgram.io")
+        );
     }
 
     #[test]
@@ -384,7 +469,14 @@ mod tests {
         let r = m.render(&[2u8; 16]);
         let parsed = mailparse::parse_mail(&r.bytes).unwrap();
         assert_eq!(parsed.ctype.mimetype, "text/plain");
-        assert_eq!(parsed.get_body().unwrap().replace("\r\n", "\n").trim_end_matches('\n'), m.body_text);
+        assert_eq!(
+            parsed
+                .get_body()
+                .unwrap()
+                .replace("\r\n", "\n")
+                .trim_end_matches('\n'),
+            m.body_text
+        );
         assert!(r.header_names.contains(&"Content-Type".to_owned()));
 
         let mut m = sample();

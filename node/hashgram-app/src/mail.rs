@@ -91,13 +91,17 @@ pub fn parse_address(input: &str) -> Result<AddressForm, AppError> {
 fn username(name: &str) -> Result<String, AppError> {
     let n = name.trim().to_lowercase();
     if n.len() < 2 || n.len() > 32 {
-        return Err(AppError::Invalid(format!("username length out of range: {name}")));
+        return Err(AppError::Invalid(format!(
+            "username length out of range: {name}"
+        )));
     }
     if !n
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
     {
-        return Err(AppError::Invalid(format!("username has invalid characters: {name}")));
+        return Err(AppError::Invalid(format!(
+            "username has invalid characters: {name}"
+        )));
     }
     Ok(n)
 }
@@ -121,7 +125,9 @@ pub fn validate_attachment(i: usize, a: &pb::MailAttachment) -> Result<(), AppEr
     let w = format!("attachments[{i}]");
     require_str(&format!("{w}.name"), &a.name, MAX_FILENAME)?;
     if a.name.contains('/') || a.name.contains('\\') || a.name == "." || a.name == ".." {
-        return Err(AppError::Invalid(format!("{w}.name contains a path separator")));
+        return Err(AppError::Invalid(format!(
+            "{w}.name contains a path separator"
+        )));
     }
     require_str_max(&format!("{w}.mime"), &a.mime, MAX_MIME)?;
     require_str_max(&format!("{w}.content_id"), &a.content_id, MAX_NAME)?;
@@ -137,7 +143,9 @@ pub fn validate_attachment(i: usize, a: &pb::MailAttachment) -> Result<(), AppEr
                 )));
             }
             if a.size != d.len() as u64 {
-                return Err(AppError::Invalid(format!("{w}.size does not match inline data")));
+                return Err(AppError::Invalid(format!(
+                    "{w}.size does not match inline data"
+                )));
             }
         }
         Some(pb::mail_attachment::Source::Blob(b)) => {
@@ -221,7 +229,11 @@ pub fn validate(m: &pb::MailMessage) -> Result<(), AppError> {
             .ok_or_else(|| AppError::Invalid("external origin without external meta".into()))?;
         require_address("external.gateway", &e.gateway)?;
         require_str_max("external.from_header", &e.from_header, MAX_HEADER)?;
-        require_str_max("external.message_id_header", &e.message_id_header, MAX_HEADER)?;
+        require_str_max(
+            "external.message_id_header",
+            &e.message_id_header,
+            MAX_HEADER,
+        )?;
         if e.auth_results.len() > 16 {
             return Err(AppError::Invalid("too many auth_results".into()));
         }
@@ -232,7 +244,9 @@ pub fn validate(m: &pb::MailMessage) -> Result<(), AppError> {
             return Err(AppError::Invalid("spam_score out of range".into()));
         }
     } else if m.external.is_some() {
-        return Err(AppError::Invalid("external meta on a native message".into()));
+        return Err(AppError::Invalid(
+            "external meta on a native message".into(),
+        ));
     }
     Ok(())
 }
@@ -435,7 +449,10 @@ pub fn normalised_subject(subject: &str) -> String {
             _ => break,
         }
     }
-    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Forward: a new thread with the original as an inline quotation and its
@@ -488,12 +505,18 @@ mod tests {
     #[test]
     fn parse_forms() {
         assert_eq!(parse_address(A).unwrap(), AddressForm::Address(A.into()));
-        assert_eq!(parse_address("@Alice").unwrap(), AddressForm::Username("alice".into()));
+        assert_eq!(
+            parse_address("@Alice").unwrap(),
+            AddressForm::Username("alice".into())
+        );
         assert_eq!(
             parse_address("alice@HASHGRAM.io").unwrap(),
             AddressForm::Username("alice".into())
         );
-        assert_eq!(parse_address("bob").unwrap(), AddressForm::Username("bob".into()));
+        assert_eq!(
+            parse_address("bob").unwrap(),
+            AddressForm::Username("bob".into())
+        );
         assert_eq!(
             parse_address("Someone@Example.com").unwrap(),
             AddressForm::External("someone@example.com".into())
@@ -566,7 +589,10 @@ mod tests {
             ..Default::default()
         };
         let r = reply_all_recipients(&m, B);
-        assert_eq!(r.to.iter().map(|a| a.address.as_str()).collect::<Vec<_>>(), vec![A, C]);
+        assert_eq!(
+            r.to.iter().map(|a| a.address.as_str()).collect::<Vec<_>>(),
+            vec![A, C]
+        );
         assert!(r.cc.is_empty());
     }
 
@@ -594,7 +620,8 @@ mod tests {
             size: (MAX_INLINE_ATTACHMENT + 1) as u64,
             source: Some(pb::mail_attachment::Source::InlineData(vec![
                 0;
-                MAX_INLINE_ATTACHMENT + 1
+                MAX_INLINE_ATTACHMENT
+                    + 1
             ])),
             ..Default::default()
         }];
@@ -629,7 +656,10 @@ mod tests {
 
     #[test]
     fn subject_normalisation() {
-        assert_eq!(normalised_subject("Re: RE: Fwd:  Hello   World"), "hello world");
+        assert_eq!(
+            normalised_subject("Re: RE: Fwd:  Hello   World"),
+            "hello world"
+        );
         assert_eq!(normalised_subject("Hello"), "hello");
         assert_eq!(normalised_subject("Re:"), "");
     }

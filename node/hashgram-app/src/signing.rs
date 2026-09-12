@@ -125,8 +125,16 @@ mod tests {
 
     #[test]
     fn networks_differ() {
-        let a = digest(&NetworkIdentity::devnet("0".repeat(64)), AppPurpose::SpaceEvent, b"x");
-        let b = digest(&NetworkIdentity::mainnet("0".repeat(64)), AppPurpose::SpaceEvent, b"x");
+        let a = digest(
+            &NetworkIdentity::devnet("0".repeat(64)),
+            AppPurpose::SpaceEvent,
+            b"x",
+        );
+        let b = digest(
+            &NetworkIdentity::mainnet("0".repeat(64)),
+            AppPurpose::SpaceEvent,
+            b"x",
+        );
         assert_ne!(a, b);
     }
 
@@ -135,8 +143,29 @@ mod tests {
         let n = net();
         let s = Ed25519Signer::from_secret([9; 32]);
         let sig = sign(&n, AppPurpose::SpaceEvent, &s, b"payload");
-        assert!(verify(&n, AppPurpose::SpaceEvent, &s.public_key(), b"payload", &sig).is_ok());
-        assert!(verify(&n, AppPurpose::SpaceEvent, &s.public_key(), b"payloae", &sig).is_err());
-        assert!(verify(&n, AppPurpose::DriveCapability, &s.public_key(), b"payload", &sig).is_err());
+        assert!(verify(
+            &n,
+            AppPurpose::SpaceEvent,
+            &s.public_key(),
+            b"payload",
+            &sig
+        )
+        .is_ok());
+        assert!(verify(
+            &n,
+            AppPurpose::SpaceEvent,
+            &s.public_key(),
+            b"payloae",
+            &sig
+        )
+        .is_err());
+        assert!(verify(
+            &n,
+            AppPurpose::DriveCapability,
+            &s.public_key(),
+            b"payload",
+            &sig
+        )
+        .is_err());
     }
 }

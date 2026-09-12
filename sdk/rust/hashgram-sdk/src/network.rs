@@ -76,7 +76,11 @@ impl<'a> Network<'a> {
             if v.single_operator {
                 "single operator".to_owned()
             } else if v.agreed {
-                format!("{} nodes / {} operators agree", v.peers.len(), v.operators.len())
+                format!(
+                    "{} nodes / {} operators agree",
+                    v.peers.len(),
+                    v.operators.len()
+                )
             } else {
                 "unverified".to_owned()
             }
@@ -99,7 +103,11 @@ impl<'a> Network<'a> {
             .chain
             .query("cosmos/staking/v1beta1/validators?pagination.limit=200")
             .await?;
-        let mut vals: Vec<Value> = v.get("validators").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+        let mut vals: Vec<Value> = v
+            .get("validators")
+            .and_then(|x| x.as_array())
+            .cloned()
+            .unwrap_or_default();
         vals.sort_by_key(|x| {
             std::cmp::Reverse(
                 x.get("tokens")
@@ -113,9 +121,23 @@ impl<'a> Network<'a> {
 
     /// Supply and reserve figures from the chain.
     pub async fn supply(&mut self) -> Result<Value, SdkError> {
-        let supply = self.one.chain.query("cosmos/bank/v1beta1/supply/by_denom?denom=uhash").await?;
-        let reserve = self.one.chain.query("hashgram/serviceproof/v1/reserve").await.unwrap_or(Value::Null);
-        let founder = self.one.chain.query("hashgram/founder/v1/revenue").await.unwrap_or(Value::Null);
+        let supply = self
+            .one
+            .chain
+            .query("cosmos/bank/v1beta1/supply/by_denom?denom=uhash")
+            .await?;
+        let reserve = self
+            .one
+            .chain
+            .query("hashgram/serviceproof/v1/reserve")
+            .await
+            .unwrap_or(Value::Null);
+        let founder = self
+            .one
+            .chain
+            .query("hashgram/founder/v1/revenue")
+            .await
+            .unwrap_or(Value::Null);
         Ok(serde_json::json!({
             "supply": supply,
             "service_reserve": reserve,
@@ -125,8 +147,14 @@ impl<'a> Network<'a> {
 
     /// Reads a public indexer endpoint (`/v1/...`). Returns `None` when no
     /// indexer URL is configured. The desktop shows these as "from indexer".
-    pub async fn indexer(&mut self, base_url: Option<&str>, path: &str) -> Result<Option<Value>, SdkError> {
-        let Some(base) = base_url else { return Ok(None) };
+    pub async fn indexer(
+        &mut self,
+        base_url: Option<&str>,
+        path: &str,
+    ) -> Result<Option<Value>, SdkError> {
+        let Some(base) = base_url else {
+            return Ok(None);
+        };
         if !path.starts_with("/v1/") || path.contains("..") {
             return Err(SdkError::Invalid("indexer path".into()));
         }
@@ -135,28 +163,61 @@ impl<'a> Network<'a> {
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .map_err(|e| SdkError::Invalid(e.to_string()))?;
-        let resp = client.get(&url).send().await.map_err(|e| SdkError::NotFound(format!("indexer: {e}")))?;
+        let resp = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| SdkError::NotFound(format!("indexer: {e}")))?;
         if !resp.status().is_success() {
-            return Err(SdkError::NotFound(format!("indexer returned {}", resp.status())));
+            return Err(SdkError::NotFound(format!(
+                "indexer returned {}",
+                resp.status()
+            )));
         }
-        let body = resp.bytes().await.map_err(|e| SdkError::Corrupt(e.to_string()))?;
+        let body = resp
+            .bytes()
+            .await
+            .map_err(|e| SdkError::Corrupt(e.to_string()))?;
         if body.len() > 4 * 1024 * 1024 {
             return Err(SdkError::Corrupt("indexer answer too large".into()));
         }
-        Ok(Some(serde_json::from_slice(&body).map_err(|e| SdkError::Corrupt(e.to_string()))?))
+        Ok(Some(
+            serde_json::from_slice(&body).map_err(|e| SdkError::Corrupt(e.to_string()))?,
+        ))
     }
 
     /// Top holders (indexer). See `docs/INDEXER.md`.
-    pub async fn top_holders(&mut self, indexer: Option<&str>, limit: u32) -> Result<Option<Value>, SdkError> {
-        self.indexer(indexer, &format!("/v1/leaderboards/holders?limit={limit}")).await
+    pub async fn top_holders(
+        &mut self,
+        indexer: Option<&str>,
+        limit: u32,
+    ) -> Result<Option<Value>, SdkError> {
+        self.indexer(indexer, &format!("/v1/leaderboards/holders?limit={limit}"))
+            .await
     }
     /// Top validators (indexer).
-    pub async fn top_validators(&mut self, indexer: Option<&str>, limit: u32) -> Result<Option<Value>, SdkError> {
-        self.indexer(indexer, &format!("/v1/leaderboards/validators?limit={limit}")).await
+    pub async fn top_validators(
+        &mut self,
+        indexer: Option<&str>,
+        limit: u32,
+    ) -> Result<Option<Value>, SdkError> {
+        self.indexer(
+            indexer,
+            &format!("/v1/leaderboards/validators?limit={limit}"),
+        )
+        .await
     }
     /// Top providers (indexer).
-    pub async fn top_providers(&mut self, indexer: Option<&str>, limit: u32) -> Result<Option<Value>, SdkError> {
-        self.indexer(indexer, &format!("/v1/leaderboards/providers?limit={limit}")).await
+    pub async fn top_providers(
+        &mut self,
+        indexer: Option<&str>,
+        limit: u32,
+    ) -> Result<Option<Value>, SdkError> {
+        self.indexer(
+            indexer,
+            &format!("/v1/leaderboards/providers?limit={limit}"),
+        )
+        .await
     }
     /// Network stats (indexer).
     pub async fn stats(&mut self, indexer: Option<&str>) -> Result<Option<Value>, SdkError> {

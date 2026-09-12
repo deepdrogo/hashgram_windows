@@ -55,14 +55,25 @@ pub struct Circles<'a> {
 
 impl<'a> Circles<'a> {
     /// Creates a circle with initial members.
-    pub async fn create(&mut self, name: &str, description: &str, members: &[String]) -> Result<String, SdkError> {
+    pub async fn create(
+        &mut self,
+        name: &str,
+        description: &str,
+        members: &[String],
+    ) -> Result<String, SdkError> {
         if name.is_empty() || name.len() > 128 {
             return Err(SdkError::Invalid("circle name length".into()));
         }
         let gid = self
             .one
             .messaging
-            .create_conversation(&self.one.link, &self.one.chain, &self.one.network, name, members)
+            .create_conversation(
+                &self.one.link,
+                &self.one.chain,
+                &self.one.network,
+                name,
+                members,
+            )
             .await?;
         let hexid = hex::encode(&gid);
         self.one.set_group_kind(&hexid, group_kind::CIRCLE)?;
@@ -81,7 +92,9 @@ impl<'a> Circles<'a> {
             avatar: None,
             history_visible_to_new_members: false,
         }))?;
-        self.one.send_app(&gid, app::app_message::Body::CircleEvent(ev.clone())).await?;
+        self.one
+            .send_app(&gid, app::app_message::Body::CircleEvent(ev.clone()))
+            .await?;
         let me = self.one.account.address().to_owned();
         self.record(&hexid, &me, &ev)?;
         Ok(hexid)
@@ -92,9 +105,19 @@ impl<'a> Circles<'a> {
         let gid = self.gid(circle_hex)?;
         self.one
             .messaging
-            .add_participant(&self.one.link, &self.one.chain, &self.one.network, &gid, address)
+            .add_participant(
+                &self.one.link,
+                &self.one.chain,
+                &self.one.network,
+                &gid,
+                address,
+            )
             .await?;
-        if let Some(mut info) = self.one.store.get::<CircleInfo>(NS_INFO, circle_hex.as_bytes())? {
+        if let Some(mut info) = self
+            .one
+            .store
+            .get::<CircleInfo>(NS_INFO, circle_hex.as_bytes())?
+        {
             if !info.members.iter().any(|m| m == address) {
                 info.members.push(address.to_owned());
             }
@@ -104,14 +127,22 @@ impl<'a> Circles<'a> {
     }
 
     /// Removes a member.
-    pub async fn remove_member(&mut self, circle_hex: &str, address: &str) -> Result<usize, SdkError> {
+    pub async fn remove_member(
+        &mut self,
+        circle_hex: &str,
+        address: &str,
+    ) -> Result<usize, SdkError> {
         let gid = self.gid(circle_hex)?;
         let n = self
             .one
             .messaging
             .remove_participant(&self.one.link, &self.one.network, &gid, address)
             .await?;
-        if let Some(mut info) = self.one.store.get::<CircleInfo>(NS_INFO, circle_hex.as_bytes())? {
+        if let Some(mut info) = self
+            .one
+            .store
+            .get::<CircleInfo>(NS_INFO, circle_hex.as_bytes())?
+        {
             info.members.retain(|m| m != address);
             self.one.store.put(NS_INFO, circle_hex.as_bytes(), &info)?;
         }
@@ -134,7 +165,14 @@ impl<'a> Circles<'a> {
     }
 
     /// Posts to a circle.
-    pub async fn post(&mut self, circle_hex: &str, text: &str, media: Vec<app::BlobRef>, drive_refs: Vec<app::DriveCapability>, poll: Option<app::Poll>) -> Result<String, SdkError> {
+    pub async fn post(
+        &mut self,
+        circle_hex: &str,
+        text: &str,
+        media: Vec<app::BlobRef>,
+        drive_refs: Vec<app::DriveCapability>,
+        poll: Option<app::Poll>,
+    ) -> Result<String, SdkError> {
         let gid = self.gid(circle_hex)?;
         let ev = c::build(app::circle_event::Body::Post(app::CirclePost {
             text: text.to_owned(),
@@ -146,7 +184,12 @@ impl<'a> Circles<'a> {
     }
 
     /// Comments.
-    pub async fn comment(&mut self, circle_hex: &str, post_hex: &str, text: &str) -> Result<String, SdkError> {
+    pub async fn comment(
+        &mut self,
+        circle_hex: &str,
+        post_hex: &str,
+        text: &str,
+    ) -> Result<String, SdkError> {
         let gid = self.gid(circle_hex)?;
         let ev = c::build(app::circle_event::Body::Comment(app::CircleComment {
             post_id: hex::decode(post_hex).map_err(|e| SdkError::Invalid(e.to_string()))?,
@@ -157,7 +200,12 @@ impl<'a> Circles<'a> {
     }
 
     /// Reacts.
-    pub async fn react(&mut self, circle_hex: &str, target_hex: &str, reaction: &str) -> Result<String, SdkError> {
+    pub async fn react(
+        &mut self,
+        circle_hex: &str,
+        target_hex: &str,
+        reaction: &str,
+    ) -> Result<String, SdkError> {
         let gid = self.gid(circle_hex)?;
         let ev = c::build(app::circle_event::Body::Reaction(app::CircleReaction {
             target_id: hex::decode(target_hex).map_err(|e| SdkError::Invalid(e.to_string()))?,
@@ -167,7 +215,12 @@ impl<'a> Circles<'a> {
     }
 
     /// Votes.
-    pub async fn vote(&mut self, circle_hex: &str, post_hex: &str, options: Vec<u32>) -> Result<String, SdkError> {
+    pub async fn vote(
+        &mut self,
+        circle_hex: &str,
+        post_hex: &str,
+        options: Vec<u32>,
+    ) -> Result<String, SdkError> {
         let gid = self.gid(circle_hex)?;
         let ev = c::build(app::circle_event::Body::Vote(app::CircleVote {
             post_id: hex::decode(post_hex).map_err(|e| SdkError::Invalid(e.to_string()))?,
@@ -186,7 +239,12 @@ impl<'a> Circles<'a> {
     }
 
     /// Updates info.
-    pub async fn set_info(&mut self, circle_hex: &str, name: &str, description: &str) -> Result<String, SdkError> {
+    pub async fn set_info(
+        &mut self,
+        circle_hex: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<String, SdkError> {
         let gid = self.gid(circle_hex)?;
         let ev = c::build(app::circle_event::Body::Info(app::CircleInfo {
             name: name.to_owned(),
@@ -194,7 +252,11 @@ impl<'a> Circles<'a> {
             avatar: None,
             history_visible_to_new_members: false,
         }))?;
-        if let Some(mut info) = self.one.store.get::<CircleInfo>(NS_INFO, circle_hex.as_bytes())? {
+        if let Some(mut info) = self
+            .one
+            .store
+            .get::<CircleInfo>(NS_INFO, circle_hex.as_bytes())?
+        {
             info.name = name.to_owned();
             info.description = description.to_owned();
             self.one.store.put(NS_INFO, circle_hex.as_bytes(), &info)?;
@@ -202,23 +264,50 @@ impl<'a> Circles<'a> {
         self.send(&gid, circle_hex, ev).await
     }
 
-    async fn send(&mut self, gid: &[u8], circle_hex: &str, ev: app::CircleEvent) -> Result<String, SdkError> {
-        self.one.send_app(gid, app::app_message::Body::CircleEvent(ev.clone())).await?;
+    async fn send(
+        &mut self,
+        gid: &[u8],
+        circle_hex: &str,
+        ev: app::CircleEvent,
+    ) -> Result<String, SdkError> {
+        self.one
+            .send_app(gid, app::app_message::Body::CircleEvent(ev.clone()))
+            .await?;
         let me = self.one.account.address().to_owned();
         self.record(circle_hex, &me, &ev)?;
         Ok(hex::encode(&ev.event_id))
     }
 
-    fn record(&mut self, circle_hex: &str, author: &str, ev: &app::CircleEvent) -> Result<(), SdkError> {
-        let key = format!("{circle_hex}/{:016x}/{}", ev.at_ms, hex::encode(&ev.event_id));
-        self.one.store.put(NS_EVENTS, key.as_bytes(), &(author.to_owned(), ev.clone()))?;
-        let tl = self.one.circles_state.timelines.entry(circle_hex.to_owned()).or_default();
+    fn record(
+        &mut self,
+        circle_hex: &str,
+        author: &str,
+        ev: &app::CircleEvent,
+    ) -> Result<(), SdkError> {
+        let key = format!(
+            "{circle_hex}/{:016x}/{}",
+            ev.at_ms,
+            hex::encode(&ev.event_id)
+        );
+        self.one
+            .store
+            .put(NS_EVENTS, key.as_bytes(), &(author.to_owned(), ev.clone()))?;
+        let tl = self
+            .one
+            .circles_state
+            .timelines
+            .entry(circle_hex.to_owned())
+            .or_default();
         tl.apply(author, ev)?;
         Ok(())
     }
 
     /// Handles a Circle event from the network.
-    pub(crate) fn handle_incoming(&mut self, r: &Received, appmsg: &app::AppMessage) -> Result<bool, SdkError> {
+    pub(crate) fn handle_incoming(
+        &mut self,
+        r: &Received,
+        appmsg: &app::AppMessage,
+    ) -> Result<bool, SdkError> {
         let Some(app::app_message::Body::CircleEvent(ev)) = &appmsg.body else {
             return Ok(false);
         };
@@ -228,7 +317,9 @@ impl<'a> Circles<'a> {
         // know the group as a conversation.
         match self.one.group_kind(&r.group_id).as_deref() {
             Some(group_kind::CIRCLE) => {}
-            Some(group_kind::CONVERSATION) | Some(group_kind::SELF) | Some(group_kind::SPACE) => return Ok(false),
+            Some(group_kind::CONVERSATION) | Some(group_kind::SELF) | Some(group_kind::SPACE) => {
+                return Ok(false)
+            }
             _ => {
                 self.one.set_group_kind(&r.group_id, group_kind::CIRCLE)?;
                 let (name, _meta_members) = self
@@ -262,7 +353,11 @@ impl<'a> Circles<'a> {
             }
         }
         if let Some(app::circle_event::Body::Info(i)) = &ev.body {
-            if let Some(mut info) = self.one.store.get::<CircleInfo>(NS_INFO, r.group_id.as_bytes())? {
+            if let Some(mut info) = self
+                .one
+                .store
+                .get::<CircleInfo>(NS_INFO, r.group_id.as_bytes())?
+            {
                 info.name = i.name.clone();
                 info.description = i.description.clone();
                 self.one.store.put(NS_INFO, r.group_id.as_bytes(), &info)?;
@@ -274,10 +369,22 @@ impl<'a> Circles<'a> {
 
     /// Lists circles.
     pub fn list(&self) -> Result<Vec<CircleInfo>, SdkError> {
-        let mut v: Vec<CircleInfo> = self.one.store.scan::<CircleInfo>(NS_INFO)?.into_iter().map(|(_, i)| i).collect();
+        let mut v: Vec<CircleInfo> = self
+            .one
+            .store
+            .scan::<CircleInfo>(NS_INFO)?
+            .into_iter()
+            .map(|(_, i)| i)
+            .collect();
         // Refresh members from MLS.
         for c in &mut v {
-            if let Some((_, _, m)) = self.one.messaging.conversations().into_iter().find(|(g, _, _)| *g == c.id) {
+            if let Some((_, _, m)) = self
+                .one
+                .messaging
+                .conversations()
+                .into_iter()
+                .find(|(g, _, _)| *g == c.id)
+            {
                 c.members = m;
             }
         }
@@ -289,12 +396,19 @@ impl<'a> Circles<'a> {
         if !self.one.circles_state.timelines.contains_key(circle_hex) {
             let mut tl = c::Timeline::default();
             let prefix = format!("{circle_hex}/");
-            for (k, (author, ev)) in self.one.store.scan::<(String, app::CircleEvent)>(NS_EVENTS)? {
+            for (k, (author, ev)) in self
+                .one
+                .store
+                .scan::<(String, app::CircleEvent)>(NS_EVENTS)?
+            {
                 if k.starts_with(prefix.as_bytes()) {
                     let _ = tl.apply(&author, &ev);
                 }
             }
-            self.one.circles_state.timelines.insert(circle_hex.to_owned(), tl);
+            self.one
+                .circles_state
+                .timelines
+                .insert(circle_hex.to_owned(), tl);
         }
         self.one
             .circles_state
@@ -304,7 +418,12 @@ impl<'a> Circles<'a> {
     }
 
     /// Posts page, newest first.
-    pub fn posts(&mut self, circle_hex: &str, before_ms: u64, limit: usize) -> Result<Vec<c::Item>, SdkError> {
+    pub fn posts(
+        &mut self,
+        circle_hex: &str,
+        before_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<c::Item>, SdkError> {
         Ok(self.timeline(circle_hex)?.posts(before_ms, limit))
     }
 
@@ -315,7 +434,11 @@ impl<'a> Circles<'a> {
 
     /// Merged private timeline across all circles (for the Feed's
     /// "friends + circles" view), newest first.
-    pub fn merged(&mut self, before_ms: u64, limit: usize) -> Result<Vec<(String, c::Item)>, SdkError> {
+    pub fn merged(
+        &mut self,
+        before_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<(String, c::Item)>, SdkError> {
         let ids: Vec<String> = self.list()?.into_iter().map(|c| c.id).collect();
         let mut all = Vec::new();
         for id in ids {

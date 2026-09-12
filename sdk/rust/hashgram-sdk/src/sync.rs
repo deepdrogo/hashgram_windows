@@ -205,13 +205,22 @@ impl<'a> Sync<'a> {
             // Rounds are persisted so periodic work (device reconciliation)
             // is spread over real rounds rather than repeated at every
             // process start.
-            self.one.sync_state.rounds = self.one.store.get("sync/meta", b"rounds").ok().flatten().unwrap_or(0);
+            self.one.sync_state.rounds = self
+                .one
+                .store
+                .get("sync/meta", b"rounds")
+                .ok()
+                .flatten()
+                .unwrap_or(0);
         }
         match self.round_inner().await {
             Ok(mut r) => {
                 r.elapsed_ms = started.elapsed().as_millis() as u64;
                 self.one.sync_state.rounds += 1;
-                let _ = self.one.store.put("sync/meta", b"rounds", &self.one.sync_state.rounds);
+                let _ = self
+                    .one
+                    .store
+                    .put("sync/meta", b"rounds", &self.one.sync_state.rounds);
                 self.one.sync_state.failures = 0;
                 self.one.sync_state.last_ok = Some(Instant::now());
                 self.set_phase(SyncPhase::Idle);
@@ -248,7 +257,9 @@ impl<'a> Sync<'a> {
         self.set_phase(SyncPhase::Discovering);
         let stores = self.one.link.peers_with_role("store").await;
         if stores.is_empty() {
-            self.emit(SyncEvent::Warning("no store node reachable; mailbox not synced".into()));
+            self.emit(SyncEvent::Warning(
+                "no store node reachable; mailbox not synced".into(),
+            ));
         }
 
         // Mailbox.
@@ -271,8 +282,14 @@ impl<'a> Sync<'a> {
                     version: hashgram_app::version::DEVICE_SYNC_VERSION,
                     body: Some(hashgram_app::pb::device_sync::Body::MailState(hint)),
                 };
-                if let Err(e) = self.one.send_app(&gid, hashgram_app::pb::app_message::Body::DeviceSync(body)).await {
-                    self.emit(SyncEvent::Warning(format!("mail flags not synced to other devices: {e}")));
+                if let Err(e) = self
+                    .one
+                    .send_app(&gid, hashgram_app::pb::app_message::Body::DeviceSync(body))
+                    .await
+                {
+                    self.emit(SyncEvent::Warning(format!(
+                        "mail flags not synced to other devices: {e}"
+                    )));
                 }
             }
         }
@@ -282,7 +299,10 @@ impl<'a> Sync<'a> {
                     version: hashgram_app::version::DEVICE_SYNC_VERSION,
                     body: Some(hashgram_app::pb::device_sync::Body::Contacts(snapshot)),
                 };
-                let _ = self.one.send_app(&gid, hashgram_app::pb::app_message::Body::DeviceSync(body)).await;
+                let _ = self
+                    .one
+                    .send_app(&gid, hashgram_app::pb::app_message::Body::DeviceSync(body))
+                    .await;
             }
         }
         if self.one.drive_state.dirty {
@@ -322,7 +342,11 @@ impl<'a> Sync<'a> {
             match self.one.devices().reconcile().await {
                 Ok(rep) => {
                     if !rep.removed.is_empty() || !rep.added.is_empty() {
-                        info!(removed = rep.removed.len(), added = rep.added.len(), "device reconciliation");
+                        info!(
+                            removed = rep.removed.len(),
+                            added = rep.added.len(),
+                            "device reconciliation"
+                        );
                     }
                 }
                 Err(e) => self.emit(SyncEvent::Warning(format!("device reconcile: {e}"))),
@@ -346,36 +370,42 @@ impl<'a> Sync<'a> {
             let _ = self.one.store.put(
                 "unsupported",
                 &appmsg.id,
-                &(r.group_id.clone(), r.sender.clone(), r.raw.encode_to_vec_hex()),
+                &(
+                    r.group_id.clone(),
+                    r.sender.clone(),
+                    r.raw.encode_to_vec_hex(),
+                ),
             );
             return;
         }
         use hashgram_app::pb::app_message::Body as B;
         let kind = envelope::kind_name(&appmsg);
         let result: Result<(), SdkError> = match &appmsg.body {
-            Some(B::Mail(_)) | Some(B::MailReceipt(_)) => match self.one.mail().handle_incoming(&r, &appmsg).await {
-                Ok(Some(rec)) => {
-                    report.mail += 1;
-                    self.emit(SyncEvent::NewMail {
-                        id: hex::encode(&rec.message.message_id),
-                        folder: rec.folder,
-                    });
-                    Ok(())
-                }
-                Ok(None) => Ok(()),
-                Err(e) => Err(e),
-            },
-            Some(B::DriveShare(_)) | Some(B::DriveShareUpdate(_)) | Some(B::DriveShareRevoke(_)) => {
-                match self.one.drive().handle_incoming(&r, &appmsg) {
-                    Ok(true) => {
-                        report.drive += 1;
-                        self.emit(SyncEvent::DriveShareChanged);
+            Some(B::Mail(_)) | Some(B::MailReceipt(_)) => {
+                match self.one.mail().handle_incoming(&r, &appmsg).await {
+                    Ok(Some(rec)) => {
+                        report.mail += 1;
+                        self.emit(SyncEvent::NewMail {
+                            id: hex::encode(&rec.message.message_id),
+                            folder: rec.folder,
+                        });
                         Ok(())
                     }
-                    Ok(false) => Ok(()),
+                    Ok(None) => Ok(()),
                     Err(e) => Err(e),
                 }
             }
+            Some(B::DriveShare(_))
+            | Some(B::DriveShareUpdate(_))
+            | Some(B::DriveShareRevoke(_)) => match self.one.drive().handle_incoming(&r, &appmsg) {
+                Ok(true) => {
+                    report.drive += 1;
+                    self.emit(SyncEvent::DriveShareChanged);
+                    Ok(())
+                }
+                Ok(false) => Ok(()),
+                Err(e) => Err(e),
+            },
             Some(B::ContactRequest(_)) | Some(B::ContactResponse(_)) | Some(B::ProfileCard(_)) => {
                 match self.one.people().handle_incoming(&r, &appmsg) {
                     Ok(true) => {
@@ -405,13 +435,15 @@ impl<'a> Sync<'a> {
                 Ok(false) => Ok(()),
                 Err(err) => Err(err),
             },
-            Some(B::DeviceSync(s)) => match self.one.devices().handle_incoming(&r.sender, s).await {
-                Ok(_) => {
-                    report.device_sync += 1;
-                    Ok(())
+            Some(B::DeviceSync(s)) => {
+                match self.one.devices().handle_incoming(&r.sender, s).await {
+                    Ok(_) => {
+                        report.device_sync += 1;
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
                 }
-                Err(e) => Err(e),
-            },
+            }
             None => Ok(()),
         };
         if let Err(e) = result {

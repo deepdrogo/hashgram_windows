@@ -22,7 +22,9 @@
 use std::collections::BTreeSet;
 
 /// Categories of content an AI request may touch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum Category {
     /// Mail subjects and bodies.
     Mail,
@@ -129,7 +131,12 @@ pub trait AiProvider: Send + Sync {
     fn is_remote(&self) -> bool;
     /// Answers a query over a corpus. Remote providers MUST check
     /// `consent` and return [`AiError::NoConsent`] otherwise.
-    fn answer(&self, corpus: &Corpus, query: &Query, consent: Option<&UserConsent>) -> Result<Answer, AiError>;
+    fn answer(
+        &self,
+        corpus: &Corpus,
+        query: &Query,
+        consent: Option<&UserConsent>,
+    ) -> Result<Answer, AiError>;
 }
 
 /// Reference on-device provider: keyword retrieval, no model.
@@ -143,7 +150,12 @@ impl AiProvider for LocalAiProvider {
     fn is_remote(&self) -> bool {
         false
     }
-    fn answer(&self, corpus: &Corpus, query: &Query, _consent: Option<&UserConsent>) -> Result<Answer, AiError> {
+    fn answer(
+        &self,
+        corpus: &Corpus,
+        query: &Query,
+        _consent: Option<&UserConsent>,
+    ) -> Result<Answer, AiError> {
         let terms: Vec<String> = query
             .text
             .to_lowercase()
@@ -164,14 +176,23 @@ impl AiProvider for LocalAiProvider {
         scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.at_ms.cmp(&a.1.at_ms)));
         Ok(Answer {
             text: String::new(),
-            references: scored.into_iter().take(query.limit).map(|(_, d)| d.clone()).collect(),
+            references: scored
+                .into_iter()
+                .take(query.limit)
+                .map(|(_, d)| d.clone())
+                .collect(),
             transmitted: false,
         })
     }
 }
 
 /// Guard every remote provider must call first.
-pub fn require_consent(provider: &dyn AiProvider, query: &Query, consent: Option<&UserConsent>, now: u64) -> Result<(), AiError> {
+pub fn require_consent(
+    provider: &dyn AiProvider,
+    query: &Query,
+    consent: Option<&UserConsent>,
+    now: u64,
+) -> Result<(), AiError> {
     if !provider.is_remote() {
         return Ok(());
     }
@@ -196,7 +217,12 @@ mod tests {
         fn is_remote(&self) -> bool {
             true
         }
-        fn answer(&self, _c: &Corpus, q: &Query, consent: Option<&UserConsent>) -> Result<Answer, AiError> {
+        fn answer(
+            &self,
+            _c: &Corpus,
+            q: &Query,
+            consent: Option<&UserConsent>,
+        ) -> Result<Answer, AiError> {
             require_consent(self, q, consent, 100)?;
             Ok(Answer {
                 transmitted: true,
@@ -236,7 +262,10 @@ mod tests {
         assert_eq!(a.references.len(), 1);
         assert!(!a.transmitted);
         let r = Remote;
-        assert!(matches!(r.answer(&corpus, &q, None), Err(AiError::NoConsent { .. })));
+        assert!(matches!(
+            r.answer(&corpus, &q, None),
+            Err(AiError::NoConsent { .. })
+        ));
         let consent = UserConsent {
             categories: [Category::Mail].into_iter().collect(),
             provider: "remote-test".into(),
@@ -248,6 +277,9 @@ mod tests {
             categories: [Category::Mail, Category::Drive].into_iter().collect(),
             ..q
         };
-        assert!(r.answer(&corpus, &q2, Some(&consent)).is_err(), "consent must cover every category");
+        assert!(
+            r.answer(&corpus, &q2, Some(&consent)).is_err(),
+            "consent must cover every category"
+        );
     }
 }

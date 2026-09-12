@@ -50,7 +50,12 @@ pub fn encode_header_value(s: &str) -> String {
     }
     words
         .iter()
-        .map(|w| format!("=?UTF-8?B?{}?=", base64::engine::general_purpose::STANDARD.encode(w.as_bytes())))
+        .map(|w| {
+            format!(
+                "=?UTF-8?B?{}?=",
+                base64::engine::general_purpose::STANDARD.encode(w.as_bytes())
+            )
+        })
         .collect::<Vec<_>>()
         .join("\r\n ")
 }
@@ -165,13 +170,21 @@ pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[allow(clippy::integer_division)] // seconds → h:m:s is integer arithmetic
 pub fn rfc5322_date(unix_ms: u64) -> String {
     const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     let secs = (unix_ms / 1000) as i64;
     let days = secs.div_euclid(86_400);
     let sod = secs.rem_euclid(86_400);
     let (y, m, d) = civil_from_days(days);
-    let dow = DAYS.get(days.rem_euclid(7) as usize).copied().unwrap_or("Thu");
-    let mon = MONTHS.get((m as usize).saturating_sub(1)).copied().unwrap_or("Jan");
+    let dow = DAYS
+        .get(days.rem_euclid(7) as usize)
+        .copied()
+        .unwrap_or("Thu");
+    let mon = MONTHS
+        .get((m as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or("Jan");
     format!(
         "{dow}, {d:02} {mon} {y} {:02}:{:02}:{:02} +0000",
         sod / 3600,
@@ -206,7 +219,12 @@ pub fn safe_filename(name: &str, fallback: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 mod tests {
     use super::*;
 
@@ -230,7 +248,10 @@ mod tests {
 
     #[test]
     fn display_names_and_mailboxes() {
-        assert_eq!(encode_display_name(r#"Al "The" Ice\"#), r#""Al \"The\" Ice\\""#);
+        assert_eq!(
+            encode_display_name(r#"Al "The" Ice\"#),
+            r#""Al \"The\" Ice\\""#
+        );
         assert_eq!(format_mailbox("", "a@b.c"), "<a@b.c>");
         assert_eq!(format_mailbox("Alice", "a@b.c"), "\"Alice\" <a@b.c>");
         // Encoded-word display names are decoded by the header-aware
@@ -259,8 +280,16 @@ mod tests {
             assert!(l.len() <= 76, "{}", l.len());
         }
         // Decodes back through mailparse.
-        let msg = format!("Content-Type: text/plain\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n{qp}");
-        assert_eq!(mailparse::parse_mail(msg.as_bytes()).unwrap().get_body().unwrap(), long);
+        let msg = format!(
+            "Content-Type: text/plain\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n{qp}"
+        );
+        assert_eq!(
+            mailparse::parse_mail(msg.as_bytes())
+                .unwrap()
+                .get_body()
+                .unwrap(),
+            long
+        );
     }
 
     #[test]
@@ -279,9 +308,18 @@ mod tests {
     #[test]
     fn dates() {
         assert_eq!(rfc5322_date(0), "Thu, 01 Jan 1970 00:00:00 +0000");
-        assert_eq!(rfc5322_date(951_782_400_000), "Tue, 29 Feb 2000 00:00:00 +0000");
-        assert_eq!(rfc5322_date(1_789_237_500_000), "Sat, 12 Sep 2026 18:25:00 +0000");
-        assert_eq!(mailparse::dateparse(&rfc5322_date(1_789_237_500_000)).unwrap(), 1_789_237_500);
+        assert_eq!(
+            rfc5322_date(951_782_400_000),
+            "Tue, 29 Feb 2000 00:00:00 +0000"
+        );
+        assert_eq!(
+            rfc5322_date(1_789_237_500_000),
+            "Sat, 12 Sep 2026 18:25:00 +0000"
+        );
+        assert_eq!(
+            mailparse::dateparse(&rfc5322_date(1_789_237_500_000)).unwrap(),
+            1_789_237_500
+        );
         assert_eq!(civil_from_days(-1), (1969, 12, 31));
     }
 

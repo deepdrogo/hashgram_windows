@@ -21,8 +21,8 @@
 use hashgram_app::signing::{self, AppPurpose};
 use hashgram_net::CanonicalBuf;
 use hashgram_proto::blob::{chunk_matches, cid as cid_of};
-use hashgram_proto::pb;
 use hashgram_proto::keys::Ed25519Signer;
+use hashgram_proto::pb;
 
 use crate::app::HashgramOne;
 use crate::SdkError;
@@ -96,7 +96,10 @@ impl StorageLease {
     /// Structural validation.
     pub fn validate(&self) -> Result<(), SdkError> {
         if self.version != LEASE_VERSION {
-            return Err(SdkError::Unsupported(format!("lease version {}", self.version)));
+            return Err(SdkError::Unsupported(format!(
+                "lease version {}",
+                self.version
+            )));
         }
         if hex::decode(&self.lease_id).map(|b| b.len()).unwrap_or(0) != 16 {
             return Err(SdkError::Invalid("lease_id".into()));
@@ -111,7 +114,8 @@ impl StorageLease {
                 return Err(SdkError::Invalid("blob id".into()));
             }
         }
-        if self.end_epoch < self.start_epoch || self.end_epoch - self.start_epoch > MAX_LEASE_EPOCHS {
+        if self.end_epoch < self.start_epoch || self.end_epoch - self.start_epoch > MAX_LEASE_EPOCHS
+        {
             return Err(SdkError::Invalid("epoch range".into()));
         }
         self.due_uhash()?;
@@ -126,15 +130,20 @@ impl StorageLease {
             .string("network_id", &self.network_id)
             .bytes("lease_id", &hex::decode(&self.lease_id).unwrap_or_default())
             .string("client", &self.client)
-            .bytes("client_device_pubkey", &hex::decode(&self.client_device_pubkey).unwrap_or_default())
+            .bytes(
+                "client_device_pubkey",
+                &hex::decode(&self.client_device_pubkey).unwrap_or_default(),
+            )
             .string("provider", &self.provider)
-            .bytes("provider_node_pubkey", &hex::decode(&self.provider_node_pubkey).unwrap_or_default())
+            .bytes(
+                "provider_node_pubkey",
+                &hex::decode(&self.provider_node_pubkey).unwrap_or_default(),
+            )
             .len("blob_ids", self.blob_ids.len());
         for c in &self.blob_ids {
             b = b.bytes("blob_id", &hex::decode(c).unwrap_or_default());
         }
-        Ok(b
-            .u64(self.total_bytes)
+        Ok(b.u64(self.total_bytes)
             .u32(self.replication)
             .u64(self.price_uhash_per_gib_epoch)
             .u64(self.start_epoch)
@@ -165,10 +174,19 @@ impl StorageLease {
     }
 
     /// Signs as the client.
-    pub fn sign_client(&mut self, network: &hashgram_net::NetworkIdentity, device: &Ed25519Signer) -> Result<(), SdkError> {
+    pub fn sign_client(
+        &mut self,
+        network: &hashgram_net::NetworkIdentity,
+        device: &Ed25519Signer,
+    ) -> Result<(), SdkError> {
         self.client_device_pubkey = hex::encode(device.public_key());
         let payload = self.canonical()?;
-        self.client_signature = hex::encode(signing::sign(network, AppPurpose::StorageLease, device, &payload));
+        self.client_signature = hex::encode(signing::sign(
+            network,
+            AppPurpose::StorageLease,
+            device,
+            &payload,
+        ));
         Ok(())
     }
 
@@ -179,13 +197,17 @@ impl StorageLease {
             return Err(SdkError::Invalid("lease is for another network".into()));
         }
         let payload = self.canonical()?;
-        let cpk = hex::decode(&self.client_device_pubkey).map_err(|e| SdkError::Invalid(e.to_string()))?;
-        let csig = hex::decode(&self.client_signature).map_err(|e| SdkError::Invalid(e.to_string()))?;
+        let cpk = hex::decode(&self.client_device_pubkey)
+            .map_err(|e| SdkError::Invalid(e.to_string()))?;
+        let csig =
+            hex::decode(&self.client_signature).map_err(|e| SdkError::Invalid(e.to_string()))?;
         signing::verify(network, AppPurpose::StorageLease, &cpk, &payload, &csig)
             .map_err(|e| SdkError::Invalid(format!("client signature: {e}")))?;
         if !self.provider_signature.is_empty() {
-            let ppk = hex::decode(&self.provider_node_pubkey).map_err(|e| SdkError::Invalid(e.to_string()))?;
-            let psig = hex::decode(&self.provider_signature).map_err(|e| SdkError::Invalid(e.to_string()))?;
+            let ppk = hex::decode(&self.provider_node_pubkey)
+                .map_err(|e| SdkError::Invalid(e.to_string()))?;
+            let psig = hex::decode(&self.provider_signature)
+                .map_err(|e| SdkError::Invalid(e.to_string()))?;
             signing::verify(network, AppPurpose::StorageLease, &ppk, &payload, &psig)
                 .map_err(|e| SdkError::Invalid(format!("provider signature: {e}")))?;
         }
@@ -273,7 +295,11 @@ impl<'a> Lease<'a> {
     /// Sends the offer to the provider. Not yet supported on the wire (see
     /// module doc); records the lease locally so verification and payment
     /// can proceed for an out-of-band agreement.
-    pub async fn offer(&mut self, lease: &StorageLease, provider_peer: &str) -> Result<(), SdkError> {
+    pub async fn offer(
+        &mut self,
+        lease: &StorageLease,
+        provider_peer: &str,
+    ) -> Result<(), SdkError> {
         lease.verify(&self.one.network)?;
         let rec = LeaseRecord {
             lease: lease.clone(),
@@ -285,7 +311,8 @@ impl<'a> Lease<'a> {
         };
         self.one.store.put(NS, lease.lease_id.as_bytes(), &rec)?;
         Err(SdkError::Unsupported(
-            "LeaseOffer is not on the wire yet (protocol v1.1); the lease was recorded locally".into(),
+            "LeaseOffer is not on the wire yet (protocol v1.1); the lease was recorded locally"
+                .into(),
         ))
     }
 
@@ -305,13 +332,23 @@ impl<'a> Lease<'a> {
 
     /// Leases we hold.
     pub fn list(&self) -> Result<Vec<LeaseRecord>, SdkError> {
-        Ok(self.one.store.scan::<LeaseRecord>(NS)?.into_iter().map(|(_, r)| r).collect())
+        Ok(self
+            .one
+            .store
+            .scan::<LeaseRecord>(NS)?
+            .into_iter()
+            .map(|(_, r)| r)
+            .collect())
     }
 
     /// Verifies availability at the provider for the given epoch: BlobHas
     /// for every CID plus sampled chunk fetches checked against the
     /// manifest hashes. Never pays.
-    pub async fn verify_epoch(&mut self, lease_id_hex: &str, epoch: u64) -> Result<Verification, SdkError> {
+    pub async fn verify_epoch(
+        &mut self,
+        lease_id_hex: &str,
+        epoch: u64,
+    ) -> Result<Verification, SdkError> {
         let mut rec: LeaseRecord = self
             .one
             .store
@@ -334,38 +371,53 @@ impl<'a> Lease<'a> {
             let has = self
                 .one
                 .link
-                .request(peer, pb::request::Body::BlobHas(pb::BlobHas { cid: cid.clone() }))
+                .request(
+                    peer,
+                    pb::request::Body::BlobHas(pb::BlobHas { cid: cid.clone() }),
+                )
                 .await;
             let (present, total) = match has {
-                Ok(pb::response::Body::BlobHas(h)) if h.has_manifest => (h.chunks_present, h.chunks_total),
+                Ok(pb::response::Body::BlobHas(h)) if h.has_manifest => {
+                    (h.chunks_present, h.chunks_total)
+                }
                 Ok(_) => {
-                    v.failures.push((cid_hex.clone(), "manifest missing".into()));
+                    v.failures
+                        .push((cid_hex.clone(), "manifest missing".into()));
                     continue;
                 }
                 Err(e) => {
-                    v.failures.push((cid_hex.clone(), format!("unreachable: {e}")));
+                    v.failures
+                        .push((cid_hex.clone(), format!("unreachable: {e}")));
                     continue;
                 }
             };
             if present < total {
-                v.failures.push((cid_hex.clone(), format!("{present}/{total} chunks present")));
+                v.failures
+                    .push((cid_hex.clone(), format!("{present}/{total} chunks present")));
                 continue;
             }
             // 2. Manifest (we verify it hashes to the CID ourselves).
             let m = match self
                 .one
                 .link
-                .request(peer, pb::request::Body::BlobGetManifest(pb::BlobGetManifest { cid: cid.clone() }))
+                .request(
+                    peer,
+                    pb::request::Body::BlobGetManifest(pb::BlobGetManifest { cid: cid.clone() }),
+                )
                 .await
             {
-                Ok(pb::response::Body::BlobGetManifest(r)) if r.found => r.manifest.unwrap_or_default(),
+                Ok(pb::response::Body::BlobGetManifest(r)) if r.found => {
+                    r.manifest.unwrap_or_default()
+                }
                 _ => {
-                    v.failures.push((cid_hex.clone(), "manifest fetch failed".into()));
+                    v.failures
+                        .push((cid_hex.clone(), "manifest fetch failed".into()));
                     continue;
                 }
             };
             if cid_of(&m).as_slice() != cid.as_slice() {
-                v.failures.push((cid_hex.clone(), "manifest does not hash to cid".into()));
+                v.failures
+                    .push((cid_hex.clone(), "manifest does not hash to cid".into()));
                 continue;
             }
             // 3. Sampled chunks from a local CSPRNG.
@@ -385,15 +437,29 @@ impl<'a> Lease<'a> {
                 match self
                     .one
                     .link
-                    .request(peer, pb::request::Body::BlobGetChunk(pb::BlobGetChunk { cid: cid.clone(), index }))
+                    .request(
+                        peer,
+                        pb::request::Body::BlobGetChunk(pb::BlobGetChunk {
+                            cid: cid.clone(),
+                            index,
+                        }),
+                    )
                     .await
                 {
-                    Ok(pb::response::Body::BlobGetChunk(c)) if c.found && chunk_matches(&m, index, &c.data) => {}
+                    Ok(pb::response::Body::BlobGetChunk(c))
+                        if c.found && chunk_matches(&m, index, &c.data) => {}
                     Ok(pb::response::Body::BlobGetChunk(c)) if c.found => {
-                        self.one.link.handle().score(peer, hashgram_p2p::ScoreEvent::ServedCorruptData).await;
-                        v.failures.push((cid_hex.clone(), format!("chunk {index} hash mismatch")));
+                        self.one
+                            .link
+                            .handle()
+                            .score(peer, hashgram_p2p::ScoreEvent::ServedCorruptData)
+                            .await;
+                        v.failures
+                            .push((cid_hex.clone(), format!("chunk {index} hash mismatch")));
                     }
-                    _ => v.failures.push((cid_hex.clone(), format!("chunk {index} missing"))),
+                    _ => v
+                        .failures
+                        .push((cid_hex.clone(), format!("chunk {index} missing"))),
                 }
             }
         }
@@ -408,7 +474,12 @@ impl<'a> Lease<'a> {
 
     /// Pays an epoch **only if** the recorded verification for it passed.
     /// Returns the tx hash.
-    pub async fn pay_epoch(&mut self, lease_id_hex: &str, epoch: u64, pay_to: &str) -> Result<String, SdkError> {
+    pub async fn pay_epoch(
+        &mut self,
+        lease_id_hex: &str,
+        epoch: u64,
+        pay_to: &str,
+    ) -> Result<String, SdkError> {
         let mut rec: LeaseRecord = self
             .one
             .store
@@ -423,13 +494,25 @@ impl<'a> Lease<'a> {
         if rec.payments.contains_key(&epoch) {
             return Err(SdkError::Invalid("epoch already paid".into()));
         }
-        let passed = rec.verifications.iter().rev().find(|v| v.epoch == epoch).map(|v| v.passed).unwrap_or(false);
+        let passed = rec
+            .verifications
+            .iter()
+            .rev()
+            .find(|v| v.epoch == epoch)
+            .map(|v| v.passed)
+            .unwrap_or(false);
         if !passed {
-            return Err(SdkError::Invalid("epoch not verified; refusing to pay".into()));
+            return Err(SdkError::Invalid(
+                "epoch not verified; refusing to pay".into(),
+            ));
         }
         let due = rec.lease.due_uhash()?;
         let memo = rec.lease.memo(epoch);
-        let hash = self.one.wallet().send(pay_to, u128::from(due), &memo).await?;
+        let hash = self
+            .one
+            .wallet()
+            .send(pay_to, u128::from(due), &memo)
+            .await?;
         rec.payments.insert(epoch, hash.clone());
         rec.last_paid_epoch = rec.last_paid_epoch.max(epoch);
         self.one.store.put(NS, lease_id_hex.as_bytes(), &rec)?;
@@ -508,13 +591,21 @@ mod tests {
         let other = hashgram_net::NetworkIdentity::mainnet("1".repeat(64));
         let mut o = l.clone();
         o.network_id = other.network_id.clone();
-        assert!(o.verify(&other).is_err(), "signed under a different network");
+        assert!(
+            o.verify(&other).is_err(),
+            "signed under a different network"
+        );
         // Provider acceptance signature.
         let node = Ed25519Signer::from_secret([9; 32]);
         l.provider_node_pubkey = hex::encode(node.public_key());
         l.sign_client(&net, &dev).unwrap();
         let payload = l.canonical().unwrap();
-        l.provider_signature = hex::encode(signing::sign(&net, AppPurpose::StorageLease, &node, &payload));
+        l.provider_signature = hex::encode(signing::sign(
+            &net,
+            AppPurpose::StorageLease,
+            &node,
+            &payload,
+        ));
         l.verify(&net).unwrap();
     }
 

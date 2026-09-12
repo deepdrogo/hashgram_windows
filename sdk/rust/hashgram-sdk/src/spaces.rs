@@ -80,7 +80,10 @@ impl<'a> Spaces<'a> {
             for (sender, e) in events {
                 let _ = st.apply(&self.one.network, &e, &sender);
             }
-            self.one.spaces_state.states.insert(space_hex.to_owned(), st);
+            self.one
+                .spaces_state
+                .states
+                .insert(space_hex.to_owned(), st);
         }
         self.one
             .spaces_state
@@ -99,15 +102,26 @@ impl<'a> Spaces<'a> {
         hex::decode(g).map_err(|e| SdkError::Invalid(e.to_string()))
     }
 
-    fn record(&mut self, space_hex: &str, sender: &str, e: &app::SpaceEvent) -> Result<(), SdkError> {
+    fn record(
+        &mut self,
+        space_hex: &str,
+        sender: &str,
+        e: &app::SpaceEvent,
+    ) -> Result<(), SdkError> {
         let key = format!("{space_hex}/{:016x}/{}", e.at_ms, hex::encode(&e.event_id));
-        self.one.store.put(NS_EVENTS, key.as_bytes(), &(sender.to_owned(), e.clone()))
+        self.one
+            .store
+            .put(NS_EVENTS, key.as_bytes(), &(sender.to_owned(), e.clone()))
     }
 
     /// Builds, signs, applies locally and sends an event. Local application
     /// first means our own rule violations are caught before anything
     /// leaves the device.
-    async fn emit(&mut self, space_hex: &str, body: app::space_event::Body) -> Result<String, SdkError> {
+    async fn emit(
+        &mut self,
+        space_hex: &str,
+        body: app::space_event::Body,
+    ) -> Result<String, SdkError> {
         let me = self.one.account.address().to_owned();
         let device = self.one.account.device()?;
         let network = self.one.network.clone();
@@ -125,7 +139,9 @@ impl<'a> Spaces<'a> {
         }
         self.record(space_hex, &me, &e)?;
         let gid = self.group_of(space_hex)?;
-        self.one.send_app(&gid, app::app_message::Body::SpaceEvent(e.clone())).await?;
+        self.one
+            .send_app(&gid, app::app_message::Body::SpaceEvent(e.clone()))
+            .await?;
         Ok(hex::encode(&e.event_id))
     }
 
@@ -136,18 +152,27 @@ impl<'a> Spaces<'a> {
         let gid = match self
             .one
             .messaging
-            .create_conversation(&self.one.link, &self.one.chain, &self.one.network, name, &[])
+            .create_conversation(
+                &self.one.link,
+                &self.one.chain,
+                &self.one.network,
+                name,
+                &[],
+            )
             .await
         {
             Ok(g) => g,
             Err(SdkError::NoRecipients) => {
                 // Single-device account: MLS needs at least one other member
                 // to create a Welcome, but a group with just us is fine.
-                self.one.messaging.mls_mut().create_group(hashgram_mls::GroupMeta {
-                    name: name.to_owned(),
-                    direct: false,
-                    joined_at: hashgram_app::ids::now_secs(),
-                })?
+                self.one
+                    .messaging
+                    .mls_mut()
+                    .create_group(hashgram_mls::GroupMeta {
+                        name: name.to_owned(),
+                        direct: false,
+                        joined_at: hashgram_app::ids::now_secs(),
+                    })?
             }
             Err(e) => return Err(e),
         };
@@ -157,7 +182,10 @@ impl<'a> Spaces<'a> {
         let shex = hex::encode(&sid);
         self.one.store.put(NS_GROUP, shex.as_bytes(), &ghex)?;
         self.one.spaces_state.groups.insert(shex.clone(), ghex);
-        self.one.spaces_state.states.insert(shex.clone(), sp::State::new(&sid));
+        self.one
+            .spaces_state
+            .states
+            .insert(shex.clone(), sp::State::new(&sid));
         self.emit(
             &shex,
             app::space_event::Body::Create(app::SpaceCreate {
@@ -174,7 +202,12 @@ impl<'a> Spaces<'a> {
     /// event first (so a rule violation is caught), then adds their
     /// devices to the MLS group and re-sends the full event log to them so
     /// they can replay the Space state.
-    pub async fn invite(&mut self, space_hex: &str, address: &str, role: app::SpaceRole) -> Result<(), SdkError> {
+    pub async fn invite(
+        &mut self,
+        space_hex: &str,
+        address: &str,
+        role: app::SpaceRole,
+    ) -> Result<(), SdkError> {
         self.emit(
             space_hex,
             app::space_event::Body::MemberAdd(app::SpaceMemberAdd {
@@ -186,7 +219,13 @@ impl<'a> Spaces<'a> {
         let gid = self.group_of(space_hex)?;
         self.one
             .messaging
-            .add_participant(&self.one.link, &self.one.chain, &self.one.network, &gid, address)
+            .add_participant(
+                &self.one.link,
+                &self.one.chain,
+                &self.one.network,
+                &gid,
+                address,
+            )
             .await?;
         // History: a new member must see the log to replay roles.
         let prefix = format!("{space_hex}/");
@@ -200,7 +239,11 @@ impl<'a> Spaces<'a> {
             .collect();
         events.sort_by_key(|(_, e)| (e.at_ms, e.event_id.clone()));
         for (_, e) in events {
-            if let Err(err) = self.one.send_app(&gid, app::app_message::Body::SpaceEvent(e)).await {
+            if let Err(err) = self
+                .one
+                .send_app(&gid, app::app_message::Body::SpaceEvent(e))
+                .await
+            {
                 debug!(error = %err, "space history replay send failed");
             }
         }
@@ -208,7 +251,12 @@ impl<'a> Spaces<'a> {
     }
 
     /// Removes a member (or leaves when `address` is us).
-    pub async fn remove(&mut self, space_hex: &str, address: &str, reason: &str) -> Result<(), SdkError> {
+    pub async fn remove(
+        &mut self,
+        space_hex: &str,
+        address: &str,
+        reason: &str,
+    ) -> Result<(), SdkError> {
         self.emit(
             space_hex,
             app::space_event::Body::MemberRemove(app::SpaceMemberRemove {
@@ -227,7 +275,12 @@ impl<'a> Spaces<'a> {
     }
 
     /// Changes a role.
-    pub async fn set_role(&mut self, space_hex: &str, address: &str, role: app::SpaceRole) -> Result<String, SdkError> {
+    pub async fn set_role(
+        &mut self,
+        space_hex: &str,
+        address: &str,
+        role: app::SpaceRole,
+    ) -> Result<String, SdkError> {
         self.emit(
             space_hex,
             app::space_event::Body::RoleChange(app::SpaceRoleChange {
@@ -239,7 +292,12 @@ impl<'a> Spaces<'a> {
     }
 
     /// Updates info.
-    pub async fn set_info(&mut self, space_hex: &str, name: &str, description: &str) -> Result<String, SdkError> {
+    pub async fn set_info(
+        &mut self,
+        space_hex: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<String, SdkError> {
         self.emit(
             space_hex,
             app::space_event::Body::Info(app::SpaceInfoUpdate {
@@ -252,7 +310,13 @@ impl<'a> Spaces<'a> {
     }
 
     /// Announcement (Admin+).
-    pub async fn announce(&mut self, space_hex: &str, title: &str, text: &str, attachments: Vec<app::DriveCapability>) -> Result<String, SdkError> {
+    pub async fn announce(
+        &mut self,
+        space_hex: &str,
+        title: &str,
+        text: &str,
+        attachments: Vec<app::DriveCapability>,
+    ) -> Result<String, SdkError> {
         self.emit(
             space_hex,
             app::space_event::Body::Announcement(app::SpaceAnnouncement {
@@ -265,7 +329,13 @@ impl<'a> Spaces<'a> {
     }
 
     /// Post (Member+).
-    pub async fn post(&mut self, space_hex: &str, text: &str, media: Vec<app::BlobRef>, drive_refs: Vec<app::DriveCapability>) -> Result<String, SdkError> {
+    pub async fn post(
+        &mut self,
+        space_hex: &str,
+        text: &str,
+        media: Vec<app::BlobRef>,
+        drive_refs: Vec<app::DriveCapability>,
+    ) -> Result<String, SdkError> {
         self.emit(
             space_hex,
             app::space_event::Body::Post(app::SpacePost {
@@ -278,7 +348,12 @@ impl<'a> Spaces<'a> {
     }
 
     /// Comment (Member+).
-    pub async fn comment(&mut self, space_hex: &str, post_hex: &str, text: &str) -> Result<String, SdkError> {
+    pub async fn comment(
+        &mut self,
+        space_hex: &str,
+        post_hex: &str,
+        text: &str,
+    ) -> Result<String, SdkError> {
         self.emit(
             space_hex,
             app::space_event::Body::Comment(app::SpaceComment {
@@ -291,14 +366,30 @@ impl<'a> Spaces<'a> {
 
     /// Shares one of our Drive entries into the Space drive at `path`.
     /// Live mode so the Space follows our edits.
-    pub async fn share_drive(&mut self, space_hex: &str, entry_hex: &str, path: &str, live: bool) -> Result<String, SdkError> {
+    pub async fn share_drive(
+        &mut self,
+        space_hex: &str,
+        entry_hex: &str,
+        path: &str,
+        live: bool,
+    ) -> Result<String, SdkError> {
         let gid = self.group_of(space_hex)?;
         let id = hex::decode(entry_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
-        let mode = if live { app::DriveShareMode::Live } else { app::DriveShareMode::Snapshot };
+        let mode = if live {
+            app::DriveShareMode::Live
+        } else {
+            app::DriveShareMode::Snapshot
+        };
         let cap = self
             .one
             .drive()
-            .grant_in_group(&id, &format!("space:{space_hex}"), &gid, mode, app::DrivePermission::Read)
+            .grant_in_group(
+                &id,
+                &format!("space:{space_hex}"),
+                &gid,
+                mode,
+                app::DrivePermission::Read,
+            )
             .await?;
         let r = self
             .emit(
@@ -316,7 +407,11 @@ impl<'a> Spaces<'a> {
     }
 
     /// Unshares.
-    pub async fn unshare_drive(&mut self, space_hex: &str, share_hex: &str) -> Result<String, SdkError> {
+    pub async fn unshare_drive(
+        &mut self,
+        space_hex: &str,
+        share_hex: &str,
+    ) -> Result<String, SdkError> {
         self.emit(
             space_hex,
             app::space_event::Body::DriveUnshare(app::SpaceDriveUnshare {
@@ -327,7 +422,11 @@ impl<'a> Spaces<'a> {
     }
 
     /// Handles a Space event from the network.
-    pub(crate) async fn handle_incoming(&mut self, r: &Received, appmsg: &app::AppMessage) -> Result<bool, SdkError> {
+    pub(crate) async fn handle_incoming(
+        &mut self,
+        r: &Received,
+        appmsg: &app::AppMessage,
+    ) -> Result<bool, SdkError> {
         let Some(app::app_message::Body::SpaceEvent(e)) = &appmsg.body else {
             return Ok(false);
         };
@@ -343,7 +442,10 @@ impl<'a> Spaces<'a> {
             None => {
                 self.one.set_group_kind(&r.group_id, group_kind::SPACE)?;
                 self.one.store.put(NS_GROUP, shex.as_bytes(), &r.group_id)?;
-                self.one.spaces_state.groups.insert(shex.clone(), r.group_id.clone());
+                self.one
+                    .spaces_state
+                    .groups
+                    .insert(shex.clone(), r.group_id.clone());
             }
         }
         let network = self.one.network.clone();
@@ -367,7 +469,13 @@ impl<'a> Spaces<'a> {
     /// Lists our spaces.
     pub fn list(&mut self) -> Result<Vec<SpaceSummary>, SdkError> {
         let me = self.one.account.address().to_owned();
-        let ids: Vec<(String, String)> = self.one.spaces_state.groups.iter().map(|(s, g)| (s.clone(), g.clone())).collect();
+        let ids: Vec<(String, String)> = self
+            .one
+            .spaces_state
+            .groups
+            .iter()
+            .map(|(s, g)| (s.clone(), g.clone()))
+            .collect();
         let mut out = Vec::new();
         for (sid, gid) in ids {
             let st = self.state_mut(&sid)?;
@@ -399,7 +507,12 @@ impl<'a> Spaces<'a> {
     }
 
     /// Content page (posts, comments, announcements), newest first.
-    pub fn content(&mut self, space_hex: &str, before_ms: u64, limit: usize) -> Result<Vec<sp::Content>, SdkError> {
+    pub fn content(
+        &mut self,
+        space_hex: &str,
+        before_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<sp::Content>, SdkError> {
         Ok(self.state_mut(space_hex)?.content_page(before_ms, limit))
     }
 
@@ -407,12 +520,21 @@ impl<'a> Spaces<'a> {
     pub fn drive_entries(&mut self, space_hex: &str) -> Result<Vec<sp::SharedEntry>, SdkError> {
         let st = self.state_mut(space_hex)?;
         let mut v: Vec<sp::SharedEntry> = st.drive.values().cloned().collect();
-        v.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.capability.name.cmp(&b.capability.name)));
+        v.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then_with(|| a.capability.name.cmp(&b.capability.name))
+        });
         Ok(v)
     }
 
     /// Sends mail to the whole Space (recipient set = members).
-    pub async fn mail(&mut self, space_hex: &str, subject: &str, body: &str) -> Result<String, SdkError> {
+    pub async fn mail(
+        &mut self,
+        space_hex: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<String, SdkError> {
         let me = self.one.account.address().to_owned();
         let members: Vec<String> = self
             .state_mut(space_hex)?

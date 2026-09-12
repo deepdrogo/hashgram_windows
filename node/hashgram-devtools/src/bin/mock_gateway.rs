@@ -103,7 +103,9 @@ fn b64_decode(s: &str) -> Vec<u8> {
             b'=' => break,
             other => other,
         };
-        let Some(v) = T.iter().position(|t| *t == c) else { continue };
+        let Some(v) = T.iter().position(|t| *t == c) else {
+            continue;
+        };
         buf = (buf << 6) | v as u32;
         bits += 6;
         if bits >= 8 {
@@ -134,7 +136,11 @@ async fn devnet_identity(State(app): S, Json(body): Json<RegisterIdentity>) -> R
             u.insert(body.username.to_lowercase(), body.address.clone());
         }
     }
-    stamped(&app, StatusCode::OK, serde_json::json!({ "registered": body.address }))
+    stamped(
+        &app,
+        StatusCode::OK,
+        serde_json::json!({ "registered": body.address }),
+    )
 }
 
 fn device_json(root: &str, d: &MockDevice) -> serde_json::Value {
@@ -269,7 +275,11 @@ async fn hashgram_any(
 ) -> Response {
     // DEVNET identity registry.
     if let Some(addr) = rest.strip_prefix("identity/v1/devices/") {
-        let devices = app.identities.lock().ok().and_then(|m| m.get(addr).cloned());
+        let devices = app
+            .identities
+            .lock()
+            .ok()
+            .and_then(|m| m.get(addr).cloned());
         return match devices {
             Some(d) => stamped(
                 &app,
@@ -280,7 +290,12 @@ async fn hashgram_any(
         };
     }
     if let Some(addr) = rest.strip_prefix("identity/v1/identity/") {
-        let known = app.identities.lock().ok().map(|m| m.contains_key(addr)).unwrap_or(false);
+        let known = app
+            .identities
+            .lock()
+            .ok()
+            .map(|m| m.contains_key(addr))
+            .unwrap_or(false);
         return if known {
             stamped(
                 &app,
@@ -292,10 +307,15 @@ async fn hashgram_any(
         };
     }
     if rest == "identity/v1/resolve_device_key" {
-        let key = q.get("device_pubkey").map(|k| hex::encode(b64_decode(k))).unwrap_or_default();
+        let key = q
+            .get("device_pubkey")
+            .map(|k| hex::encode(b64_decode(k)))
+            .unwrap_or_default();
         let found = app.identities.lock().ok().and_then(|m| {
             m.iter().find_map(|(addr, devs)| {
-                devs.iter().find(|d| d.device_pubkey.eq_ignore_ascii_case(&key)).map(|d| (addr.clone(), d.clone()))
+                devs.iter()
+                    .find(|d| d.device_pubkey.eq_ignore_ascii_case(&key))
+                    .map(|d| (addr.clone(), d.clone()))
             })
         });
         return match found {
@@ -308,7 +328,11 @@ async fn hashgram_any(
         };
     }
     if let Some(name) = rest.strip_prefix("username/v1/lookup/") {
-        let owner = app.usernames.lock().ok().and_then(|u| u.get(&name.to_lowercase()).cloned());
+        let owner = app
+            .usernames
+            .lock()
+            .ok()
+            .and_then(|u| u.get(&name.to_lowercase()).cloned());
         return match owner {
             Some(o) => stamped(
                 &app,
@@ -323,15 +347,27 @@ async fn hashgram_any(
             .usernames
             .lock()
             .ok()
-            .map(|u| u.iter().filter(|(_, o)| o.as_str() == addr).map(|(n, _)| n.clone()).collect())
+            .map(|u| {
+                u.iter()
+                    .filter(|(_, o)| o.as_str() == addr)
+                    .map(|(n, _)| n.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         return stamped(&app, StatusCode::OK, serde_json::json!({ "names": names }));
     }
-    if rest.starts_with("serviceproof/v1/provider/") || rest.starts_with("serviceproof/v1/rewards/") || rest.starts_with("serviceproof/v1/assignments/") {
+    if rest.starts_with("serviceproof/v1/provider/")
+        || rest.starts_with("serviceproof/v1/rewards/")
+        || rest.starts_with("serviceproof/v1/assignments/")
+    {
         return not_found(&app);
     }
     if rest == "serviceproof/v1/providers" {
-        return stamped(&app, StatusCode::OK, serde_json::json!({ "providers": [], "pagination": { "next_key": null, "total": "0" } }));
+        return stamped(
+            &app,
+            StatusCode::OK,
+            serde_json::json!({ "providers": [], "pagination": { "next_key": null, "total": "0" } }),
+        );
     }
     // Enough of the Hashgram modules for screens to render "empty" honestly.
     let body = match rest.as_str() {

@@ -298,7 +298,9 @@ impl SegmentDecryptor {
     /// Opens the next sealed chunk.
     pub fn open(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, AppError> {
         if self.next >= self.count {
-            return Err(AppError::Integrity("more segments than the object declares".into()));
+            return Err(AppError::Integrity(
+                "more segments than the object declares".into(),
+            ));
         }
         let pt = self
             .cipher
@@ -409,7 +411,9 @@ pub fn open_object(ciphertext: &[u8], r: &pb::DriveObjectRef) -> Result<Vec<u8>,
             .ok_or_else(|| AppError::Invalid("object ref has no key".into()))?,
     )?;
     if ciphertext.len() as u64 != ciphertext_size(r.size) {
-        return Err(AppError::Integrity("ciphertext length does not match the object".into()));
+        return Err(AppError::Integrity(
+            "ciphertext length does not match the object".into(),
+        ));
     }
     let mut dec = SegmentDecryptor::new(key, r.size)?;
     let mut out = Vec::with_capacity(r.size as usize);
@@ -590,7 +594,10 @@ impl Manifest {
     }
 
     /// Seals for upload under the manifest key.
-    pub fn seal(&self, manifest_key: &ObjectKey) -> Result<(Vec<u8>, pb::DriveObjectRef), AppError> {
+    pub fn seal(
+        &self,
+        manifest_key: &ObjectKey,
+    ) -> Result<(Vec<u8>, pb::DriveObjectRef), AppError> {
         seal_object_with(&self.encode(), manifest_key.clone())
     }
 
@@ -636,9 +643,14 @@ impl Manifest {
             return Err(AppError::Invalid("name contains a path separator".into()));
         }
         if self.inner.entries.iter().any(|e| {
-            e.parent_id == parent && !e.trashed && e.id != except && e.name.eq_ignore_ascii_case(name)
+            e.parent_id == parent
+                && !e.trashed
+                && e.id != except
+                && e.name.eq_ignore_ascii_case(name)
         }) {
-            return Err(AppError::Invalid(format!("an entry named {name:?} already exists here")));
+            return Err(AppError::Invalid(format!(
+                "an entry named {name:?} already exists here"
+            )));
         }
         Ok(())
     }
@@ -744,9 +756,16 @@ impl Manifest {
 
     /// Restores an older version as the current content (the current one is
     /// kept as a version, nothing is lost).
-    pub fn restore_version(&mut self, id: &[u8], version_no: u64, device: &[u8]) -> Result<(), AppError> {
+    pub fn restore_version(
+        &mut self,
+        id: &[u8],
+        version_no: u64,
+        device: &[u8],
+    ) -> Result<(), AppError> {
         let obj = {
-            let e = self.get(id).ok_or_else(|| AppError::NotFound("entry".into()))?;
+            let e = self
+                .get(id)
+                .ok_or_else(|| AppError::NotFound("entry".into()))?;
             e.versions
                 .iter()
                 .find(|v| v.version_no == version_no)
@@ -759,7 +778,11 @@ impl Manifest {
 
     /// Renames.
     pub fn rename(&mut self, id: &[u8], name: &str, device: &[u8]) -> Result<(), AppError> {
-        let parent = self.get(id).ok_or_else(|| AppError::NotFound("entry".into()))?.parent_id.clone();
+        let parent = self
+            .get(id)
+            .ok_or_else(|| AppError::NotFound("entry".into()))?
+            .parent_id
+            .clone();
         self.require_free_name(&parent, name, id)?;
         let e = self.get_mut(id)?;
         e.name = name.to_owned();
@@ -777,9 +800,16 @@ impl Manifest {
             if cur == id {
                 return Err(AppError::Invalid("cannot move a folder into itself".into()));
             }
-            cur = self.get(&cur).map(|p| p.parent_id.clone()).unwrap_or_default();
+            cur = self
+                .get(&cur)
+                .map(|p| p.parent_id.clone())
+                .unwrap_or_default();
         }
-        let name = self.get(id).ok_or_else(|| AppError::NotFound("entry".into()))?.name.clone();
+        let name = self
+            .get(id)
+            .ok_or_else(|| AppError::NotFound("entry".into()))?
+            .name
+            .clone();
         self.require_free_name(new_parent, &name, id)?;
         let e = self.get_mut(id)?;
         e.parent_id = new_parent.to_vec();
@@ -789,12 +819,23 @@ impl Manifest {
     }
 
     /// Copies a file (same object, no re-upload) into a folder.
-    pub fn copy_file(&mut self, id: &[u8], new_parent: &[u8], name: &str, device: &[u8]) -> Result<Vec<u8>, AppError> {
-        let src = self.get(id).ok_or_else(|| AppError::NotFound("entry".into()))?.clone();
+    pub fn copy_file(
+        &mut self,
+        id: &[u8],
+        new_parent: &[u8],
+        name: &str,
+        device: &[u8],
+    ) -> Result<Vec<u8>, AppError> {
+        let src = self
+            .get(id)
+            .ok_or_else(|| AppError::NotFound("entry".into()))?
+            .clone();
         if src.kind != pb::DriveEntryKind::File as i32 {
             return Err(AppError::Invalid("only files can be copied".into()));
         }
-        let obj = src.current.ok_or_else(|| AppError::Invalid("file has no content".into()))?;
+        let obj = src
+            .current
+            .ok_or_else(|| AppError::Invalid("file has no content".into()))?;
         let new_id = self.add_file(new_parent, name, &src.mime, obj, device)?;
         if let Ok(e) = self.get_mut(&new_id) {
             e.attrs = src.attrs;
@@ -821,10 +862,16 @@ impl Manifest {
 
     /// Restores from trash (recursively).
     pub fn restore(&mut self, id: &[u8], device: &[u8]) -> Result<(), AppError> {
-        let entry = self.get(id).cloned().ok_or_else(|| AppError::NotFound("entry".into()))?;
+        let entry = self
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound("entry".into()))?;
         // The parent must be active; otherwise restore to root.
         let parent_ok = entry.parent_id.is_empty()
-            || self.get(&entry.parent_id).map(|p| !p.trashed).unwrap_or(false);
+            || self
+                .get(&entry.parent_id)
+                .map(|p| !p.trashed)
+                .unwrap_or(false);
         let ids = self.subtree(id);
         for i in ids {
             if let Ok(e) = self.get_mut(&i) {
@@ -837,7 +884,10 @@ impl Manifest {
             e.parent_id = Vec::new();
         }
         let name = self.get(id).map(|e| e.name.clone()).unwrap_or_default();
-        let parent = self.get(id).map(|e| e.parent_id.clone()).unwrap_or_default();
+        let parent = self
+            .get(id)
+            .map(|e| e.parent_id.clone())
+            .unwrap_or_default();
         if self.require_free_name(&parent, &name, id).is_err() {
             let e = self.get_mut(id)?;
             e.name = format!("{name} (restored {})", now_ms());
@@ -849,16 +899,23 @@ impl Manifest {
     /// Permanently deletes (recursively). Only trashed entries may be
     /// deleted, so a deletion is always a two-step act.
     pub fn delete(&mut self, id: &[u8], device: &[u8]) -> Result<usize, AppError> {
-        let e = self.get(id).ok_or_else(|| AppError::NotFound("entry".into()))?;
+        let e = self
+            .get(id)
+            .ok_or_else(|| AppError::NotFound("entry".into()))?;
         if !e.trashed {
-            return Err(AppError::Invalid("entry must be trashed before it is deleted".into()));
+            return Err(AppError::Invalid(
+                "entry must be trashed before it is deleted".into(),
+            ));
         }
         let ids: BTreeSet<Vec<u8>> = self.subtree(id).into_iter().collect();
         let before = self.inner.entries.len();
         self.inner.entries.retain(|e| !ids.contains(&e.id));
         let t = now_ms();
         for i in &ids {
-            self.inner.tombstones.push(pb::DriveTombstone { id: i.clone(), at_ms: t });
+            self.inner.tombstones.push(pb::DriveTombstone {
+                id: i.clone(),
+                at_ms: t,
+            });
         }
         while self.inner.tombstones.len() > MAX_TOMBSTONES {
             self.inner.tombstones.remove(0);
@@ -900,7 +957,13 @@ impl Manifest {
     }
 
     /// Sets an attribute.
-    pub fn set_attr(&mut self, id: &[u8], key: &str, value: &str, device: &[u8]) -> Result<(), AppError> {
+    pub fn set_attr(
+        &mut self,
+        id: &[u8],
+        key: &str,
+        value: &str,
+        device: &[u8],
+    ) -> Result<(), AppError> {
         require_str("attr key", key, 64)?;
         require_str_max("attr value", value, MAX_ATTR)?;
         let e = self.get_mut(id)?;
@@ -1011,11 +1074,9 @@ impl Manifest {
     pub fn resolve_path(&self, path: &str) -> Option<Vec<u8>> {
         let mut parent: Vec<u8> = Vec::new();
         for part in path.split('/').filter(|p| !p.is_empty()) {
-            let e = self
-                .inner
-                .entries
-                .iter()
-                .find(|e| e.parent_id == parent && !e.trashed && e.name.eq_ignore_ascii_case(part))?;
+            let e = self.inner.entries.iter().find(|e| {
+                e.parent_id == parent && !e.trashed && e.name.eq_ignore_ascii_case(part)
+            })?;
             parent = e.id.clone();
         }
         if parent.is_empty() {
@@ -1089,7 +1150,10 @@ impl Manifest {
     ) -> Result<pb::DriveCapability, AppError> {
         require_address("owner", owner)?;
         require_str("grantee", grantee, 128)?;
-        let e = self.get(entry_id).ok_or_else(|| AppError::NotFound("entry".into()))?.clone();
+        let e = self
+            .get(entry_id)
+            .ok_or_else(|| AppError::NotFound("entry".into()))?
+            .clone();
         if e.trashed {
             return Err(AppError::Invalid("cannot share a trashed entry".into()));
         }
@@ -1099,7 +1163,9 @@ impl Manifest {
                 AppError::Invalid("a folder share needs its sealed folder manifest".into())
             })?
         } else {
-            e.current.clone().ok_or_else(|| AppError::Invalid("file has no content".into()))?
+            e.current
+                .clone()
+                .ok_or_else(|| AppError::Invalid("file has no content".into()))?
         };
         let share_id = random_id()?;
         let cap = pb::DriveCapability {
@@ -1135,7 +1201,11 @@ impl Manifest {
 
     /// Marks a share revoked. Returns the record (so the SDK can send the
     /// revoke message to its group).
-    pub fn revoke(&mut self, share_id: &[u8], device: &[u8]) -> Result<pb::DriveShareRecord, AppError> {
+    pub fn revoke(
+        &mut self,
+        share_id: &[u8],
+        device: &[u8],
+    ) -> Result<pb::DriveShareRecord, AppError> {
         let s = self
             .inner
             .shares
@@ -1159,7 +1229,9 @@ impl Manifest {
         self.inner
             .shares
             .iter()
-            .filter(|s| s.entry_id == entry_id && !s.revoked && s.mode == pb::DriveShareMode::Live as i32)
+            .filter(|s| {
+                s.entry_id == entry_id && !s.revoked && s.mode == pb::DriveShareMode::Live as i32
+            })
             .collect()
     }
 
@@ -1169,14 +1241,19 @@ impl Manifest {
     /// [`seal_object`] always gives anyway; this is for the UI).
     #[must_use]
     pub fn has_active_shares(&self, entry_id: &[u8]) -> bool {
-        self.inner.shares.iter().any(|s| s.entry_id == entry_id && !s.revoked)
+        self.inner
+            .shares
+            .iter()
+            .any(|s| s.entry_id == entry_id && !s.revoked)
     }
 
     /// Builds the folder manifest for a folder share: the subtree with ids
     /// preserved and the folder itself as the root (its children get an
     /// empty parent id).
     pub fn folder_manifest(&self, folder_id: &[u8]) -> Result<pb::DriveFolderManifest, AppError> {
-        let f = self.get(folder_id).ok_or_else(|| AppError::NotFound("folder".into()))?;
+        let f = self
+            .get(folder_id)
+            .ok_or_else(|| AppError::NotFound("folder".into()))?;
         if f.kind != pb::DriveEntryKind::Folder as i32 {
             return Err(AppError::Invalid("not a folder".into()));
         }
@@ -1247,7 +1324,9 @@ pub fn validate_capability(c: &pb::DriveCapability) -> Result<(), AppError> {
     require_id("capability.entry_id", &c.entry_id)?;
     require_str("capability.name", &c.name, MAX_NAME)?;
     if c.name.contains('/') || c.name.contains('\\') || c.name == ".." {
-        return Err(AppError::Invalid("capability name contains a path separator".into()));
+        return Err(AppError::Invalid(
+            "capability name contains a path separator".into(),
+        ));
     }
     require_str_max("capability.mime", &c.mime, MAX_MIME)?;
     let o = c
@@ -1302,7 +1381,11 @@ pub fn merge(a: &Manifest, b: &Manifest) -> Result<Manifest, AppError> {
                     versions.entry(v.version_no).or_insert_with(|| v.clone());
                 }
                 if let (Some(lc), Some(wc)) = (&loser.current, &winner.current) {
-                    if lc.cid != wc.cid && !versions.values().any(|v| v.object.as_ref().map(|o| o.cid == lc.cid).unwrap_or(false)) {
+                    if lc.cid != wc.cid
+                        && !versions
+                            .values()
+                            .any(|v| v.object.as_ref().map(|o| o.cid == lc.cid).unwrap_or(false))
+                    {
                         let no = versions.keys().next_back().copied().unwrap_or(0) + 1;
                         versions.insert(
                             no,
@@ -1414,7 +1497,14 @@ mod tests {
 
     #[test]
     fn seal_open_round_trip_various_sizes() {
-        for size in [0usize, 1, SEGMENT_PLAINTEXT - 1, SEGMENT_PLAINTEXT, SEGMENT_PLAINTEXT + 1, 3 * SEGMENT_PLAINTEXT + 7] {
+        for size in [
+            0usize,
+            1,
+            SEGMENT_PLAINTEXT - 1,
+            SEGMENT_PLAINTEXT,
+            SEGMENT_PLAINTEXT + 1,
+            3 * SEGMENT_PLAINTEXT + 7,
+        ] {
             let pt: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
             let (ct, r) = seal_object(&pt).unwrap();
             assert_eq!(ct.len() as u64, ciphertext_size(size as u64));
@@ -1427,7 +1517,9 @@ mod tests {
 
     #[test]
     fn tamper_reorder_truncate_detected() {
-        let pt: Vec<u8> = (0..(2 * SEGMENT_PLAINTEXT + 10)).map(|i| (i % 7) as u8).collect();
+        let pt: Vec<u8> = (0..(2 * SEGMENT_PLAINTEXT + 10))
+            .map(|i| (i % 7) as u8)
+            .collect();
         let (ct, r) = seal_object(&pt).unwrap();
         let mut bad = ct.clone();
         bad[5] ^= 1;
@@ -1437,7 +1529,10 @@ mod tests {
         let (s0, rest) = swapped.split_at_mut(CHUNK_SIZE);
         let (s1, _) = rest.split_at_mut(CHUNK_SIZE);
         s0.swap_with_slice(s1);
-        assert!(matches!(open_object(&swapped, &r), Err(AppError::Integrity(_))));
+        assert!(matches!(
+            open_object(&swapped, &r),
+            Err(AppError::Integrity(_))
+        ));
         // Truncate.
         let trunc = &ct[..2 * CHUNK_SIZE];
         assert!(open_object(trunc, &r).is_err());
@@ -1453,7 +1548,9 @@ mod tests {
 
     #[test]
     fn streaming_matches_one_shot() {
-        let pt: Vec<u8> = (0..(SEGMENT_PLAINTEXT + 100)).map(|i| (i % 13) as u8).collect();
+        let pt: Vec<u8> = (0..(SEGMENT_PLAINTEXT + 100))
+            .map(|i| (i % 13) as u8)
+            .collect();
         let key = ObjectKey::generate().unwrap();
         let (ct, r) = seal_object_with(&pt, key.clone()).unwrap();
         let mut dec = SegmentDecryptor::new(key, r.size).unwrap();
@@ -1479,15 +1576,23 @@ mod tests {
         let mut m = Manifest::new(&dev(1)).unwrap();
         let docs = m.mkdir(&[], "Docs", &dev(1)).unwrap();
         let f = file(&mut m, &docs, "a.txt", b"hello");
-        assert!(m.mkdir(&[], "docs", &dev(1)).is_err(), "case-insensitive sibling uniqueness");
-        assert!(m.add_file(&docs, "a.txt", "", seal_object(b"x").unwrap().1, &dev(1)).is_err());
+        assert!(
+            m.mkdir(&[], "docs", &dev(1)).is_err(),
+            "case-insensitive sibling uniqueness"
+        );
+        assert!(m
+            .add_file(&docs, "a.txt", "", seal_object(b"x").unwrap().1, &dev(1))
+            .is_err());
         assert_eq!(m.path(&f), "/Docs/a.txt");
         assert_eq!(m.resolve_path("/docs/A.TXT").unwrap(), f);
         m.rename(&f, "b.txt", &dev(1)).unwrap();
         let sub = m.mkdir(&docs, "Sub", &dev(1)).unwrap();
         m.mv(&f, &sub, &dev(1)).unwrap();
         assert_eq!(m.path(&f), "/Docs/Sub/b.txt");
-        assert!(m.mv(&docs, &sub, &dev(1)).is_err(), "no folder into descendant");
+        assert!(
+            m.mv(&docs, &sub, &dev(1)).is_err(),
+            "no folder into descendant"
+        );
         // Versions.
         let (_, r2) = seal_object(b"hello v2").unwrap();
         let no = m.update_file(&f, r2.clone(), &dev(1), "edit").unwrap();
@@ -1519,7 +1624,16 @@ mod tests {
         let mut m = Manifest::new(&dev(1)).unwrap();
         let f = file(&mut m, &[], "c.txt", b"contract");
         let cap = m
-            .grant(&f, OWNER, "hash1bob", "aa", pb::DriveShareMode::Live, pb::DrivePermission::Read, None, &dev(1))
+            .grant(
+                &f,
+                OWNER,
+                "hash1bob",
+                "aa",
+                pb::DriveShareMode::Live,
+                pb::DrivePermission::Read,
+                None,
+                &dev(1),
+            )
             .unwrap();
         assert_eq!(cap.version_no, 1);
         assert!(!cap.folder);
@@ -1531,12 +1645,34 @@ mod tests {
         // Folder share needs a folder object.
         let d = m.mkdir(&[], "D", &dev(1)).unwrap();
         file(&mut m, &d, "in.txt", b"x");
-        assert!(m.grant(&d, OWNER, "hash1bob", "aa", pb::DriveShareMode::Snapshot, pb::DrivePermission::Read, None, &dev(1)).is_err());
+        assert!(m
+            .grant(
+                &d,
+                OWNER,
+                "hash1bob",
+                "aa",
+                pb::DriveShareMode::Snapshot,
+                pb::DrivePermission::Read,
+                None,
+                &dev(1)
+            )
+            .is_err());
         let fm = m.folder_manifest(&d).unwrap();
         assert_eq!(fm.entries.len(), 1);
         assert!(fm.entries[0].parent_id.is_empty());
         let (_, fobj) = seal_object(&fm.encode_to_vec()).unwrap();
-        let cap = m.grant(&d, OWNER, "hash1bob", "aa", pb::DriveShareMode::Snapshot, pb::DrivePermission::Read, Some(fobj), &dev(1)).unwrap();
+        let cap = m
+            .grant(
+                &d,
+                OWNER,
+                "hash1bob",
+                "aa",
+                pb::DriveShareMode::Snapshot,
+                pb::DrivePermission::Read,
+                Some(fobj),
+                &dev(1),
+            )
+            .unwrap();
         assert!(cap.folder);
         validate_capability(&cap).unwrap();
     }
@@ -1562,7 +1698,9 @@ mod tests {
         assert_eq!(e.name, "renamed.txt", "later modification wins fields");
         // A's newer content is not lost: it is in versions or current.
         let has_a = e.current.as_ref().map(|c| c.cid == ra.cid).unwrap_or(false)
-            || e.versions.iter().any(|v| v.object.as_ref().map(|o| o.cid == ra.cid).unwrap_or(false));
+            || e.versions
+                .iter()
+                .any(|v| v.object.as_ref().map(|o| o.cid == ra.cid).unwrap_or(false));
         assert!(has_a);
         assert!(m1.get(&g).unwrap().trashed);
         assert_eq!(m1.revision(), a.revision().max(b.revision()) + 1);
@@ -1588,8 +1726,14 @@ mod tests {
         a.trash(&d, &dev(1)).unwrap();
         a.delete(&d, &dev(1)).unwrap();
         let m = merge(&a, &b).unwrap();
-        assert!(m.get(&d).is_none(), "deleted folder stays deleted (tombstone)");
-        assert!(m.get(&inner).unwrap().parent_id.is_empty(), "orphan goes to root");
+        assert!(
+            m.get(&d).is_none(),
+            "deleted folder stays deleted (tombstone)"
+        );
+        assert!(
+            m.get(&inner).unwrap().parent_id.is_empty(),
+            "orphan goes to root"
+        );
         let m2 = merge(&b, &a).unwrap();
         assert_eq!(m.entries(), m2.entries());
     }

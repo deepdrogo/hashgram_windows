@@ -56,9 +56,18 @@ impl<'a> Devices<'a> {
 
     /// Adds a device to our identity on chain (requires the root key on
     /// this device). `pubkey_hex` is the new device's ed25519 public key.
-    pub async fn add_on_chain(&mut self, device_id: &str, pubkey_hex: &str, label: &str, platform: &str) -> Result<String, SdkError> {
+    pub async fn add_on_chain(
+        &mut self,
+        device_id: &str,
+        pubkey_hex: &str,
+        label: &str,
+        platform: &str,
+    ) -> Result<String, SdkError> {
         let pk = hex::decode(pubkey_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
-        let pk: [u8; 32] = pk.as_slice().try_into().map_err(|_| SdkError::Invalid("device key must be 32 bytes".into()))?;
+        let pk: [u8; 32] = pk
+            .as_slice()
+            .try_into()
+            .map_err(|_| SdkError::Invalid("device key must be 32 bytes".into()))?;
         let me = self.one.account.address().to_owned();
         let rotation = crate::account::rotation_count_on_chain(&self.one.chain, &me)
             .await?
@@ -80,7 +89,9 @@ impl<'a> Devices<'a> {
     /// Revokes a device on chain (requires the wallet key). Then removes it
     /// from every group we are in.
     pub async fn revoke_on_chain(&mut self, device_id: &str) -> Result<String, SdkError> {
-        let r = crate::account::revoke_device_on_chain(&self.one.account, &self.one.chain, device_id).await?;
+        let r =
+            crate::account::revoke_device_on_chain(&self.one.account, &self.one.chain, device_id)
+                .await?;
         let _ = self.reconcile().await;
         Ok(r.txhash)
     }
@@ -92,7 +103,9 @@ impl<'a> Devices<'a> {
         report.groups = conversations.len();
         let mut chain_cache: BTreeMap<String, Vec<DeviceView>> = BTreeMap::new();
         for (gid_hex, _meta, addrs) in conversations {
-            let Ok(gid) = hex::decode(&gid_hex) else { continue };
+            let Ok(gid) = hex::decode(&gid_hex) else {
+                continue;
+            };
             let members = match self.one.messaging.mls().members(&gid) {
                 Ok(m) => m,
                 Err(e) => {
@@ -119,7 +132,9 @@ impl<'a> Devices<'a> {
                     },
                 };
                 for d in devs {
-                    let Ok(k) = hex::decode(&d.device_pubkey) else { continue };
+                    let Ok(k) = hex::decode(&d.device_pubkey) else {
+                        continue;
+                    };
                     if d.revoked {
                         revoked.insert(k);
                     } else {
@@ -137,13 +152,30 @@ impl<'a> Devices<'a> {
                 }
             }
             if !to_remove.is_empty() {
-                match self.one.messaging.mls_mut().remove_members(&gid, &to_remove) {
+                match self
+                    .one
+                    .messaging
+                    .mls_mut()
+                    .remove_members(&gid, &to_remove)
+                {
                     Ok(commit) => {
-                        for key in self.one.messaging.mls().recipient_devices(&gid).unwrap_or_default() {
+                        for key in self
+                            .one
+                            .messaging
+                            .mls()
+                            .recipient_devices(&gid)
+                            .unwrap_or_default()
+                        {
                             if let Err(e) = self
                                 .one
                                 .messaging
-                                .deliver_raw(&self.one.link, &self.one.network, &key, hashgram_proto::pb::EnvelopeKind::MlsMessage, &commit)
+                                .deliver_raw(
+                                    &self.one.link,
+                                    &self.one.network,
+                                    &key,
+                                    hashgram_proto::pb::EnvelopeKind::MlsMessage,
+                                    &commit,
+                                )
                                 .await
                             {
                                 debug!(error = %e, "removal commit delivery failed for one device");
@@ -157,21 +189,33 @@ impl<'a> Devices<'a> {
             // Add missing active devices.
             let present: BTreeSet<Vec<u8>> = members
                 .iter()
-                .map(|m| hashgram_mls::parse_identity(&m.identity).map(|(_, k)| k).unwrap_or_default())
+                .map(|m| {
+                    hashgram_mls::parse_identity(&m.identity)
+                        .map(|(_, k)| k)
+                        .unwrap_or_default()
+                })
                 .collect();
             for (addr, keys) in &active {
                 if keys.iter().any(|k| !present.contains(k)) {
                     match self
                         .one
                         .messaging
-                        .add_participant(&self.one.link, &self.one.chain, &self.one.network, &gid, addr)
+                        .add_participant(
+                            &self.one.link,
+                            &self.one.chain,
+                            &self.one.network,
+                            &gid,
+                            addr,
+                        )
                         .await
                     {
                         Ok(()) => report.added.push((gid_hex.clone(), addr.clone())),
                         Err(SdkError::NoRecipients) => {} // no key package yet
                         Err(e) => {
                             warn!(group = %gid_hex, address = %addr, error = %e, "adding new device failed");
-                            report.errors.push((gid_hex.clone(), format!("{addr}: {e}")));
+                            report
+                                .errors
+                                .push((gid_hex.clone(), format!("{addr}: {e}")));
                         }
                     }
                 }
@@ -203,13 +247,19 @@ impl<'a> Devices<'a> {
 
     /// Handles a `DeviceSync` from one of our own devices. Refuses anything
     /// whose MLS sender is not our own address.
-    pub(crate) async fn handle_incoming(&mut self, sender: &str, sync: &app::DeviceSync) -> Result<bool, SdkError> {
+    pub(crate) async fn handle_incoming(
+        &mut self,
+        sender: &str,
+        sync: &app::DeviceSync,
+    ) -> Result<bool, SdkError> {
         if sender != self.one.account.address() {
             warn!("device sync from another address ignored");
             return Ok(false);
         }
         match &sync.body {
-            Some(app::device_sync::Body::DriveKeyring(k)) => self.one.drive().apply_keyring(k).await,
+            Some(app::device_sync::Body::DriveKeyring(k)) => {
+                self.one.drive().apply_keyring(k).await
+            }
             Some(app::device_sync::Body::MailState(h)) => {
                 self.one.mail().apply_state_hint(h)?;
                 Ok(true)

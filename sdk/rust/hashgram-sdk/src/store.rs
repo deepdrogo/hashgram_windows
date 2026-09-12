@@ -146,7 +146,12 @@ impl LocalStore {
     }
 
     /// Writes a JSON-serialisable value.
-    pub fn put<T: serde::Serialize>(&self, ns: &str, key: &[u8], value: &T) -> Result<(), SdkError> {
+    pub fn put<T: serde::Serialize>(
+        &self,
+        ns: &str,
+        key: &[u8],
+        value: &T,
+    ) -> Result<(), SdkError> {
         let json = serde_json::to_vec(value).map_err(err)?;
         let sealed = self.seal(ns, key, &json)?;
         let tx = self.db.begin_write().map_err(err)?;
@@ -173,7 +178,11 @@ impl LocalStore {
     }
 
     /// Reads a value.
-    pub fn get<T: serde::de::DeserializeOwned>(&self, ns: &str, key: &[u8]) -> Result<Option<T>, SdkError> {
+    pub fn get<T: serde::de::DeserializeOwned>(
+        &self,
+        ns: &str,
+        key: &[u8],
+    ) -> Result<Option<T>, SdkError> {
         match self.get_bytes(ns, key)? {
             Some(b) => Ok(Some(serde_json::from_slice(&b).map_err(err)?)),
             None => Ok(None),
@@ -211,7 +220,10 @@ impl LocalStore {
 
     /// Every (key, value) in a namespace, in key order, decoded as `T`.
     /// Records that fail to decode are skipped (a newer build wrote them).
-    pub fn scan<T: serde::de::DeserializeOwned>(&self, ns: &str) -> Result<Vec<(Vec<u8>, T)>, SdkError> {
+    pub fn scan<T: serde::de::DeserializeOwned>(
+        &self,
+        ns: &str,
+    ) -> Result<Vec<(Vec<u8>, T)>, SdkError> {
         let raw = self.scan_bytes(ns)?;
         let mut out = Vec::with_capacity(raw.len());
         for (k, v) in raw {
@@ -293,7 +305,11 @@ mod tests {
         let sealed = {
             let tx = s.db.begin_read().unwrap();
             let t = tx.open_table(KV).unwrap();
-            t.get(composite("a", b"k").as_slice()).unwrap().unwrap().value().to_vec()
+            t.get(composite("a", b"k").as_slice())
+                .unwrap()
+                .unwrap()
+                .value()
+                .to_vec()
         };
         // Moving the sealed bytes to another key must fail to authenticate.
         assert!(s.open_sealed("a", b"other", &sealed).is_err());
@@ -308,7 +324,8 @@ mod tests {
     fn schema_version_guard() {
         let s = LocalStore::ephemeral(&[3; 32]).unwrap();
         assert_eq!(s.migrate().unwrap(), SCHEMA_VERSION);
-        s.put("meta", b"schema_version", &(SCHEMA_VERSION + 5)).unwrap();
+        s.put("meta", b"schema_version", &(SCHEMA_VERSION + 5))
+            .unwrap();
         assert!(s.migrate().is_err());
     }
 }

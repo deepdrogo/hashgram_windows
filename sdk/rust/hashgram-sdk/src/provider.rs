@@ -112,18 +112,28 @@ fn str_of(v: &Value, k: &str) -> String {
 }
 fn i64_of(v: &Value, k: &str) -> i64 {
     v.get(k)
-        .and_then(|x| x.as_i64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
+        .and_then(|x| {
+            x.as_i64()
+                .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or(0)
 }
 fn u64_of(v: &Value, k: &str) -> u64 {
     v.get(k)
-        .and_then(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
+        .and_then(|x| {
+            x.as_u64()
+                .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or(0)
 }
 
 /// Derives a status from a provider JSON record and a few extra facts.
 #[must_use]
-pub fn status_from_json(p: &Value, has_assignments: bool, has_pending_credit: bool) -> ProviderStatus {
+pub fn status_from_json(
+    p: &Value,
+    has_assignments: bool,
+    has_pending_credit: bool,
+) -> ProviderStatus {
     let roles: Vec<String> = p
         .get("roles")
         .and_then(|r| r.as_array())
@@ -132,7 +142,10 @@ pub fn status_from_json(p: &Value, has_assignments: bool, has_pending_credit: bo
     let bond = p
         .get("bond")
         .and_then(|b| b.as_array())
-        .and_then(|a| a.iter().find(|c| c.get("denom").and_then(|d| d.as_str()) == Some("uhash")))
+        .and_then(|a| {
+            a.iter()
+                .find(|c| c.get("denom").and_then(|d| d.as_str()) == Some("uhash"))
+        })
         .map(|c| str_of(c, "amount"))
         .unwrap_or_else(|| "0".into());
     let jailed = p.get("jailed").and_then(|x| x.as_bool()).unwrap_or(false);
@@ -176,8 +189,15 @@ pub struct Provider<'a> {
 impl<'a> Provider<'a> {
     /// Status of an operator (ours by default).
     pub async fn status(&mut self, operator: Option<&str>) -> Result<ProviderStatus, SdkError> {
-        let op = operator.map(str::to_owned).unwrap_or_else(|| self.one.account.address().to_owned());
-        let v = match self.one.chain.query(&format!("hashgram/serviceproof/v1/provider/{op}")).await {
+        let op = operator
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.one.account.address().to_owned());
+        let v = match self
+            .one
+            .chain
+            .query(&format!("hashgram/serviceproof/v1/provider/{op}"))
+            .await
+        {
             Ok(v) => v,
             Err(e) => {
                 let msg = e.to_string();
@@ -198,7 +218,11 @@ impl<'a> Provider<'a> {
             .query(&format!("hashgram/serviceproof/v1/assignments/{op}"))
             .await
             .ok()
-            .and_then(|a| a.get("assignments").and_then(|x| x.as_array()).map(|x| !x.is_empty()))
+            .and_then(|a| {
+                a.get("assignments")
+                    .and_then(|x| x.as_array())
+                    .map(|x| !x.is_empty())
+            })
             .unwrap_or(false);
         let pending = self
             .one
@@ -209,7 +233,13 @@ impl<'a> Provider<'a> {
             .map(|r| {
                 ["pending_credit", "credit", "accrued_credit"]
                     .iter()
-                    .any(|k| u64_of(&r, k) > 0 || r.get(k).and_then(|x| x.as_str()).map(|s| s != "0" && !s.is_empty()).unwrap_or(false))
+                    .any(|k| {
+                        u64_of(&r, k) > 0
+                            || r.get(k)
+                                .and_then(|x| x.as_str())
+                                .map(|s| s != "0" && !s.is_empty())
+                                .unwrap_or(false)
+                    })
             })
             .unwrap_or(false);
         Ok(status_from_json(&p, assignments, pending))
@@ -217,7 +247,9 @@ impl<'a> Provider<'a> {
 
     /// Earnings of an operator (ours by default).
     pub async fn earnings(&mut self, operator: Option<&str>) -> Result<Earnings, SdkError> {
-        let op = operator.map(str::to_owned).unwrap_or_else(|| self.one.account.address().to_owned());
+        let op = operator
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.one.account.address().to_owned());
         let r = self
             .one
             .chain
@@ -246,7 +278,10 @@ impl<'a> Provider<'a> {
                         return n.to_string();
                     }
                     if let Some(a) = x.as_array() {
-                        if let Some(c) = a.iter().find(|c| c.get("denom").and_then(|d| d.as_str()) == Some("uhash")) {
+                        if let Some(c) = a
+                            .iter()
+                            .find(|c| c.get("denom").and_then(|d| d.as_str()) == Some("uhash"))
+                        {
                             return str_of(c, "amount");
                         }
                     }
@@ -257,8 +292,12 @@ impl<'a> Provider<'a> {
         Ok(Earnings {
             total_paid_uhash: find(&r, &["total_paid", "paid", "total_rewards"]),
             pending_credit: find(&r, &["pending_credit", "credit", "accrued_credit"]),
-            epoch: u64_of(epoch.get("epoch").unwrap_or(&epoch), "number").max(u64_of(&epoch, "epoch_number")),
-            reserve_remaining_uhash: find(reserve.get("reserve").unwrap_or(&reserve), &["remaining", "balance", "amount"]),
+            epoch: u64_of(epoch.get("epoch").unwrap_or(&epoch), "number")
+                .max(u64_of(&epoch, "epoch_number")),
+            reserve_remaining_uhash: find(
+                reserve.get("reserve").unwrap_or(&reserve),
+                &["remaining", "balance", "amount"],
+            ),
             raw: r,
         })
     }
@@ -272,7 +311,11 @@ impl<'a> Provider<'a> {
             .await?;
         Ok(v.get("providers")
             .and_then(|p| p.as_array())
-            .map(|a| a.iter().map(|p| status_from_json(p, false, false)).collect())
+            .map(|a| {
+                a.iter()
+                    .map(|p| status_from_json(p, false, false))
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
@@ -288,10 +331,15 @@ impl<'a> Provider<'a> {
         moniker: &str,
     ) -> Result<String, SdkError> {
         let wallet = self.one.account.wallet()?;
-        let node_pubkey = hex::decode(node_pubkey_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
+        let node_pubkey =
+            hex::decode(node_pubkey_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
         let roles: Vec<i32> = roles
             .iter()
-            .map(|r| role_from_str(r).map(|x| x as i32).ok_or_else(|| SdkError::Invalid(format!("unknown role {r}"))))
+            .map(|r| {
+                role_from_str(r)
+                    .map(|x| x as i32)
+                    .ok_or_else(|| SdkError::Invalid(format!("unknown role {r}")))
+            })
             .collect::<Result<_, _>>()?;
         let msg = sp::MsgRegisterProvider {
             operator: self.one.account.address().to_owned(),
@@ -310,17 +358,32 @@ impl<'a> Provider<'a> {
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::register_provider(&msg)], "hashgram one: register provider")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::register_provider(&msg)],
+                "hashgram one: register provider",
+            )
             .await?;
         Ok(r.txhash)
     }
 
     /// Updates mutable fields.
-    pub async fn update(&mut self, reward_address: &str, roles: &[&str], declared_storage_bytes: u64, moniker: &str, additional_bond_uhash: u128) -> Result<String, SdkError> {
+    pub async fn update(
+        &mut self,
+        reward_address: &str,
+        roles: &[&str],
+        declared_storage_bytes: u64,
+        moniker: &str,
+        additional_bond_uhash: u128,
+    ) -> Result<String, SdkError> {
         let wallet = self.one.account.wallet()?;
         let roles: Vec<i32> = roles
             .iter()
-            .map(|r| role_from_str(r).map(|x| x as i32).ok_or_else(|| SdkError::Invalid(format!("unknown role {r}"))))
+            .map(|r| {
+                role_from_str(r)
+                    .map(|x| x as i32)
+                    .ok_or_else(|| SdkError::Invalid(format!("unknown role {r}")))
+            })
             .collect::<Result<_, _>>()?;
         let msg = sp::MsgUpdateProvider {
             operator: self.one.account.address().to_owned(),
@@ -341,7 +404,11 @@ impl<'a> Provider<'a> {
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::update_provider(&msg)], "hashgram one: update provider")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::update_provider(&msg)],
+                "hashgram one: update provider",
+            )
             .await?;
         Ok(r.txhash)
     }
@@ -352,7 +419,11 @@ impl<'a> Provider<'a> {
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::begin_unbonding(self.one.account.address())], "hashgram one: unbond")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::begin_unbonding(self.one.account.address())],
+                "hashgram one: unbond",
+            )
             .await?;
         Ok(r.txhash)
     }
@@ -363,7 +434,11 @@ impl<'a> Provider<'a> {
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::withdraw_bond(self.one.account.address())], "hashgram one: withdraw bond")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::withdraw_bond(self.one.account.address())],
+                "hashgram one: withdraw bond",
+            )
             .await?;
         Ok(r.txhash)
     }
@@ -379,15 +454,30 @@ mod tests {
             "operator": "hash1op", "roles": ["SERVICE_ROLE_STORAGE"], "bond": [{"denom":"uhash","amount":"1000000000"}],
             "fraud_score": "0", "jailed": false, "unbonding_height": "0"
         });
-        assert_eq!(status_from_json(&p, false, false).lifecycle, Lifecycle::WaitingForAssignment);
-        assert_eq!(status_from_json(&p, true, false).lifecycle, Lifecycle::Active);
+        assert_eq!(
+            status_from_json(&p, false, false).lifecycle,
+            Lifecycle::WaitingForAssignment
+        );
+        assert_eq!(
+            status_from_json(&p, true, false).lifecycle,
+            Lifecycle::Active
+        );
         let mut d = p.clone();
         d["fraud_score"] = serde_json::json!("25");
-        assert_eq!(status_from_json(&d, true, true).lifecycle, Lifecycle::Degraded);
+        assert_eq!(
+            status_from_json(&d, true, true).lifecycle,
+            Lifecycle::Degraded
+        );
         d["jailed"] = serde_json::json!(true);
-        assert_eq!(status_from_json(&d, true, true).lifecycle, Lifecycle::Jailed);
+        assert_eq!(
+            status_from_json(&d, true, true).lifecycle,
+            Lifecycle::Jailed
+        );
         d["unbonding_height"] = serde_json::json!("500");
-        assert_eq!(status_from_json(&d, true, true).lifecycle, Lifecycle::Unbonding);
+        assert_eq!(
+            status_from_json(&d, true, true).lifecycle,
+            Lifecycle::Unbonding
+        );
         let relay = serde_json::json!({"roles": [2], "bond": []});
         let s = status_from_json(&relay, false, false);
         assert_eq!(s.lifecycle, Lifecycle::Registered);

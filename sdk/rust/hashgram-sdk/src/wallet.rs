@@ -16,7 +16,11 @@ pub const UHASH_PER_HASH: u128 = 1_000_000;
 #[must_use]
 #[allow(clippy::integer_division)] // exact: display units are a fixed 10^6 scale
 pub fn format_hash(uhash: u128) -> String {
-    format!("{}.{:06} HASH", uhash / UHASH_PER_HASH, uhash % UHASH_PER_HASH)
+    format!(
+        "{}.{:06} HASH",
+        uhash / UHASH_PER_HASH,
+        uhash % UHASH_PER_HASH
+    )
 }
 
 /// Parses `"1.5"` / `"1.5 HASH"` / `"1500000uhash"` into uhash. Never
@@ -24,19 +28,33 @@ pub fn format_hash(uhash: u128) -> String {
 pub fn parse_amount(s: &str) -> Result<u128, SdkError> {
     let t = s.trim().to_ascii_lowercase();
     if let Some(u) = t.strip_suffix("uhash") {
-        return u.trim().parse().map_err(|_| SdkError::Invalid(format!("bad amount {s}")));
+        return u
+            .trim()
+            .parse()
+            .map_err(|_| SdkError::Invalid(format!("bad amount {s}")));
     }
     let t = t.strip_suffix("hash").map(str::trim).unwrap_or(&t);
     let (whole, frac) = t.split_once('.').unwrap_or((t, ""));
     if frac.len() > 6 || whole.is_empty() && frac.is_empty() {
         return Err(SdkError::Invalid(format!("bad amount {s}")));
     }
-    let whole: u128 = if whole.is_empty() { 0 } else { whole.parse().map_err(|_| SdkError::Invalid(format!("bad amount {s}")))? };
+    let whole: u128 = if whole.is_empty() {
+        0
+    } else {
+        whole
+            .parse()
+            .map_err(|_| SdkError::Invalid(format!("bad amount {s}")))?
+    };
     let mut f = frac.to_owned();
     while f.len() < 6 {
         f.push('0');
     }
-    let frac: u128 = if f.is_empty() { 0 } else { f.parse().map_err(|_| SdkError::Invalid(format!("bad amount {s}")))? };
+    let frac: u128 = if f.is_empty() {
+        0
+    } else {
+        f.parse()
+            .map_err(|_| SdkError::Invalid(format!("bad amount {s}")))?
+    };
     whole
         .checked_mul(UHASH_PER_HASH)
         .and_then(|w| w.checked_add(frac))
@@ -64,7 +82,9 @@ pub struct WalletApi<'a> {
 impl<'a> WalletApi<'a> {
     /// Balance of ours (or of `address`).
     pub async fn balance(&mut self, address: Option<&str>) -> Result<Balance, SdkError> {
-        let a = address.map(str::to_owned).unwrap_or_else(|| self.one.account.address().to_owned());
+        let a = address
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.one.account.address().to_owned());
         let uhash = match self.one.chain.balance(&a).await {
             Ok(b) => b,
             Err(crate::chain::ClientError::NoAccount(_)) => 0,
@@ -74,7 +94,11 @@ impl<'a> WalletApi<'a> {
             if v.single_operator {
                 "verified by 1 node — only one operator reachable".to_owned()
             } else if v.agreed {
-                format!("verified by {} nodes ({} operators)", v.peers.len(), v.operators.len())
+                format!(
+                    "verified by {} nodes ({} operators)",
+                    v.peers.len(),
+                    v.operators.len()
+                )
             } else {
                 "unverified".to_owned()
             }
@@ -88,24 +112,49 @@ impl<'a> WalletApi<'a> {
     }
 
     /// Sends HASH.
-    pub async fn send(&mut self, to: &str, amount_uhash: u128, memo: &str) -> Result<String, SdkError> {
+    pub async fn send(
+        &mut self,
+        to: &str,
+        amount_uhash: u128,
+        memo: &str,
+    ) -> Result<String, SdkError> {
         hashgram_app::ids::require_address("to", to)?;
         let wallet = self.one.account.wallet()?;
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::bank_send(self.one.account.address(), to, amount_uhash)], memo)
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::bank_send(
+                    self.one.account.address(),
+                    to,
+                    amount_uhash,
+                )],
+                memo,
+            )
             .await?;
         Ok(r.txhash)
     }
 
     /// Fee preview for a send.
-    pub async fn preview_send(&mut self, to: &str, amount_uhash: u128) -> Result<hashgram_chain::FeePreview, SdkError> {
+    pub async fn preview_send(
+        &mut self,
+        to: &str,
+        amount_uhash: u128,
+    ) -> Result<hashgram_chain::FeePreview, SdkError> {
         let wallet = self.one.account.wallet()?;
         Ok(self
             .one
             .chain
-            .fee_preview(&wallet, vec![msgs::bank_send(self.one.account.address(), to, amount_uhash)], "")
+            .fee_preview(
+                &wallet,
+                vec![msgs::bank_send(
+                    self.one.account.address(),
+                    to,
+                    amount_uhash,
+                )],
+                "",
+            )
             .await?)
     }
 
@@ -115,18 +164,38 @@ impl<'a> WalletApi<'a> {
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::delegate(self.one.account.address(), validator, amount_uhash)], "hashgram one: stake")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::delegate(
+                    self.one.account.address(),
+                    validator,
+                    amount_uhash,
+                )],
+                "hashgram one: stake",
+            )
             .await?;
         Ok(r.txhash)
     }
 
     /// Undelegates.
-    pub async fn unstake(&mut self, validator: &str, amount_uhash: u128) -> Result<String, SdkError> {
+    pub async fn unstake(
+        &mut self,
+        validator: &str,
+        amount_uhash: u128,
+    ) -> Result<String, SdkError> {
         let wallet = self.one.account.wallet()?;
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::undelegate(self.one.account.address(), validator, amount_uhash)], "hashgram one: unstake")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::undelegate(
+                    self.one.account.address(),
+                    validator,
+                    amount_uhash,
+                )],
+                "hashgram one: unstake",
+            )
             .await?;
         Ok(r.txhash)
     }
@@ -137,7 +206,14 @@ impl<'a> WalletApi<'a> {
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::withdraw_rewards(self.one.account.address(), validator)], "hashgram one: rewards")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::withdraw_rewards(
+                    self.one.account.address(),
+                    validator,
+                )],
+                "hashgram one: rewards",
+            )
             .await?;
         Ok(r.txhash)
     }
@@ -152,7 +228,11 @@ impl<'a> WalletApi<'a> {
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::register_username(&msg)], "hashgram one: username")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::register_username(&msg)],
+                "hashgram one: username",
+            )
             .await?;
         Ok(r.txhash)
     }
@@ -163,20 +243,32 @@ impl<'a> WalletApi<'a> {
         let r = self
             .one
             .chain
-            .sign_and_broadcast(&wallet, vec![msgs::renew_username(self.one.account.address(), name)], "hashgram one: renew")
+            .sign_and_broadcast(
+                &wallet,
+                vec![msgs::renew_username(self.one.account.address(), name)],
+                "hashgram one: renew",
+            )
             .await?;
         Ok(r.txhash)
     }
 
     /// Username availability with the chain's reason code.
     pub async fn username_availability(&mut self, name: &str) -> Result<Value, SdkError> {
-        Ok(self.one.chain.query(&format!("hashgram/username/v1/availability/{name}")).await?)
+        Ok(self
+            .one
+            .chain
+            .query(&format!("hashgram/username/v1/availability/{name}"))
+            .await?)
     }
 
     /// Delegations of ours.
     pub async fn delegations(&mut self) -> Result<Value, SdkError> {
         let me = self.one.account.address();
-        Ok(self.one.chain.query(&format!("cosmos/staking/v1beta1/delegations/{me}")).await?)
+        Ok(self
+            .one
+            .chain
+            .query(&format!("cosmos/staking/v1beta1/delegations/{me}"))
+            .await?)
     }
 
     /// Recent transactions involving us (through the gateway's tx search).
