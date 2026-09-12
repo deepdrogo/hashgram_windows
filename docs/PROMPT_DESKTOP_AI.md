@@ -1,3 +1,7 @@
+> **Superseded (2026-09-12).** This is the messenger-era prompt kept for the
+> record. The Hashgram One desktop application is specified in
+> [DESKTOP_APP_MASTER_PROMPT.md](DESKTOP_APP_MASTER_PROMPT.md); use that.
+
 # COPY-PASTE PROMPT — Hashgram for Windows, the complete application
 
 Hand this entire file to a coding agent that has the Hashgram repository
