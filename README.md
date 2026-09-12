@@ -3,12 +3,46 @@
 A decentralised network with a fixed supply, a finite reward reserve and no
 central point of control.
 
+## Hashgram One
+
+**One identity. One inbox. One vault. One network.**
+
+Hashgram One is the consumer product built on this network: private
+communication and storage where the blockchain and the libp2p swarm are
+infrastructure and the user-facing concepts are
+
+| | |
+| --- | --- |
+| **Mail** | end-to-end encrypted HashMail between `hash1…` identities, `@alice`, `alice@hashgram.io`; threads, BCC, receipts, local spam policy — [docs/HASHMAIL.md](docs/HASHMAIL.md) |
+| **Drive** | HashDrive: client-encrypted, segmented, versioned files with an encrypted manifest tree, multi-device merge and capability sharing — [docs/HASHDRIVE.md](docs/HASHDRIVE.md) |
+| **People** | chain-resolved identities, contact requests over MLS, friend/block/mute/trust state that never leaves your devices |
+| **Feed** | public signed posts plus private Circle posts merged client-side |
+| **Spaces** | MLS groups with a signed, hash-chained role log (Owner/Admin/Member/Guest), space drive and space mail — [docs/SPACES.md](docs/SPACES.md) |
+| **Earn** | the `x/serviceproof` provider lifecycle as an application API |
+| **Wallet** | HASH balances and transfers through the chain relay |
+| **Network** | validators, providers, leaderboards and stats from the indexer |
+
+Everything cryptographic lives in Rust (`node/hashgram-app`,
+`sdk/rust/hashgram-sdk`); every application payload travels inside MLS
+ciphertext that no node, relay, store or indexer decodes. Architecture and
+what is and is not built: [docs/HASHGRAM_ONE_ARCHITECTURE.md](docs/HASHGRAM_ONE_ARCHITECTURE.md);
+baseline audit: [docs/HASHGRAM_ONE_AUDIT.md](docs/HASHGRAM_ONE_AUDIT.md);
+sync model: [docs/SYNC_ENGINE.md](docs/SYNC_ENGINE.md); privacy:
+[docs/PRIVACY_MODEL.md](docs/PRIVACY_MODEL.md).
+
+## The repository
+
 This repository holds Hashgram Core: the blockchain, the peer-to-peer node,
-the client SDK, the indexer, the safety engine, the operator tooling and the
-genesis machinery. **Phases 1 and 2 are complete and run**: chain, E2EE
-messaging, social events, media storage, useful-service rewards, calls
-infrastructure. Mainnet is not launched; the native client applications are
-specified, not built. See [Status](#status) for exactly what exists.
+the application protocol and client SDK, the indexer, the safety engine, the
+operator tooling and the genesis machinery. **Phases 1 and 2 are complete and
+run**: chain, E2EE messaging, social events, media storage, useful-service
+rewards, calls infrastructure. **Mainnet `hashgram-1` launched on
+2026-09-10** (genesis hash
+`e322bc2319f6e0173286fa526dab5a8ff8ad0797c7b80dd03e7c9d98621d5e4d`). A
+Windows desktop application exists in `apps/desktop` (Tauri 2 + SolidJS,
+v0.1.1) and is being superseded by the Hashgram One desktop specified in
+`docs/DESKTOP_APP_MASTER_PROMPT.md`. See [Status](#status) for exactly what
+exists.
 
 ## What is different about it
 
@@ -68,13 +102,23 @@ a disbursement record.
 | Prometheus metrics, Grafana dashboards, alerts | Complete and verified against a running node. |
 | CI: tests, staticcheck, gosec, gitleaks, govulncheck | Green. |
 | Reproducible release build | Verified byte-identical. |
-| Mainnet | **Not launched.** Requires a Founder address generated off this server. |
+| Mainnet | **Launched 2026-09-10.** Chain id `hashgram-1`, genesis hash `e322bc2319f6e0173286fa526dab5a8ff8ad0797c7b80dd03e7c9d98621d5e4d`. One genesis validator; chain relay and store node deployed; messaging verified end to end on 2026-09-12. |
 | `hashgram-node` (Rust): libp2p swarm with the genesis-checking handshake, mailboxes, blobs, social log, safety table, rewards agent | Runs. 63 network-level acceptance checks pass (`scripts/testnet/phase2.sh`). |
-| `hashgram-sdk` + `hashgram-client` (Rust): vault, wallet, identity, MLS messaging, social, media, calls | Runs against a live devnet: identities registered, E2EE messages delivered, reels published, private media round-tripped. |
+| `hashgram-sdk` + `hashgram-client` (Rust): vault, wallet, identity, MLS messaging, social, media, calls | Runs against a live devnet and Mainnet: identities registered, E2EE messages delivered, reels published, private media round-tripped. |
 | `hashgram-indexer`, `hashgram-safety` (Go) | Run. Feeds served from PostgreSQL; a scam post blocked end to end. |
 | Fuzzing, `cargo audit`, hardened systemd units, installer for the node stack | Complete. |
-| Windows, iOS, Android apps | Not built. Specifications and the SDK exist. |
+| Windows desktop app (`apps/desktop`, Tauri 2 + SolidJS, v0.1.1) | Exists (97 commands: wallet, messenger, social, calls, identity, node). Being superseded by the Hashgram One desktop (`docs/DESKTOP_APP_MASTER_PROMPT.md`). |
+| iOS, Android apps | Not built. Specifications and the SDK exist. |
 | Token bridge | Not built; interfaces sketched only. |
+| **Hashgram One** (`node/hashgram-app`, `sdk/rust/hashgram-sdk`, `hashgram-client one …`) | |
+| HashMail | **Implemented.** `MailMessage` model with bounds, threading, BCC copies, inline/blob/Drive attachments, DELIVERED/READ receipts, local folders and flags with device sync, spam/Requests policy, authenticated-sender rule. E2E: `scripts/testnet/hashgram-one-e2e.sh`. |
+| HashDrive | **Implemented.** Segmented XChaCha20-Poly1305 objects, encrypted `DriveManifest` with folders/versions/trash/tombstones, deterministic multi-device merge, `DriveKeyring` device sync, snapshot/live capabilities, revocation, folder shares. Partial: no provider-enforced deletion, separate Drives on two devices are not auto-merged, `PendingUpload` bookkeeping is not yet written by `upload`. |
+| People | **Implemented.** Resolution of `hash1…`/`@name`/`name@hashgram.io`, contact requests and responses over MLS, friend/pending/blocked/muted/trusted states, `ContactsSnapshot` device sync, private `ProfileCard` with optional wallet disclosure, public follow mirror. |
+| Feed / Circles | **Implemented.** Typed feed over the social log (`friends`, `following`, `author`, `thread`, post/comment/react/repost) with cursors; Circles as MLS groups with `CircleEvent` posts, comments, one-reaction-per-author, polls with closing, author-only delete. Partial: `history_visible_to_new_members` is carried but not acted on; circles have no roles. |
+| Spaces | **Implemented.** Signed hash-chained `SpaceEvent` log under the `hashgram-app/v1/<network>/space-event` domain, role state machine enforced by every reader, per-actor sequences, pending-event retry, MLS roster reconciliation on invite/remove, space drive, space mail. |
+| Earn API | **Implemented** (SDK `provider`): status, lifecycle derivation, earnings, register/update/unbond/withdraw over `x/serviceproof`. Economics unchanged; storage assignment on Mainnet is inert until governance registers an assigner. |
+| Indexer leaderboards | **Implemented** (Go, additive): `balances` projection, `/v1/leaderboards/{holders,validators,providers,earners}`, `/v1/validators`, `/v1/network/stats`. |
+| Mail gateway (`services/mail-gateway`) | **Partial.** Library complete: SMTP server state machine and client, MIME parse/render, DKIM (rsa/ed25519), address mapping, policy, rate limits, SQLite queue, `Bridge::run` over `HashgramOne`. The `hashgram-mail-gateway` binary entry point is a placeholder; `docs/MAIL_GATEWAY.md` is not yet written. Native HashMail does not depend on it. |
 
 ## The chain
 
@@ -144,6 +188,16 @@ Four validators, a killed validator, and fork isolation:
 scripts/testnet/four-validator.sh
 ```
 
+Hashgram One end to end on a local devnet (mock chain gateway, one
+store/relay/media node, two `hashgram-client one …` identities exercising
+Mail, Drive, People, Spaces, Circles and device reconciliation; every step
+asserts on output):
+
+```bash
+cd node && cargo build -p hashgram-node -p hashgram-client -p hashgram-devtools
+scripts/testnet/hashgram-one-e2e.sh
+```
+
 ## Binaries
 
 | Binary | Purpose |
@@ -152,6 +206,22 @@ scripts/testnet/four-validator.sh
 | `hashgramctl` | Operator CLI: install, join, roles, status, backup, preflight. |
 | `hashgram-test-client` | Developer client that exercises the protocol from outside a node. |
 | `hashgram-keygen` | Offline key generation. No networking, no disk writes. |
+| `hashgram-node` (Rust) | Store / relay / media / bootstrap node on the libp2p swarm. |
+| `hashgram-client` (Rust) | Reference CLI over `hashgram-sdk`; `hashgram-client one mail|drive|people|feed|circle|space|devices|provider|network|sync` is the Hashgram One developer harness. |
+| `hashgram-mail-gateway` (Rust) | External SMTP bridge (`services/mail-gateway`). Library implemented; binary entry point still a placeholder. |
+
+## Repository layout (application layer)
+
+| Path | Purpose |
+| --- | --- |
+| `proto/hashgram/app/v1/app.proto` | `AppMessage` envelope and the HashMail, HashDrive, People, Circles, Spaces and DeviceSync bodies; carried only inside MLS. |
+| `node/hashgram-app` | Pure application protocol, no I/O: versioning, mail model and threading, spam policy, Drive segment crypto / manifest / merge / capabilities, Space signed log and role state machine, Circle timeline, contacts. |
+| `sdk/rust/hashgram-sdk` | The application boundary: `HashgramOne` facade with `mail`, `drive`, `people`, `feed`, `circles`, `spaces`, `devices`, `sync`, `provider`, `network`, `wallet`, `store` (sealed local redb), plus the pre-existing `account`, `link`, `messaging`, `blob`, `social`, `chain_relay`. |
+| `node/hashgram-client/src/one.rs` | `hashgram-client one …` commands over the same facade the desktop uses. |
+| `services/mail-gateway` | SMTP ↔ HashMail bridge owning an ordinary Hashgram identity. |
+| `indexer/api_network.go` | Balances projection, leaderboards, validators, network stats. |
+| `apps/desktop` | Windows desktop app v0.1.1 (Tauri 2 + SolidJS); superseded by the Hashgram One desktop. |
+| `scripts/testnet/hashgram-one-e2e.sh` | Hashgram One acceptance suite on a local devnet. |
 
 ## Documentation
 
@@ -162,6 +232,17 @@ the document says so rather than describing it in the present tense.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit together
 - [TOKENOMICS.md](docs/TOKENOMICS.md) — supply, allocations, emission, the Founder share
 - [OPERATIONS.md](docs/OPERATIONS.md) — running a node day to day
+
+**Hashgram One**
+- [HASHGRAM_ONE_ARCHITECTURE.md](docs/HASHGRAM_ONE_ARCHITECTURE.md) — layering, where state lives, the application envelope
+- [HASHGRAM_ONE_AUDIT.md](docs/HASHGRAM_ONE_AUDIT.md) — the pre-transformation baseline and findings
+- [HASHMAIL.md](docs/HASHMAIL.md) — addresses, `MailMessage`, transport, threading, receipts, spam policy
+- [HASHDRIVE.md](docs/HASHDRIVE.md) — object encryption, manifest, merge, sharing and revocation
+- [SPACES.md](docs/SPACES.md) — Spaces (signed role log) and Circles (flat MLS groups)
+- [SYNC_ENGINE.md](docs/SYNC_ENGINE.md) — the sync state machine, idempotency, resumability, what a desktop app should do
+- [PRIVACY_MODEL.md](docs/PRIVACY_MODEL.md) — who can see what, actor by actor
+- [MULTI_DEVICE_SECURITY.md](docs/MULTI_DEVICE_SECURITY.md) — devices in MLS groups, revocation, recovery
+- [ADR_HASH_STORAGE_MARKET.md](docs/ADR_HASH_STORAGE_MARKET.md) — paid storage decision record
 
 **Running a node**
 - [NODE_ROLES.md](docs/NODE_ROLES.md) — the eight roles and what each needs
