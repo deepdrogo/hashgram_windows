@@ -322,6 +322,49 @@ impl<'a> Drive<'a> {
         Ok(no)
     }
 
+    /// Re-encrypts the current content of a file under a fresh key as a new
+    /// version and revokes every live share of it. Used after a device is
+    /// stolen or a share must be cut off: grantees who still hold the old
+    /// capability can fetch the OLD ciphertext by CID (unavoidable), but
+    /// never this or later versions. Returns the new version number.
+    pub async fn rekey(&mut self, id_hex: &str) -> Result<u64, SdkError> {
+        let id = hex::decode(id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
+        let bytes = self.download(id_hex).await?;
+        let shares: Vec<Vec<u8>> = self
+            .one
+            .drive_state
+            .manifest
+            .shares()
+            .iter()
+            .filter(|s| s.entry_id == id && !s.revoked)
+            .map(|s| s.share_id.clone())
+            .collect();
+        for sid in shares {
+            self.revoke(&hex::encode(sid)).await?;
+        }
+        self.update(id_hex, &bytes, "rekeyed").await
+    }
+
+    /// Re-keys every file in the Drive (see [`Self::rekey`]). Slow: every
+    /// object is downloaded, re-sealed and uploaded. Returns the count.
+    pub async fn rekey_all(&mut self) -> Result<usize, SdkError> {
+        let ids: Vec<String> = self
+            .one
+            .drive_state
+            .manifest
+            .entries()
+            .iter()
+            .filter(|e| !e.trashed && e.kind == app::DriveEntryKind::File as i32 && e.current.is_some())
+            .map(|e| hex::encode(&e.id))
+            .collect();
+        let mut n = 0;
+        for id in ids {
+            self.rekey(&id).await?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// Restores an older version.
     pub async fn restore_version(&mut self, id_hex: &str, version_no: u64) -> Result<(), SdkError> {
         let id = hex::decode(id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
