@@ -151,21 +151,29 @@ $notes += "Hashgram One for Windows $version - commit $commit - built $(Get-Date
 $notes += "Installs per user (no admin), data in %LOCALAPPDATA%\Hashgram\data; a v0.1.x vault is migrated in place."
 $notes += ""
 $failures = 0
+$publishedArtefacts = @()
 foreach ($a in $artefacts) {
-    Copy-Item $a.FullName $OutDir -Force
-    $sha = (Get-FileHash $a.FullName -Algorithm SHA256).Hash.ToLower()
-    $mb = [math]::Round($a.Length / 1MB, 2)
-    $line = "{0}  {1}  {2} MB" -f $sha, $a.Name, $mb
+    # GitHub's release upload API silently rewrites spaces in asset names to
+    # dots. Normalize before publishing so latest.json always names the real
+    # downloadable asset (and local/CI releases produce identical names).
+    $publishName = $a.Name -replace " ", "."
+    $destination = Join-Path $OutDir $publishName
+    Copy-Item $a.FullName $destination -Force
+    $published = Get-Item $destination
+    $publishedArtefacts += $published
+    $sha = (Get-FileHash $published.FullName -Algorithm SHA256).Hash.ToLower()
+    $mb = [math]::Round($published.Length / 1MB, 2)
+    $line = "{0}  {1}  {2} MB" -f $sha, $published.Name, $mb
     Write-Host $line
     $notes += $line
-    if ($a.Extension -eq ".exe" -and $a.Length -gt 45MB) { Write-Host "  [FAIL] installer exceeds the 45 MB budget"; $failures++ }
+    if ($published.Extension -eq ".exe" -and $published.Length -gt 45MB) { Write-Host "  [FAIL] installer exceeds the 45 MB budget"; $failures++ }
 }
 
 # Updater manifest: the app fetches <release>/latest/download/latest.json and
 # follows `url` only when `signature` verifies against the compiled-in key.
 if ($updater) {
     Step "updater manifest (latest.json)"
-    $setup = $artefacts | Where-Object { $_.Extension -eq ".exe" } | Select-Object -First 1
+    $setup = $publishedArtefacts | Where-Object { $_.Extension -eq ".exe" } | Select-Object -First 1
     $sigFile = "$($setup.FullName).sig"
     if (-not (Test-Path $sigFile)) { Fail "missing signature $sigFile" }
     $manifest = [ordered]@{
