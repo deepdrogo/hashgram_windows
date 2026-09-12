@@ -98,8 +98,8 @@ export function Shell(props: ParentProps) {
         <div class="flex h-8 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 text-xs" role="status">
           <Download size={14} aria-hidden="true" />
           <span class="flex-1">
-            <Show when={updates.phase() === "available"}>Hashgram {updates.available()?.version} is available.</Show>
-            <Show when={updates.phase() === "downloading"}>Downloading Hashgram {updates.available()?.version}…</Show>
+            <Show when={updates.phase() === "available"}>Hashgram One {updates.available()?.version} is available.</Show>
+            <Show when={updates.phase() === "downloading"}>Downloading Hashgram One {updates.available()?.version}…</Show>
             <Show when={updates.phase() === "installing"}>Signature verified — installing and restarting…</Show>
           </span>
           <Show when={updates.phase() === "available"}>
