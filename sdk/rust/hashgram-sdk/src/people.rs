@@ -260,6 +260,12 @@ impl<'a> People<'a> {
         Ok(prof)
     }
 
+    /// Our display name (used in outgoing mail headers and cards).
+    #[must_use]
+    pub fn my_display_name(&self) -> String {
+        self.one.people_state.my_display_name.clone()
+    }
+
     /// Sets our display name (used in outgoing mail headers and cards).
     pub fn set_my_display_name(&mut self, name: &str) -> Result<(), SdkError> {
         if name.len() > 128 {
