@@ -836,6 +836,49 @@ fn s_i64(v: &serde_json::Value) -> Option<i64> {
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
+/// The `@username` in a `hashgram/username/v1/reverse/{owner}` answer.
+///
+/// The gateway renders `QueryReverseLookupResponse` as
+/// `{"registrations":[{"name":..,"owner":..,..}]}`; there is no top-level
+/// `name`, which is what this used to read, so no username ever showed
+/// next to an address. Several names are possible; the first is shown.
+#[must_use]
+pub(crate) fn username_from_reverse(v: &serde_json::Value) -> Option<String> {
+    let regs = v.get("registrations").and_then(|r| r.as_array())?;
+    regs.iter()
+        .filter_map(|r| r.get("name").and_then(|n| n.as_str()))
+        .find(|n| !n.is_empty())
+        .map(str::to_owned)
+}
+
+/// A resolved `hashgram/username/v1/lookup/{name}` answer: `(owner,
+/// expiry_height)` when the name is registered. The gateway renders
+/// `QueryLookupResponse` as `{"found":bool,"registration":{..},"normalized":..}`.
+#[must_use]
+pub(crate) fn owner_from_lookup(v: &serde_json::Value) -> Option<(String, Option<i64>)> {
+    if v.get("found").and_then(|f| f.as_bool()) == Some(false) {
+        return None;
+    }
+    let reg = v.get("registration").unwrap_or(v);
+    let owner = reg
+        .get("owner")
+        .or_else(|| v.get("owner"))
+        .and_then(|o| o.as_str())
+        .filter(|o| !o.is_empty())?
+        .to_owned();
+    let expiry = reg
+        .get("expiry_height")
+        .or_else(|| v.get("expiry_height"))
+        .and_then(s_i64);
+    Some((owner, expiry))
+}
+
+/// Normalises what a person typed as a username: strips `@`, lowercases.
+#[must_use]
+pub(crate) fn normalise_username(q: &str) -> String {
+    q.trim().trim_start_matches('@').trim().to_lowercase()
+}
+
 /// Reads balance, account and username for the unlocked address.
 #[tauri::command]
 pub async fn wallet_overview(state: S<'_>) -> Result<WalletOverview, String> {
@@ -910,13 +953,7 @@ pub async fn wallet_overview(state: S<'_>) -> Result<WalletOverview, String> {
     let username = chain_read(&state, &format!("hashgram/username/v1/reverse/{address}"))
         .await
         .ok()
-        .and_then(|r| {
-            r.value
-                .get("name")
-                .and_then(|n| n.as_str())
-                .filter(|n| !n.is_empty())
-                .map(str::to_owned)
-        });
+        .and_then(|r| username_from_reverse(&r.value));
     Ok(WalletOverview {
         address,
         balance_uhash,
@@ -1185,12 +1222,26 @@ pub async fn identity_register(
     app: AppHandle,
     label: String,
 ) -> Result<TxSubmitted, String> {
+    register_identity(&state, &app, &label).await
+}
+
+/// The registration itself, shared by the command and the automatic path.
+pub async fn register_identity(
+    state: &AppState,
+    app: &AppHandle,
+    label: &str,
+) -> Result<TxSubmitted, String> {
     let label = if label.trim().is_empty() {
-        state.settings.read().await.device_label.clone()
+        let s = state.settings.read().await.device_label.clone();
+        if s.trim().is_empty() {
+            std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows PC".into())
+        } else {
+            s
+        }
     } else {
         label.trim().to_owned()
     };
-    let (_, client) = chain_client(&state).await?;
+    let (_, client) = chain_client(state).await?;
     let identity = state
         .net
         .identity()
@@ -1238,6 +1289,258 @@ pub async fn identity_register(
         hash: r.txhash,
         summary,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Messaging readiness
+// ---------------------------------------------------------------------------
+
+/// Everything that has to be true before a message can leave this PC or
+/// reach it, checked in one place so the Messages screen can say exactly
+/// which link in the chain is missing instead of "delivery failed".
+#[derive(Debug, Clone, Serialize)]
+pub struct MessagingReadiness {
+    /// The swarm is up and at least one node passed the handshake.
+    pub connected: bool,
+    /// Verified peers with the `store` role (mailboxes live there).
+    pub store_nodes: usize,
+    /// A chain source answers (needed for devices and usernames).
+    pub chain_ok: bool,
+    /// Why not, when not.
+    pub chain_detail: String,
+    /// This account has an identity on chain.
+    pub identity_registered: bool,
+    /// This PC's device key is on chain (and not revoked).
+    pub device_registered: bool,
+    /// Spendable balance, uhash (decimal string).
+    pub balance_uhash: String,
+    /// Enough HASH to pay for the registration transaction.
+    pub can_pay_registration: bool,
+    /// Key packages were accepted by at least one store node this session.
+    pub key_packages_published: bool,
+    /// Local clock minus the latest block time, seconds (nodes refuse
+    /// signed requests more than 300 s off).
+    pub clock_skew_secs: i64,
+    /// Ready to send and receive.
+    pub ready: bool,
+    /// What is missing, one sentence each, in the order to fix them.
+    pub problems: Vec<String>,
+    /// Unix seconds when this was computed.
+    pub checked_at: u64,
+}
+
+/// The fee a registration transaction needs, uhash, with headroom. 200k
+/// gas at the 0.0025 uhash minimum is 500; this asks for a little more so
+/// a busier chain does not turn "ready" into "failed".
+pub const REGISTRATION_FEE_UHASH: u64 = 5_000;
+
+/// Reads the ISO-8601 block time of the latest block and returns the local
+/// clock's offset from it, seconds.
+fn clock_skew_from_latest_block(v: &serde_json::Value) -> Option<i64> {
+    let t = v
+        .get("block")
+        .and_then(|b| b.get("header"))
+        .and_then(|h| h.get("time"))
+        .and_then(|t| t.as_str())?;
+    let parsed =
+        time::OffsetDateTime::parse(t, &time::format_description::well_known::Rfc3339).ok()?;
+    let now = time::OffsetDateTime::now_utc();
+    Some((now - parsed).whole_seconds())
+}
+
+/// Computes messaging readiness. Cheap when the chain is unreachable;
+/// four short reads otherwise.
+pub async fn compute_readiness(state: &AppState) -> Result<MessagingReadiness, String> {
+    let (account, _, address) = state.session_handles().await?;
+    let (this_device_pubkey, _device_id) = {
+        let a = account.lock().await;
+        (
+            hex::encode(a.device().map_err(|e| e.to_string())?.public_key()),
+            a.contents.device_id.clone(),
+        )
+    };
+    let link = state.net.link().await;
+    let (connected, store_nodes) = match &link {
+        Some(l) => {
+            let peers = l.peers().await;
+            (
+                !peers.is_empty(),
+                peers
+                    .iter()
+                    .filter(|p| p.roles.iter().any(|r| r == "store"))
+                    .count(),
+            )
+        }
+        None => (false, 0),
+    };
+    let key_packages_published = state.chat.key_package_stores().await > 0;
+
+    let mut problems = Vec::new();
+    let chain = chain_client(state).await;
+    let (chain_ok, chain_detail) = match &chain {
+        Ok(_) => (true, String::new()),
+        Err(e) => (false, e.clone()),
+    };
+
+    let mut identity_registered = false;
+    let mut device_registered = false;
+    let mut balance_uhash = "0".to_owned();
+    let mut clock_skew_secs = 0i64;
+    if let Ok((_, client)) = &chain {
+        if let Ok(v) = client
+            .query("cosmos/base/tendermint/v1beta1/blocks/latest")
+            .await
+        {
+            clock_skew_secs = clock_skew_from_latest_block(&v).unwrap_or(0);
+        }
+        if let Ok(b) = client.balance(&address).await {
+            balance_uhash = b.to_string();
+        }
+        match account::rotation_count_on_chain(client, &address).await {
+            Ok(Some(_)) => {
+                identity_registered = true;
+                if let Ok(devs) = account::devices_on_chain(client, &address).await {
+                    device_registered = devs
+                        .iter()
+                        .any(|d| d.device_pubkey == this_device_pubkey && !d.revoked);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => problems.push(format!("cannot read the identity registry: {e}")),
+        }
+    }
+    let balance: u64 = balance_uhash.parse().unwrap_or(0);
+    let can_pay_registration = balance >= REGISTRATION_FEE_UHASH;
+
+    if !connected {
+        problems.push("not connected to any Hashgram node yet (see Network)".into());
+    } else if store_nodes == 0 {
+        problems.push(
+            "no connected node serves the store role; messages have nowhere to be held".into(),
+        );
+    }
+    if !chain_ok {
+        problems.push(format!("no chain source: {chain_detail}"));
+    }
+    if clock_skew_secs.abs() > 240 {
+        problems.push(format!(
+            "this PC's clock is {} s {} the network; nodes refuse signed requests more than 300 s off — set the clock to automatic",
+            clock_skew_secs.abs(),
+            if clock_skew_secs > 0 { "ahead of" } else { "behind" }
+        ));
+    }
+    if chain_ok && !device_registered {
+        if !can_pay_registration {
+            problems.push(format!(
+                "this PC's device key is not on chain yet, and the account has {} uhash — someone must send it at least {} uhash (0.005 HASH) first; then registration happens by itself",
+                balance_uhash, REGISTRATION_FEE_UHASH
+            ));
+        } else if !identity_registered {
+            problems.push(
+                "this account's identity is not on chain yet; it is being registered (Wallet → Identity shows progress)".into(),
+            );
+        } else {
+            problems.push(
+                "this PC is not yet one of the account's devices on chain; it is being added (Wallet → Identity)".into(),
+            );
+        }
+    }
+    if connected && store_nodes > 0 && !key_packages_published {
+        problems.push("key packages not yet accepted by a store node; retrying".into());
+    }
+    let ready = connected
+        && store_nodes > 0
+        && chain_ok
+        && device_registered
+        && key_packages_published
+        && clock_skew_secs.abs() <= 240;
+    Ok(MessagingReadiness {
+        connected,
+        store_nodes,
+        chain_ok,
+        chain_detail,
+        identity_registered,
+        device_registered,
+        balance_uhash,
+        can_pay_registration,
+        key_packages_published,
+        clock_skew_secs,
+        ready,
+        problems,
+        checked_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    })
+}
+
+/// Messaging readiness, freshly computed when `refresh` or when nothing
+/// was computed yet; otherwise the last background result.
+#[tauri::command]
+pub async fn messaging_readiness(
+    state: S<'_>,
+    refresh: bool,
+) -> Result<MessagingReadiness, String> {
+    if !refresh {
+        if let Some(r) = state.readiness.read().await.clone() {
+            return Ok(r);
+        }
+    }
+    let r = compute_readiness(&state).await?;
+    *state.readiness.write().await = Some(r.clone());
+    Ok(r)
+}
+
+/// Background: recompute readiness and, when allowed and affordable, put
+/// this PC's device on chain. Returns `true` when a registration was
+/// submitted.
+pub async fn readiness_tick(state: &AppState, app: &AppHandle) -> bool {
+    let Ok(r) = compute_readiness(state).await else {
+        return false;
+    };
+    let changed = state
+        .readiness
+        .read()
+        .await
+        .as_ref()
+        .map(|old| old.ready != r.ready || old.problems != r.problems)
+        .unwrap_or(true);
+    let want_register = r.chain_ok && !r.device_registered && r.can_pay_registration;
+    *state.readiness.write().await = Some(r);
+    if changed {
+        let _ = app.emit("chat:readiness", ());
+    }
+    if !want_register {
+        return false;
+    }
+    if !state.settings.read().await.messaging.auto_register_identity {
+        return false;
+    }
+    // One attempt per five minutes: a submitted transaction needs a block,
+    // and a failed one needs a human to look at Wallet → Identity.
+    {
+        let mut last = state.identity_auto_attempt.lock().await;
+        if last
+            .map(|t| t.elapsed() < std::time::Duration::from_secs(300))
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        *last = Some(Instant::now());
+    }
+    if !state.pending.lock().await.is_empty() {
+        return false;
+    }
+    match register_identity(state, app, "").await {
+        Ok(t) => {
+            tracing::info!(hash = %t.hash, "identity registration submitted automatically");
+            true
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "automatic identity registration failed");
+            false
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,59 +1616,53 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
         let username = chain_read(&state, &format!("hashgram/username/v1/reverse/{q}"))
             .await
             .ok()
-            .and_then(|r| {
-                r.value
-                    .get("name")
-                    .and_then(|n| n.as_str())
-                    .filter(|n| !n.is_empty())
-                    .map(str::to_owned)
-            });
+            .and_then(|r| username_from_reverse(&r.value));
         return Ok(SearchResult::Address {
             address: q.to_owned(),
             username,
         });
     }
     if let Some(name) = q.strip_prefix('@') {
-        let name = name.to_ascii_lowercase();
-        if let Ok(r) = chain_read(&state, &format!("hashgram/username/v1/lookup/{name}")).await {
-            {
-                let owner = r
-                    .value
-                    .get("owner")
-                    .or_else(|| r.value.get("registration").and_then(|x| x.get("owner")))
-                    .and_then(|o| o.as_str())
-                    .unwrap_or("")
-                    .to_owned();
-                if !owner.is_empty() {
-                    let expiry = r
-                        .value
-                        .get("expiry_height")
-                        .or_else(|| {
-                            r.value
-                                .get("registration")
-                                .and_then(|x| x.get("expiry_height"))
-                        })
-                        .and_then(s_i64);
-                    return Ok(SearchResult::Username {
-                        name,
-                        address: owner,
-                        expiry_height: expiry,
-                    });
-                }
-            }
+        let name = normalise_username(name);
+        if name.is_empty() {
+            return Ok(SearchResult::Nothing {
+                reason: "type the name after the @".into(),
+            });
+        }
+        // A chain error (no node relays reads yet) is a real answer the user
+        // needs, not "the name is free".
+        let r = chain_read(&state, &format!("hashgram/username/v1/lookup/{name}"))
+            .await
+            .map_err(|e| format!("cannot look up @{name}: {e}"))?;
+        if let Some((owner, expiry)) = owner_from_lookup(&r.value) {
+            return Ok(SearchResult::Username {
+                name,
+                address: owner,
+                expiry_height: expiry,
+            });
         }
         let confusable = chain_read(&state, &format!("hashgram/username/v1/availability/{name}"))
             .await
             .ok()
             .and_then(|r| {
-                r.value
-                    .get("confusable_with")
-                    .and_then(|c| c.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|x| x.as_str().map(str::to_owned))
-                            .collect()
-                    })
+                // `conflicting_name` is what the chain reports; an older
+                // rendering used a list.
+                let one = r
+                    .value
+                    .get("conflicting_name")
+                    .and_then(|c| c.as_str())
+                    .filter(|c| !c.is_empty())
+                    .map(|c| vec![c.to_owned()]);
+                one.or_else(|| {
+                    r.value
+                        .get("confusable_with")
+                        .and_then(|c| c.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| x.as_str().map(str::to_owned))
+                                .collect()
+                        })
+                })
             })
             .unwrap_or_default();
         return Ok(SearchResult::UsernameAvailable {
@@ -1402,18 +1699,23 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
     }
     // A bare word is tried as a username too, since people forget the @.
     if q.len() >= 3 && q.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        let name = q.to_ascii_lowercase();
-        if let Ok(r) = chain_read(&state, &format!("hashgram/username/v1/lookup/{name}")).await {
-            if let Some(owner) = r
-                .value
-                .get("owner")
-                .and_then(|o| o.as_str())
-                .filter(|o| !o.is_empty())
-            {
-                return Ok(SearchResult::Username {
-                    name,
-                    address: owner.to_owned(),
-                    expiry_height: r.value.get("expiry_height").and_then(s_i64),
+        let name = normalise_username(q);
+        match chain_read(&state, &format!("hashgram/username/v1/lookup/{name}")).await {
+            Ok(r) => {
+                if let Some((owner, expiry)) = owner_from_lookup(&r.value) {
+                    return Ok(SearchResult::Username {
+                        name,
+                        address: owner,
+                        expiry_height: expiry,
+                    });
+                }
+                return Ok(SearchResult::Nothing {
+                    reason: format!("no @{name} on chain; addresses start with hash1"),
+                });
+            }
+            Err(e) => {
+                return Ok(SearchResult::Nothing {
+                    reason: format!("cannot look up @{name}: {e}"),
                 });
             }
         }
@@ -1421,6 +1723,28 @@ pub async fn search_resolve(state: S<'_>, query: String) -> Result<SearchResult,
     Ok(SearchResult::Nothing {
         reason: "not an address, @username, transaction hash, #hashtag or channel".into(),
     })
+}
+
+/// Resolves a recipient typed by hand — an address, `@name` or a bare
+/// name — to an address, for Messages and Send. Errors say why.
+#[tauri::command]
+pub async fn resolve_recipient(state: S<'_>, query: String) -> Result<String, String> {
+    let q = query.trim();
+    let q = q.strip_prefix("hashgram://").unwrap_or(q);
+    if tx::validate_address(q, tx::ADDRESS_PREFIX).is_ok() {
+        return Ok(q.to_owned());
+    }
+    let name = normalise_username(q);
+    if name.len() < 3 || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err("type a hash1… address or an @username (3+ letters, digits or _)".into());
+    }
+    let r = chain_read(&state, &format!("hashgram/username/v1/lookup/{name}"))
+        .await
+        .map_err(|e| format!("cannot look up @{name}: {e}"))?;
+    match owner_from_lookup(&r.value) {
+        Some((owner, _)) => Ok(owner),
+        None => Err(format!("no one has registered @{name} on chain")),
+    }
 }
 
 /// Recent searches.
@@ -1548,5 +1872,63 @@ mod updater_tests {
             ""
         );
         assert_eq!(minisign_key_id("!!!"), "");
+    }
+}
+
+#[cfg(test)]
+mod username_tests {
+    use super::{normalise_username, owner_from_lookup, username_from_reverse};
+
+    #[test]
+    fn reverse_lookup_reads_the_registrations_list() {
+        // The gateway's rendering of QueryReverseLookupResponse.
+        let v = serde_json::json!({
+            "registrations": [
+                {"name": "alice", "owner": "hash1alice", "expiry_height": "7884000"}
+            ]
+        });
+        assert_eq!(username_from_reverse(&v).as_deref(), Some("alice"));
+        // No names: nothing, not an empty string.
+        assert_eq!(
+            username_from_reverse(&serde_json::json!({"registrations": []})),
+            None
+        );
+        // The shape this used to expect never occurs, and must not crash.
+        assert_eq!(
+            username_from_reverse(&serde_json::json!({"name": "x"})),
+            None
+        );
+    }
+
+    #[test]
+    fn lookup_reads_found_and_the_nested_registration() {
+        let hit = serde_json::json!({
+            "found": true,
+            "registration": {"name": "alice", "owner": "hash1alice", "expiry_height": "123"},
+            "normalized": "alice"
+        });
+        assert_eq!(
+            owner_from_lookup(&hit),
+            Some(("hash1alice".to_owned(), Some(123)))
+        );
+        let miss = serde_json::json!({
+            "found": false,
+            "registration": {"name": "", "owner": "", "expiry_height": "0"},
+            "normalized": "nobody"
+        });
+        assert_eq!(owner_from_lookup(&miss), None);
+        // A flat rendering (owner at the top) still resolves.
+        let flat = serde_json::json!({"owner": "hash1flat"});
+        assert_eq!(
+            owner_from_lookup(&flat),
+            Some(("hash1flat".to_owned(), None))
+        );
+    }
+
+    #[test]
+    fn typed_names_are_normalised() {
+        assert_eq!(normalise_username(" @Alice "), "alice");
+        assert_eq!(normalise_username("bob"), "bob");
+        assert_eq!(normalise_username("@"), "");
     }
 }

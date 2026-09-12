@@ -41,6 +41,7 @@ export interface Settings {
   security: { auto_lock_minutes: number; hello_enabled: boolean; clipboard_clear_secs: number };
   appearance: { reduced_motion: boolean; compact: boolean };
   notifications: { messages: boolean; calls: boolean };
+  messaging: { auto_register_identity: boolean };
   media: { autoplay: boolean; cache_mb: number };
   updates: { auto_check: boolean; channel: string };
   advanced: { log_level: string };
@@ -124,6 +125,24 @@ export interface NetSnapshot {
   uptime_secs: number;
   listen_addrs: string[];
   external_addrs: string[];
+  last_error?: string;
+}
+
+/** Everything that must hold before a message can leave or arrive. */
+export interface MessagingReadiness {
+  connected: boolean;
+  store_nodes: number;
+  chain_ok: boolean;
+  chain_detail: string;
+  identity_registered: boolean;
+  device_registered: boolean;
+  balance_uhash: string;
+  can_pay_registration: boolean;
+  key_packages_published: boolean;
+  clock_skew_secs: number;
+  ready: boolean;
+  problems: string[];
+  checked_at: number;
 }
 
 export interface WalletOverview {
@@ -416,6 +435,9 @@ export const ipc = {
   txHasPending: () => call<boolean>("tx_has_pending"),
   identityStatus: () => call<IdentityStatus>("identity_status"),
   identityRegister: (label: string) => call<TxSubmitted>("identity_register", { label }),
+  messagingReadiness: (refresh = false) => call<MessagingReadiness>("messaging_readiness", { refresh }),
+  /** Address, @username or bare username → address; rejects with a reason. */
+  resolveRecipient: (query: string) => call<string>("resolve_recipient", { query }),
   searchResolve: (query: string) => call<SearchResult>("search_resolve", { query }),
   searchRecent: () => call<string[]>("search_recent"),
   qrSvg: (text: string) => call<string>("qr_svg", { text }),
@@ -500,6 +522,7 @@ export type Events = {
   "deep-link": { url: string };
   "chat:changed": { group_id?: string; new?: number; expired?: number };
   "chat:unread": number;
+  "chat:readiness": void;
   "feed:changed": number;
 };
 

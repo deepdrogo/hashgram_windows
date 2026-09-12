@@ -141,6 +141,25 @@ async fn probe_http(url: &str, chain_id: &str) -> (bool, String, u32) {
     }
 }
 
+/// Turns a relay failure into words that say what to do. The one that
+/// matters most: a node built before the chain relay existed decodes a
+/// `ChainQuery` as an empty request and says so; that is the node being out
+/// of date, not this app or the network being down.
+#[must_use]
+pub fn explain_relay_error(e: &str) -> String {
+    let lower = e.to_ascii_lowercase();
+    if lower.contains("empty request") || (lower.contains("unsupported") && lower.contains("relay"))
+    {
+        "the connected node runs an older hashgram-node without the chain relay; its operator must update it (or add an HTTPS endpoint in Settings → Network)".to_owned()
+    } else if lower.contains("gateway unreachable") || lower.contains("gateway timed out") {
+        "the connected node's chain gateway (its local hashgramd REST API) is down; the operator must start it".to_owned()
+    } else if lower.contains("rate_limited") {
+        "the connected node is rate-limiting this app; retrying shortly".to_owned()
+    } else {
+        e.to_owned()
+    }
+}
+
 impl ChainAccess {
     /// Sets the chain id every source must be on.
     pub async fn set_chain_id(&self, chain_id: &str) {
@@ -263,7 +282,7 @@ impl ChainAccess {
                                     (false, format!("wrong network: {network}"))
                                 }
                             }
-                            Ok(Err(e)) => (false, e.to_string()),
+                            Ok(Err(e)) => (false, explain_relay_error(&e.to_string())),
                             Err(_) => (false, "relay timed out".into()),
                         }
                     }
@@ -317,7 +336,22 @@ impl ChainAccess {
             }
             None => {
                 *self.active.write().await = None;
-                Err("no chain source is reachable: no local node, no relay node answered, no HTTPS endpoint configured".into())
+                // Say which source failed and why, in the order they were
+                // tried; "nothing reachable" alone sends people looking at
+                // their own connection when the node is at fault.
+                let why: Vec<String> = self
+                    .health
+                    .read()
+                    .await
+                    .iter()
+                    .filter(|h| !h.ok)
+                    .map(|h| match &h.source {
+                        Source::LocalNode { .. } => format!("local node: {}", h.detail),
+                        Source::P2pRelay => format!("P2P relay: {}", h.detail),
+                        Source::Https { url } => format!("{url}: {}", h.detail),
+                    })
+                    .collect();
+                Err(format!("no chain source is reachable — {}", why.join("; ")))
             }
         }
     }

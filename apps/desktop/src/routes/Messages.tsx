@@ -4,13 +4,13 @@
 import { createEffect, createMemo, createResource, createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Send, Paperclip, Mic, Square, Phone, Video, Info, Plus, Check, CheckCheck, Clock, Reply, Trash2, Pencil, Smile, RefreshCw, Users, Search } from "lucide-solid";
+import { Send, Paperclip, Mic, Square, Phone, Video, Info, Plus, Check, CheckCheck, Clock, Reply, Trash2, Pencil, Smile, RefreshCw, Users, Search, AlertTriangle } from "lucide-solid";
 import { Button, Dialog, Field, Input, Notice, Skeleton, Empty, Badge, Switch } from "~/components/ui";
 import { PersonLabel, Mono, Avatar } from "~/components/identity";
 import { VirtualList } from "~/components/VirtualList";
-import { ipc, on, type ConversationMeta, type MessageView, type ChatInfo } from "~/lib/ipc";
+import { ipc, on, type ConversationMeta, type MessageView, type ChatInfo, type MessagingReadiness } from "~/lib/ipc";
 import { store } from "~/lib/store";
-import { formatTime, isHashAddress, relTime, truncateMiddle } from "~/lib/format";
+import { formatTime, relTime, truncateMiddle } from "~/lib/format";
 import { attachmentUrl, bytes, durationLabel } from "~/lib/media";
 import { CallPanel } from "./Calls";
 
@@ -28,6 +28,7 @@ export function Messages() {
   const params = useParams<{ group?: string }>();
   const navigate = useNavigate();
   const [convs, { refetch: refetchConvs }] = createResource(() => ipc.chatList().catch(() => [] as ConversationMeta[]));
+  const [readiness, { refetch: refetchReadiness }] = createResource(() => ipc.messagingReadiness(false).catch(() => null as MessagingReadiness | null));
   const [newOpen, setNewOpen] = createSignal(false);
   const [search, setSearch] = createSignal("");
   const [results, setResults] = createSignal<MessageView[] | null>(null);
@@ -36,7 +37,13 @@ export function Messages() {
 
   onMount(async () => {
     const un = await on("chat:changed", () => void refetchConvs());
-    onCleanup(() => un());
+    const un2 = await on("chat:readiness", () => void refetchReadiness());
+    const un3 = await on("net:changed", () => void refetchReadiness());
+    onCleanup(() => {
+      un();
+      un2();
+      un3();
+    });
   });
 
   const runSearch = async (q: string) => {
@@ -81,13 +88,47 @@ export function Messages() {
           )}
         </Show>
       </aside>
-      <section class="min-w-0 flex-1">
-        <Show when={selected()} fallback={<Empty title="Pick a conversation">End-to-end encrypted with MLS. Store nodes keep only ciphertext until your devices fetch it.</Empty>}>
-          <Thread groupId={selected()} me={me()} conv={convs()?.find((c) => c.group_id === selected())} onChanged={() => void refetchConvs()} />
-        </Show>
+      <section class="flex min-w-0 flex-1 flex-col">
+        <ReadinessBanner r={readiness() ?? null} onRecheck={() => void ipc.messagingReadiness(true).then(() => refetchReadiness()).catch(() => undefined)} />
+        <div class="min-h-0 flex-1">
+          <Show when={selected()} fallback={<Empty title="Pick a conversation">End-to-end encrypted with MLS. Store nodes keep only ciphertext until your devices fetch it.</Empty>}>
+            <Thread groupId={selected()} me={me()} conv={convs()?.find((c) => c.group_id === selected())} onChanged={() => void refetchConvs()} />
+          </Show>
+        </div>
       </section>
       <NewConversation open={newOpen()} onClose={() => setNewOpen(false)} onCreated={(g) => { void refetchConvs(); navigate(`/messages/${g}`); }} />
     </div>
+  );
+}
+
+/**
+ * What stands between this PC and a delivered message, named. Hidden when
+ * everything holds; otherwise every missing piece in the order to fix it,
+ * because "delivery failed" on its own sent people looking in the wrong
+ * place (their Wi‑Fi) for what was a node or a registration.
+ */
+function ReadinessBanner(props: { r: MessagingReadiness | null; onRecheck: () => void }) {
+  return (
+    <Show when={props.r && !props.r.ready}>
+      <div class="border-b border-border bg-surface-2 px-4 py-2 text-xs" role="status">
+        <div class="flex items-start gap-2">
+          <AlertTriangle size={14} class="mt-0.5 shrink-0" />
+          <div class="min-w-0 flex-1">
+            <p class="font-medium">Messaging is not ready on this PC yet</p>
+            <ul class="mt-1 list-disc space-y-0.5 pl-4 text-muted">
+              <For each={props.r!.problems}>{(p) => <li>{p}</li>}</For>
+            </ul>
+            <p class="mono mt-1 text-[10px] text-muted">
+              nodes {props.r!.connected ? "✓" : "✗"} · store {props.r!.store_nodes} · chain {props.r!.chain_ok ? "✓" : "✗"} · identity {props.r!.identity_registered ? "✓" : "✗"} · this device {props.r!.device_registered ? "✓" : "✗"} · key packages {props.r!.key_packages_published ? "✓" : "✗"}
+              <Show when={Math.abs(props.r!.clock_skew_secs) > 60}> · clock {props.r!.clock_skew_secs > 0 ? "+" : ""}{props.r!.clock_skew_secs}s</Show>
+            </p>
+          </div>
+          <Button size="sm" variant="ghost" onClick={props.onRecheck} title="Check again now">
+            <RefreshCw size={12} />
+          </Button>
+        </div>
+      </div>
+    </Show>
   );
 }
 
@@ -471,10 +512,10 @@ function ChatInfoDialog(props: { open: boolean; onClose: () => void; groupId: st
               </ul>
             </div>
             <Show when={!props.conv?.direct}>
-              <Field label="Add a member by address">
+              <Field label="Add a member by address or @username">
                 <div class="flex gap-2">
-                  <Input mono value={addr()} onInput={(e) => setAddr(e.currentTarget.value)} placeholder="hash1…" />
-                  <Button variant="secondary" disabled={!isHashAddress(addr())} onClick={() => void ipc.chatAddMember(props.groupId, addr().trim()).then(() => { setAddr(""); void refetch(); props.onChanged(); }).catch((e) => store.toast(String(e), "error"))}>
+                  <Input mono value={addr()} onInput={(e) => setAddr(e.currentTarget.value)} placeholder="hash1… or @name" />
+                  <Button variant="secondary" disabled={addr().trim().length < 3} onClick={() => void ipc.resolveRecipient(addr()).then((a) => ipc.chatAddMember(props.groupId, a)).then(() => { setAddr(""); void refetch(); props.onChanged(); }).catch((e) => store.toast(String(e), "error"))}>
                     Add
                   </Button>
                 </div>
@@ -524,13 +565,17 @@ function NewConversation(props: { open: boolean; onClose: () => void; onCreated:
     setBusy(true);
     setErr(null);
     try {
-      let target = addr().trim();
-      if (target.startsWith("@")) {
-        const r = await ipc.searchResolve(target);
-        if (r.kind !== "username") throw new Error("no such username on chain");
-        target = r.address;
+      // Anything typed — hash1… address, @name or a bare name — resolves on
+      // chain to an address; the error says why when it does not.
+      let g: string;
+      if (mode() === "direct") {
+        const target = await ipc.resolveRecipient(addr());
+        g = await ipc.chatStartDirect(target);
+      } else {
+        const resolved: string[] = [];
+        for (const m of memberList()) resolved.push(await ipc.resolveRecipient(m));
+        g = await ipc.chatCreateGroup(name(), resolved);
       }
-      const g = mode() === "direct" ? await ipc.chatStartDirect(target) : await ipc.chatCreateGroup(name(), memberList());
       props.onCreated(g);
       props.onClose();
       setAddr("");
@@ -551,7 +596,7 @@ function NewConversation(props: { open: boolean; onClose: () => void; onCreated:
       footer={
         <>
           <Button variant="secondary" onClick={props.onClose}>Cancel</Button>
-          <Button onClick={create} loading={busy()} disabled={mode() === "direct" ? !addr().trim() : !name().trim() || !memberList().every(isHashAddress) || !memberList().length}>
+          <Button onClick={create} loading={busy()} disabled={mode() === "direct" ? !addr().trim() : !name().trim() || !memberList().length}>
             Start
           </Button>
         </>
@@ -571,14 +616,16 @@ function NewConversation(props: { open: boolean; onClose: () => void; onCreated:
           <Field label="Group name">
             <Input value={name()} onInput={(e) => setName(e.currentTarget.value)} />
           </Field>
-          <Field label="Member addresses (space or comma separated)">
-            <Input mono value={members()} onInput={(e) => setMembers(e.currentTarget.value)} placeholder="hash1… hash1…" />
+          <Field label="Members: addresses or @usernames (space or comma separated)">
+            <Input mono value={members()} onInput={(e) => setMembers(e.currentTarget.value)} placeholder="hash1… @name …" />
           </Field>
         </Show>
         <Show when={err()}>
           <Notice strong>{err()}</Notice>
         </Show>
-        <Notice>If someone cannot be reached, they have not published a key package yet — they need to open Hashgram once while online.</Notice>
+        <Notice>
+          To be reachable, a person needs two things: their device key on chain (Hashgram does this by itself once the account holds a little HASH) and a key package on a store node (published when they open Hashgram online). The error names whichever is missing.
+        </Notice>
       </div>
     </Dialog>
   );

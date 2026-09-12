@@ -84,6 +84,8 @@ fn build_state() -> Result<Arc<AppState>, String> {
         pending: tokio::sync::Mutex::new(Vec::new()),
         chat: Arc::new(chat::ChatHub::default()),
         social: Arc::new(social_hub::SocialHub::default()),
+        identity_auto_attempt: tokio::sync::Mutex::new(None),
+        readiness: tokio::sync::RwLock::new(None),
     }))
 }
 
@@ -94,15 +96,35 @@ fn spawn_background(app: tauri::AppHandle, state: Arc<AppState>) {
         let st = state.clone();
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
-            let s = st.settings.read().await.clone();
-            if let Ok(identity) = net::identity_for(&s) {
-                st.chain.set_chain_id(&identity.chain_id).await;
+            // A start can fail for reasons that pass (a port in use, the
+            // network adapter not up yet at login). Keep trying with a
+            // growing pause instead of leaving the app offline until a
+            // manual "reconnect"; the loop ends once a link is running or
+            // someone else (settings change, reconnect) started one.
+            let mut pause = Duration::from_secs(2);
+            loop {
+                if st.net.link().await.is_some() {
+                    break;
+                }
+                let s = st.settings.read().await.clone();
+                if let Ok(identity) = net::identity_for(&s) {
+                    st.chain.set_chain_id(&identity.chain_id).await;
+                }
+                match st.net.start(&s, &st.db).await {
+                    Ok(_) => {
+                        tracing::info!("network link started");
+                        let _ = app.emit("net:changed", ());
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, retry_in_secs = pause.as_secs(), "network link did not start");
+                        st.net.note_start_error(&e).await;
+                        let _ = app.emit("net:changed", ());
+                    }
+                }
+                tokio::time::sleep(pause).await;
+                pause = (pause * 2).min(Duration::from_secs(30));
             }
-            match st.net.start(&s, &st.db).await {
-                Ok(_) => tracing::info!("network link started"),
-                Err(e) => tracing::warn!(error = %e, "network link did not start"),
-            }
-            let _ = app.emit("net:changed", ());
         });
     }
     // 2. Periodic: latency, pending transactions, auto-lock, net events.
@@ -142,14 +164,17 @@ fn spawn_background(app: tauri::AppHandle, state: Arc<AppState>) {
         tauri::async_runtime::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(4));
             let mut n: u64 = 0;
+            let mut since_open: u64 = 0;
             let mut published_keys = false;
             loop {
                 tick.tick().await;
                 n += 1;
                 if !st.chat.is_open().await {
                     published_keys = false;
+                    since_open = 0;
                     continue;
                 }
+                since_open += 1;
                 if !published_keys {
                     if let Ok((account, _, _)) = st.session_handles().await {
                         if let (Some(link), Some(identity)) =
@@ -186,6 +211,14 @@ fn spawn_background(app: tauri::AppHandle, state: Arc<AppState>) {
                     if let Err(e) = commands_social::refresh_feed(&st, &app).await {
                         tracing::debug!(error = %e, "feed refresh");
                     }
+                }
+                // Readiness: soon after unlock, then every ~40 s. This is
+                // also where the device key gets on chain by itself once
+                // the account can pay for it.
+                if (since_open == 2 || since_open.is_multiple_of(10))
+                    && commands::readiness_tick(&st, &app).await
+                {
+                    let _ = app.emit("chat:readiness", ());
                 }
             }
         });
@@ -320,6 +353,8 @@ pub fn run() {
             commands::tx_has_pending,
             commands::identity_status,
             commands::identity_register,
+            commands::messaging_readiness,
+            commands::resolve_recipient,
             commands::search_resolve,
             commands::search_recent,
             commands::qr_svg,

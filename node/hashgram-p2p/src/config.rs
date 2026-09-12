@@ -329,7 +329,7 @@ fn default_max_per_peer() -> usize {
     2
 }
 fn default_max_per_subnet() -> usize {
-    4
+    crate::limits::DEFAULT_MAX_PER_SUBNET
 }
 fn default_max_inbound() -> usize {
     128

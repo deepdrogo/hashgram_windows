@@ -73,6 +73,21 @@ Publishing a new version:
 The private key never enters the repository; losing it means installed apps
 cannot verify future updates, so keep an offline copy.
 
+## When messages or @usernames do not work
+
+Messages needs three things and the banner at the top of Messages names
+whichever is missing: a connected node with the `store` role, a chain
+source (the P2P relay of a `relay`/`bootstrap` node built **after**
+commit `c9470f4`, which added `ChainQuery`; an older node answers
+`invalid: empty request` and Network → Chain sources says so), and this
+PC's device key on chain (automatic once the account holds ~0.005 HASH).
+Operator steps for the genesis node are in `docs/NODE_UPDATE_KA.md`.
+
+End-to-end proof on one Windows machine, no chain needed:
+`powershell -File scripts/testnet/messaging-devnet.ps1` (two nodes with
+`relay`+`store`, two clients, MLS Welcome and text both ways over the real
+swarm) and `scripts/testnet/chain-relay-devnet.ps1` (cross-checked reads).
+
 ## Rules enforced by tests
 
 - Accounts are 24 words only; login is restore; no server registration.

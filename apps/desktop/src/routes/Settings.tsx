@@ -113,6 +113,12 @@ export function Settings() {
                 <div class="p-4">
                   <Switch label="Messages" hint="Native Windows toast for new messages" checked={d().notifications.messages} onChange={(v) => patch((x) => (x.notifications.messages = v))} />
                   <Switch label="Calls" hint="Toast for incoming calls" checked={d().notifications.calls} onChange={(v) => patch((x) => (x.notifications.calls = v))} />
+                  <Switch
+                    label="Register this PC's device key on chain automatically"
+                    hint="Messaging needs your device's public key on chain (MsgCreateIdentity / MsgAddDevice, about 0.0005 HASH in fees). With this on, it happens by itself as soon as the account holds HASH; off, do it in Wallet → Identity."
+                    checked={d().messaging?.auto_register_identity ?? true}
+                    onChange={(v) => patch((x) => { x.messaging = { ...(x.messaging ?? { auto_register_identity: true }), auto_register_identity: v }; })}
+                  />
                 </div>
               </Card>
             </Show>

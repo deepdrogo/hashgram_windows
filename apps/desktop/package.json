@@ -1,7 +1,7 @@
 {
   "name": "hashgram-desktop",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Hashgram for Windows: wallet, messenger, social network, calls, identity and node — talking to the peer-to-peer network, never to one server.",
   "type": "module",
   "scripts": {

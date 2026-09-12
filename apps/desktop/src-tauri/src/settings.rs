@@ -86,6 +86,24 @@ fn default_true() -> bool {
     true
 }
 
+/// Messaging.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessagingSettings {
+    /// Put this PC's device key on chain by itself (`MsgCreateIdentity` or
+    /// `MsgAddDevice`, a fraction of a cent in fees) as soon as the account
+    /// has HASH, so people can message it without a manual step.
+    #[serde(default = "default_true")]
+    pub auto_register_identity: bool,
+}
+
+impl Default for MessagingSettings {
+    fn default() -> Self {
+        Self {
+            auto_register_identity: true,
+        }
+    }
+}
+
 /// Media.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaSettings {
@@ -140,6 +158,9 @@ pub struct Settings {
     pub appearance: AppearanceSettings,
     /// Notifications.
     pub notifications: NotificationSettings,
+    /// Messaging.
+    #[serde(default)]
+    pub messaging: MessagingSettings,
     /// Media.
     pub media: MediaSettings,
     /// Updates.
@@ -177,6 +198,7 @@ impl Default for Settings {
                 messages: true,
                 calls: true,
             },
+            messaging: MessagingSettings::default(),
             media: MediaSettings {
                 autoplay: true,
                 cache_mb: default_cache_mb(),

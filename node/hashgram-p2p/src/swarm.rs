@@ -31,7 +31,8 @@ use libp2p::identity::Keypair;
 use libp2p::kad;
 use libp2p::multiaddr::Protocol;
 use libp2p::request_response::{self, OutboundRequestId, ResponseChannel};
-use libp2p::swarm::{ConnectionId, SwarmEvent};
+use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
+use libp2p::swarm::{ConnectionId, DialError, SwarmEvent};
 use libp2p::{autonat, identify, noise, yamux, Multiaddr, PeerId, Swarm};
 use prometheus_client::registry::Registry;
 use tokio::sync::{mpsc, oneshot};
@@ -58,6 +59,14 @@ const RATE_BURST: f64 = 80.0;
 const TICK: Duration = Duration::from_secs(1);
 /// How often the peerstore is flushed.
 const PEERSTORE_FLUSH: Duration = Duration::from_secs(60);
+/// Shortest interval between two rounds of bootstrap dialling while the
+/// node is below `min_peers`. A round is cheap once peers are connected
+/// (they are skipped), but a peer that is down would otherwise be dialled
+/// every second.
+const BOOTSTRAP_RETRY: Duration = Duration::from_secs(3);
+/// Shortest interval between two Kademlia bootstrap queries started from
+/// the tick (Kademlia also runs its own every five minutes).
+const KAD_BOOTSTRAP: Duration = Duration::from_secs(60);
 
 /// A request the swarm could not complete.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -438,6 +447,8 @@ struct Runner {
     /// disconnecting. Closing first would swallow the reason.
     pending_reject: HashMap<PeerId, (ReasonCode, String, Instant)>,
     buckets: HashMap<PeerId, Bucket>,
+    /// Connections refused by the limits and closed before being counted.
+    refused: HashSet<ConnectionId>,
     limits: ConnectionLimits,
     scores: Scoreboard,
     peerstore: Peerstore,
@@ -446,6 +457,8 @@ struct Runner {
     reachability: &'static str,
     bootstrap_candidates: Vec<Multiaddr>,
     last_peerstore_flush: Instant,
+    last_bootstrap_dial: Instant,
+    last_kad_bootstrap: Instant,
 }
 
 /// Starts the swarm. Returns the handle, the event stream and the task.
@@ -468,15 +481,13 @@ pub fn start(
     let network_id = identity.network_id.clone();
     let cfg_for_behaviour = cfg.clone();
 
+    // QUIC first, then TCP through the wrapper in `transport.rs` (Windows
+    // TCP dials must not reuse the listening port; see that module).
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
-        .with_tcp(
-            libp2p::tcp::Config::default().nodelay(true),
-            noise::Config::new,
-            yamux::Config::default,
-        )
-        .map_err(|e| StartError::Transport(e.to_string()))?
         .with_quic()
+        .with_other_transport(crate::transport::tcp_transport)
+        .map_err(|e| StartError::Transport(e.to_string()))?
         .with_dns()
         .map_err(|e| StartError::Transport(e.to_string()))?
         .with_relay_client(noise::Config::new, yamux::Config::default)
@@ -525,13 +536,29 @@ pub fn start(
                 .with(Protocol::Tcp(cfg.listen_port)),
         );
     }
+    // One transport failing to bind (a UDP port already taken, a firewall
+    // policy refusing QUIC) must not take the other down with it: a node
+    // that can still speak TCP is a node. Only when nothing listens is it
+    // an error.
+    let mut listening = 0usize;
+    let mut last_listen_error: Option<StartError> = None;
     for addr in listen {
-        swarm
-            .listen_on(addr.clone())
-            .map_err(|e| StartError::Listen {
-                addr: addr.to_string(),
-                reason: e.to_string(),
-            })?;
+        match swarm.listen_on(addr.clone()) {
+            Ok(_) => listening += 1,
+            Err(e) => {
+                warn!(%addr, error = %e, "listen failed; continuing with the other transport");
+                last_listen_error = Some(StartError::Listen {
+                    addr: addr.to_string(),
+                    reason: e.to_string(),
+                });
+            }
+        }
+    }
+    if listening == 0 {
+        return Err(last_listen_error.unwrap_or(StartError::Listen {
+            addr: String::new(),
+            reason: "no transport enabled".into(),
+        }));
     }
     for a in &cfg.announce_addrs {
         if let Ok(ma) = a.parse::<Multiaddr>() {
@@ -582,6 +609,7 @@ pub fn start(
         banned: HashMap::new(),
         pending_reject: HashMap::new(),
         buckets: HashMap::new(),
+        refused: HashSet::new(),
         limits,
         scores: Scoreboard::new(),
         peerstore,
@@ -590,6 +618,8 @@ pub fn start(
         reachability: "unknown",
         bootstrap_candidates,
         last_peerstore_flush: Instant::now(),
+        last_bootstrap_dial: Instant::now(),
+        last_kad_bootstrap: Instant::now(),
     };
 
     let task = tokio::spawn(runner.run());
@@ -738,7 +768,7 @@ impl Runner {
     fn on_command(&mut self, cmd: Command) {
         match cmd {
             Command::Dial(addr, reply) => {
-                let _ = reply.send(self.swarm.dial(addr).map_err(|e| e.to_string()));
+                let _ = reply.send(self.dial_grouped(vec![addr]).map(|_| ()));
             }
             Command::Request {
                 peer,
@@ -875,22 +905,37 @@ impl Runner {
             return;
         }
         if !self.connected.contains_key(&peer) {
-            let mut dialled = false;
-            for addr in addrs {
-                let addr = if peer_of(&addr).is_some() {
-                    addr
-                } else {
-                    addr.with(Protocol::P2p(peer))
-                };
-                if self.swarm.dial(addr).is_ok() {
-                    dialled = true;
+            // One dial per peer with every address we have: libp2p races
+            // them and keeps the first that succeeds (QUIC or TCP), so a
+            // blocked transport costs nothing and the peer sees one
+            // connection, not one per address.
+            let mut all: Vec<Multiaddr> = addrs
+                .into_iter()
+                .map(|a| {
+                    if peer_of(&a).is_some() {
+                        a
+                    } else {
+                        a.with(Protocol::P2p(peer))
+                    }
+                })
+                .collect();
+            for a in self.addrs_of(&peer) {
+                if !all.contains(&a) {
+                    all.push(a);
                 }
             }
-            if !dialled && self.addrs_of(&peer).is_empty() && self.swarm.dial(peer).is_err() {
-                let _ = reply.send(Err(RequestError::Unreachable(
-                    "no address and dial failed".into(),
-                )));
-                return;
+            let opts = DialOpts::peer_id(peer)
+                .addresses(all)
+                .condition(PeerCondition::DisconnectedAndNotDialing)
+                .build();
+            match self.swarm.dial(opts) {
+                Ok(()) => {}
+                // Already dialling: the queued request rides that attempt.
+                Err(DialError::DialPeerConditionFalse(_)) => {}
+                Err(e) => {
+                    let _ = reply.send(Err(RequestError::Unreachable(format!("dial failed: {e}"))));
+                    return;
+                }
             }
         }
         self.queued.entry(peer).or_default().push_back(Queued {
@@ -941,10 +986,11 @@ impl Runner {
             } => self.on_connected(peer_id, connection_id, endpoint, num_established.get()),
             SwarmEvent::ConnectionClosed {
                 peer_id,
+                connection_id,
                 endpoint,
                 num_established,
                 ..
-            } => self.on_closed(peer_id, &endpoint, num_established),
+            } => self.on_closed(peer_id, connection_id, &endpoint, num_established),
             SwarmEvent::OutgoingConnectionError {
                 peer_id: Some(peer),
                 error,
@@ -975,8 +1021,13 @@ impl Runner {
             self.limits.allow_outbound(&peer.to_string(), banned)
         };
         if !decision.is_allowed() {
-            debug!(%peer, %decision, "connection refused by local limits");
+            // Info, not debug: an operator whose users cannot connect needs
+            // to see this in the journal under the default filter.
+            info!(%peer, %ip, %decision, "connection refused by local limits");
             self.metrics.connections_refused.inc();
+            // Remember it so its close does not debit a connection that was
+            // never credited (that drift loosened the limits over time).
+            self.refused.insert(connection);
             self.swarm.close_connection(connection);
             return;
         }
@@ -1014,10 +1065,18 @@ impl Runner {
         }
     }
 
-    fn on_closed(&mut self, peer: PeerId, endpoint: &ConnectedPoint, remaining: u32) {
+    fn on_closed(
+        &mut self,
+        peer: PeerId,
+        connection: ConnectionId,
+        endpoint: &ConnectedPoint,
+        remaining: u32,
+    ) {
         let ip = remote_ip(endpoint).unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
-        self.limits
-            .closed(&peer.to_string(), ip, endpoint.is_listener());
+        if !self.refused.remove(&connection) {
+            self.limits
+                .closed(&peer.to_string(), ip, endpoint.is_listener());
+        }
         if remaining == 0 {
             self.connected.remove(&peer);
             self.unverified_since.remove(&peer);
@@ -1486,10 +1545,14 @@ impl Runner {
         self.scores.prune(now, Duration::from_secs(6 * 3600));
         self.buckets.retain(|p, _| self.connected.contains_key(p));
 
-        if self.verified.len() < self.cfg.min_peers {
+        if self.verified.len() < self.cfg.min_peers
+            && now.duration_since(self.last_bootstrap_dial) >= BOOTSTRAP_RETRY
+        {
+            self.last_bootstrap_dial = now;
             self.dial_bootstrap(4);
         }
-        if self.kad_size() > 0 {
+        if self.kad_size() > 0 && now.duration_since(self.last_kad_bootstrap) >= KAD_BOOTSTRAP {
+            self.last_kad_bootstrap = now;
             let _ = self.swarm.behaviour_mut().kad.bootstrap();
         }
 
@@ -1502,26 +1565,42 @@ impl Runner {
     }
 
     fn dial_bootstrap(&mut self, max: usize) {
-        let mut dialled = 0;
         let candidates = std::mem::take(&mut self.bootstrap_candidates);
-        let mut keep = Vec::with_capacity(candidates.len());
-        for addr in candidates {
-            let already = peer_of(&addr)
+        let local = *self.swarm.local_peer_id();
+        // Every address of one peer goes into one dial (QUIC and TCP of the
+        // same node race; the first to connect wins), and a peer already
+        // connected, banned, or being dialled is not dialled again. Before
+        // this, each address was dialled on its own with no peer condition,
+        // which opened two or three connections to the same node and used
+        // up its per-subnet inbound slots two or three times as fast.
+        let mut ordered: Vec<(Option<PeerId>, Vec<Multiaddr>)> = Vec::new();
+        for addr in &candidates {
+            let pid = peer_of(addr);
+            if pid == Some(local) {
+                continue;
+            }
+            match pid.and_then(|p| ordered.iter_mut().find(|(q, _)| *q == Some(p))) {
+                Some((_, list)) => list.push(addr.clone()),
+                None => ordered.push((pid, vec![addr.clone()])),
+            }
+        }
+        let mut dialled = 0usize;
+        for (pid, addrs) in ordered {
+            if dialled >= max {
+                break;
+            }
+            let skip = pid
                 .is_some_and(|p| self.connected.contains_key(&p) || self.banned.contains_key(&p));
-            if already || dialled >= max {
-                keep.push(addr);
+            if skip {
                 continue;
             }
-            if peer_of(&addr) == Some(*self.swarm.local_peer_id()) {
-                continue;
+            match self.dial_grouped(addrs) {
+                Ok(n) => dialled += n,
+                Err(e) => debug!(error = %e, "bootstrap dial not started"),
             }
-            match self.swarm.dial(addr.clone()) {
-                Ok(()) => dialled += 1,
-                Err(e) => debug!(%addr, %e, "bootstrap dial not started"),
-            }
-            keep.push(addr);
         }
         // Rotate so the next round tries different candidates first.
+        let mut keep = candidates;
         if !keep.is_empty() {
             let by = dialled.min(keep.len());
             keep.rotate_left(by);
@@ -1532,6 +1611,50 @@ impl Runner {
             if !self.bootstrap_candidates.contains(&addr) {
                 self.bootstrap_candidates.push(addr);
             }
+        }
+    }
+
+    /// Dials a set of addresses as one attempt per peer id. Addresses that
+    /// carry no `/p2p/` component are dialled individually. Returns how many
+    /// dial attempts were started; a peer already connected or already
+    /// being dialled counts as zero and is not an error.
+    fn dial_grouped(&mut self, addrs: Vec<Multiaddr>) -> Result<usize, String> {
+        let mut by_peer: Vec<(PeerId, Vec<Multiaddr>)> = Vec::new();
+        let mut anonymous = Vec::new();
+        for a in addrs {
+            match peer_of(&a) {
+                Some(p) => match by_peer.iter_mut().find(|(q, _)| *q == p) {
+                    Some((_, list)) => list.push(a),
+                    None => by_peer.push((p, vec![a])),
+                },
+                None => anonymous.push(a),
+            }
+        }
+        let mut started = 0usize;
+        let mut last_err: Option<String> = None;
+        for (peer, list) in by_peer {
+            if self.connected.contains_key(&peer) || self.banned.contains_key(&peer) {
+                continue;
+            }
+            let opts = DialOpts::peer_id(peer)
+                .addresses(list)
+                .condition(PeerCondition::DisconnectedAndNotDialing)
+                .build();
+            match self.swarm.dial(opts) {
+                Ok(()) => started += 1,
+                Err(DialError::DialPeerConditionFalse(_)) => {}
+                Err(e) => last_err = Some(e.to_string()),
+            }
+        }
+        for a in anonymous {
+            match self.swarm.dial(a) {
+                Ok(()) => started += 1,
+                Err(e) => last_err = Some(e.to_string()),
+            }
+        }
+        match (started, last_err) {
+            (0, Some(e)) => Err(e),
+            _ => Ok(started),
         }
     }
 
