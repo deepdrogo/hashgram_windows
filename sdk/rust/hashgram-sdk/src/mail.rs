@@ -276,6 +276,41 @@ impl<'a> Mail<'a> {
     pub async fn send(&mut self, mut draft: m::Draft) -> Result<String, SdkError> {
         draft.from = self.my_address().await;
         let out = draft.build_all()?;
+        let id = self.send_built(out.main, out.bcc_copies).await?;
+        // Live Drive attachments: remember the group so updates flow.
+        for a in &draft.attachments {
+            if let Some(app::mail_attachment::Source::Drive(cap)) = &a.source {
+                if cap.mode == app::DriveShareMode::Live as i32 {
+                    debug!(share = hex::encode(&cap.share_id), "live attachment sent");
+                }
+            }
+        }
+        Ok(id)
+    }
+
+    /// Delivers already-built copies of one message: the To+CC copy to its
+    /// participant group and each BCC copy to a sender+recipient group,
+    /// then files our Sent record. Returns the message id (hex).
+    ///
+    /// This is the delivery half of [`Mail::send`], exposed for callers
+    /// that must adjust the built `MailMessage` before it leaves — the
+    /// external mail gateway sets `origin = EXTERNAL_GATEWAY` and fills
+    /// `external` (see `docs/MAIL_GATEWAY.md`); `Draft::build_all` always
+    /// produces native messages and that is the right default for every
+    /// other caller. The messages are re-validated here, so a caller cannot
+    /// bypass the bounds in `hashgram_app::mail::validate`.
+    pub async fn send_built(
+        &mut self,
+        main: Option<app::MailMessage>,
+        bcc_copies: Vec<(app::MailAddress, app::MailMessage)>,
+    ) -> Result<String, SdkError> {
+        if let Some(main) = &main {
+            m::validate(main)?;
+        }
+        for (_, copy) in &bcc_copies {
+            m::validate(copy)?;
+        }
+        let out = m::Outgoing { main, bcc_copies };
         let me = self.one.account.address().to_owned();
         let mut sent_record: Option<MailRecord> = None;
         let mut errors = Vec::new();
@@ -329,14 +364,6 @@ impl<'a> Mail<'a> {
         if self.one.mail_state.settings.keep_sent {
             let id = hex::encode(&rec.message.message_id);
             self.put(&id, &rec)?;
-        }
-        // Live Drive attachments: remember the group so updates flow.
-        for a in &draft.attachments {
-            if let Some(app::mail_attachment::Source::Drive(cap)) = &a.source {
-                if cap.mode == app::DriveShareMode::Live as i32 {
-                    debug!(share = hex::encode(&cap.share_id), "live attachment sent");
-                }
-            }
         }
         Ok(hex::encode(&rec.message.message_id))
     }
@@ -454,6 +481,10 @@ impl<'a> Mail<'a> {
             return Ok(Some(rec));
         }
         let mut facts = self.one.people_state.contacts.sender_facts(&r.sender);
+        if !facts.has_username {
+            // The chain knows whether this stranger paid for a name.
+            facts.has_username = !self.one.people().username_of(&r.sender).await.unwrap_or_default().is_empty();
+        }
         facts.previously_written_to = self.one.mail_state.by_folder.get(folder::SENT).map(|v| {
             v.iter().any(|(_, sid)| {
                 self.get(sid).ok().flatten().map(|rec| {

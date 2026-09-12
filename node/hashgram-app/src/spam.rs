@@ -65,8 +65,11 @@ pub struct SenderFacts {
 pub const MAX_UNKNOWN_PER_HOUR: u32 = 30;
 /// Per-sender first-contact bound.
 pub const MAX_PER_SENDER_PER_HOUR: u32 = 5;
-/// Score at or above which an unknown sender goes to Requests rather than Spam.
-pub const REQUESTS_THRESHOLD: i32 = 0;
+/// Score at or above which an unknown sender goes to Requests rather than
+/// Spam. A plain first message from a stranger with no username scores
+/// −10 and lands in Requests; it takes a bulk shape, a failed gateway
+/// authentication or a high gateway spam score to fall below this.
+pub const REQUESTS_THRESHOLD: i32 = -20;
 
 /// Sliding window of first-contact arrivals.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -234,6 +237,8 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(dispose(&facts, &msg("hash1a", 1), &mut w, 0), Disposition::Requests);
+        // A stranger without a username is still a request, not spam.
+        assert_eq!(dispose(&SenderFacts::default(), &msg("hash1z", 1), &mut w, 0), Disposition::Requests);
         let bulk = msg("hash1b", 50);
         assert_eq!(
             dispose(&SenderFacts::default(), &bulk, &mut w, 0),
@@ -262,7 +267,7 @@ mod tests {
         for i in 0..(MAX_UNKNOWN_PER_HOUR + 1) {
             d = dispose(&facts, &msg(&format!("hash1s{i}"), 1), &mut w, 5);
         }
-        assert_eq!(d, Disposition::Spam);
+        assert_eq!(d, Disposition::Spam, "past the hourly window low-score strangers go to spam");
     }
 
     #[test]

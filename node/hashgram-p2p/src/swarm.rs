@@ -1103,12 +1103,22 @@ impl Runner {
                 step,
                 ..
             }) => {
+                // Answer the requester as soon as any providers are known
+                // rather than when the whole Kademlia walk finishes: on a
+                // small network a full walk runs to the 30 s query timeout,
+                // and every SDK caller unions the answer with its connected
+                // store peers anyway. The query keeps running to completion
+                // in the background so the routing table still benefits.
+                let mut done = step.last;
                 if let Some((found, _)) = self.pending_providers.get_mut(&id) {
                     if let Ok(kad::GetProvidersOk::FoundProviders { providers, .. }) = res {
                         found.extend(providers);
+                        if !found.is_empty() {
+                            done = true;
+                        }
                     }
                 }
-                if step.last {
+                if done {
                     if let Some((found, reply)) = self.pending_providers.remove(&id) {
                         let _ = reply.send(found.into_iter().collect());
                     }

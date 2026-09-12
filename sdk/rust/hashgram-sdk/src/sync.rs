@@ -201,10 +201,17 @@ impl<'a> Sync<'a> {
     /// or the error that stopped the round (the phase is then `Backoff`).
     pub async fn round(&mut self) -> Result<SyncReport, SdkError> {
         let started = Instant::now();
+        if self.one.sync_state.rounds == 0 {
+            // Rounds are persisted so periodic work (device reconciliation)
+            // is spread over real rounds rather than repeated at every
+            // process start.
+            self.one.sync_state.rounds = self.one.store.get("sync/meta", b"rounds").ok().flatten().unwrap_or(0);
+        }
         match self.round_inner().await {
             Ok(mut r) => {
                 r.elapsed_ms = started.elapsed().as_millis() as u64;
                 self.one.sync_state.rounds += 1;
+                let _ = self.one.store.put("sync/meta", b"rounds", &self.one.sync_state.rounds);
                 self.one.sync_state.failures = 0;
                 self.one.sync_state.last_ok = Some(Instant::now());
                 self.set_phase(SyncPhase::Idle);
@@ -309,7 +316,8 @@ impl<'a> Sync<'a> {
         }
 
         // Devices.
-        if self.one.sync_state.rounds.is_multiple_of(self.one.sync_state.reconcile_every.max(1)) {
+        let rounds = self.one.sync_state.rounds;
+        if rounds > 0 && rounds.is_multiple_of(self.one.sync_state.reconcile_every.max(1)) {
             self.set_phase(SyncPhase::Syncing(Stage::Devices));
             match self.one.devices().reconcile().await {
                 Ok(rep) => {

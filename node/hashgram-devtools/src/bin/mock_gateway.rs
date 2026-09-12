@@ -49,6 +49,105 @@ struct App {
     height: AtomicU64,
     lie: bool,
     txs: Mutex<Vec<(String, u64)>>,
+    /// DEVNET ONLY identity registry: address → devices. Lets two
+    /// unfunded test clients find each other's device keys (the SDK asks
+    /// the chain for them) without a chain. Filled through
+    /// `POST /devnet/identity`.
+    identities: Mutex<std::collections::BTreeMap<String, Vec<MockDevice>>>,
+    /// DEVNET ONLY username registry: name → owner.
+    usernames: Mutex<std::collections::BTreeMap<String, String>>,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct MockDevice {
+    device_id: String,
+    /// Hex ed25519 public key.
+    device_pubkey: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    platform: String,
+    #[serde(default)]
+    revoked: bool,
+}
+
+fn b64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk.first().copied().unwrap_or(0);
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        let n = (u32::from(b0) << 16) | (u32::from(b1) << 8) | u32::from(b2);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                let idx = ((n >> (18 - 6 * i)) & 63) as usize;
+                out.push(T.get(idx).copied().unwrap_or(b'A') as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn b64_decode(s: &str) -> Vec<u8> {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let mut buf = 0u32;
+    let mut bits = 0;
+    for c in s.bytes() {
+        let c = match c {
+            b'-' => b'+',
+            b'_' => b'/',
+            b'=' => break,
+            other => other,
+        };
+        let Some(v) = T.iter().position(|t| *t == c) else { continue };
+        buf = (buf << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buf >> bits) & 0xff) as u8);
+        }
+    }
+    out
+}
+
+#[derive(serde::Deserialize)]
+struct RegisterIdentity {
+    address: String,
+    devices: Vec<MockDevice>,
+    #[serde(default)]
+    username: String,
+}
+
+/// `POST /devnet/identity` — registers an address with its devices (and an
+/// optional username). DEVNET ONLY; a real chain requires a signed
+/// certificate and gas for this.
+async fn devnet_identity(State(app): S, Json(body): Json<RegisterIdentity>) -> Response {
+    if let Ok(mut ids) = app.identities.lock() {
+        ids.insert(body.address.clone(), body.devices.clone());
+    }
+    if !body.username.is_empty() {
+        if let Ok(mut u) = app.usernames.lock() {
+            u.insert(body.username.to_lowercase(), body.address.clone());
+        }
+    }
+    stamped(&app, StatusCode::OK, serde_json::json!({ "registered": body.address }))
+}
+
+fn device_json(root: &str, d: &MockDevice) -> serde_json::Value {
+    serde_json::json!({
+        "root_address": root,
+        "device_id": d.device_id,
+        "device_pubkey": b64(&hex::decode(&d.device_pubkey).unwrap_or_default()),
+        "key_type": "KEY_TYPE_ED25519",
+        "label": d.label,
+        "platform": d.platform,
+        "revoked": d.revoked,
+        "added_height": "1",
+    })
 }
 
 type S = State<Arc<App>>;
@@ -163,7 +262,77 @@ async fn founder_params(State(app): S) -> Response {
     )
 }
 
-async fn hashgram_any(State(app): S, Path(rest): Path<String>) -> Response {
+async fn hashgram_any(
+    State(app): S,
+    Path(rest): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    // DEVNET identity registry.
+    if let Some(addr) = rest.strip_prefix("identity/v1/devices/") {
+        let devices = app.identities.lock().ok().and_then(|m| m.get(addr).cloned());
+        return match devices {
+            Some(d) => stamped(
+                &app,
+                StatusCode::OK,
+                serde_json::json!({ "devices": d.iter().map(|x| device_json(addr, x)).collect::<Vec<_>>() }),
+            ),
+            None => stamped(&app, StatusCode::OK, serde_json::json!({ "devices": [] })),
+        };
+    }
+    if let Some(addr) = rest.strip_prefix("identity/v1/identity/") {
+        let known = app.identities.lock().ok().map(|m| m.contains_key(addr)).unwrap_or(false);
+        return if known {
+            stamped(
+                &app,
+                StatusCode::OK,
+                serde_json::json!({ "identity": { "address": addr, "rotation_count": 0, "revoked": false } }),
+            )
+        } else {
+            not_found(&app)
+        };
+    }
+    if rest == "identity/v1/resolve_device_key" {
+        let key = q.get("device_pubkey").map(|k| hex::encode(b64_decode(k))).unwrap_or_default();
+        let found = app.identities.lock().ok().and_then(|m| {
+            m.iter().find_map(|(addr, devs)| {
+                devs.iter().find(|d| d.device_pubkey.eq_ignore_ascii_case(&key)).map(|d| (addr.clone(), d.clone()))
+            })
+        });
+        return match found {
+            Some((addr, d)) => stamped(
+                &app,
+                StatusCode::OK,
+                serde_json::json!({ "found": true, "root_address": addr, "device": device_json(&addr, &d) }),
+            ),
+            None => stamped(&app, StatusCode::OK, serde_json::json!({ "found": false })),
+        };
+    }
+    if let Some(name) = rest.strip_prefix("username/v1/lookup/") {
+        let owner = app.usernames.lock().ok().and_then(|u| u.get(&name.to_lowercase()).cloned());
+        return match owner {
+            Some(o) => stamped(
+                &app,
+                StatusCode::OK,
+                serde_json::json!({ "registration": { "name": name, "owner": o, "expiry_height": "9999999" } }),
+            ),
+            None => not_found(&app),
+        };
+    }
+    if let Some(addr) = rest.strip_prefix("username/v1/reverse/") {
+        let names: Vec<String> = app
+            .usernames
+            .lock()
+            .ok()
+            .map(|u| u.iter().filter(|(_, o)| o.as_str() == addr).map(|(n, _)| n.clone()).collect())
+            .unwrap_or_default();
+        return stamped(&app, StatusCode::OK, serde_json::json!({ "names": names }));
+    }
+    if rest.starts_with("serviceproof/v1/provider/") || rest.starts_with("serviceproof/v1/rewards/") || rest.starts_with("serviceproof/v1/assignments/") {
+        return not_found(&app);
+    }
+    if rest == "serviceproof/v1/providers" {
+        return stamped(&app, StatusCode::OK, serde_json::json!({ "providers": [], "pagination": { "next_key": null, "total": "0" } }));
+    }
     // Enough of the Hashgram modules for screens to render "empty" honestly.
     let body = match rest.as_str() {
         "username/v1/params" => {
@@ -258,6 +427,8 @@ async fn main() {
         height: AtomicU64::new(cli.height),
         lie: cli.lie,
         txs: Mutex::new(Vec::new()),
+        identities: Mutex::new(Default::default()),
+        usernames: Mutex::new(Default::default()),
     });
     {
         let app = app.clone();
@@ -287,6 +458,7 @@ async fn main() {
         .route("/cosmos/tx/v1beta1/simulate", post(simulate))
         .route("/cosmos/tx/v1beta1/txs/{hash}", get(tx_by_hash))
         .route("/hashgram/founder/v1/params", get(founder_params))
+        .route("/devnet/identity", post(devnet_identity))
         .route("/hashgram/{*rest}", get(hashgram_any))
         .fallback(fallback)
         .with_state(app);

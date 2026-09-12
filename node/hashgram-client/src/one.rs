@@ -80,8 +80,9 @@ pub enum OneCmd {
 pub enum MailCmd {
     /// Send a message.
     Send {
-        /// Recipients: hash1…, @name, name@hashgram.io (repeat).
-        #[arg(long = "to", required = true)]
+        /// Recipients: hash1…, @name, name@hashgram.io (repeat). Optional
+        /// when replying (the reply target's sender is used).
+        #[arg(long = "to")]
         to: Vec<String>,
         /// CC recipients.
         #[arg(long = "cc")]
@@ -738,6 +739,9 @@ async fn mail(one: &mut HashgramOne, json: bool, cmd: MailCmd) -> anyhow::Result
                 Some(id) => one.mail().reply_draft(id, all)?,
                 None => Draft::default(),
             };
+            if to.is_empty() && reply_to.is_none() && bcc.is_empty() {
+                anyhow::bail!("--to is required unless replying");
+            }
             if !to.is_empty() {
                 draft.to = one.mail().resolve_recipients(&to).await?;
             }

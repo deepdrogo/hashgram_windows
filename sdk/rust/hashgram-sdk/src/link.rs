@@ -76,6 +76,10 @@ pub struct RejectedPeer {
     pub at: u64,
 }
 
+/// How long a client waits for DHT provider records before proceeding
+/// with its connected store peers.
+pub const PROVIDER_QUERY_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// The link.
 pub struct Link {
     handle: NodeHandle,
@@ -409,7 +413,14 @@ impl Link {
     /// Providers of a DHT key, from Kademlia. Unverified peers among them
     /// will be verified at connection before any request is served.
     pub async fn providers(&self, key: Vec<u8>) -> Vec<PeerId> {
-        self.handle.get_providers(key).await
+        // A client never waits for a full Kademlia walk: with few peers the
+        // walk lasts until the 30 s query timeout, and every caller falls
+        // back to its connected store peers. Whatever is known within the
+        // bound is returned; nothing is an acceptable answer.
+        match tokio::time::timeout(PROVIDER_QUERY_TIMEOUT, self.handle.get_providers(key)).await {
+            Ok(v) => v,
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Node announcements from any verified peer.

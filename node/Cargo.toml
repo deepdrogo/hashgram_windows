@@ -14,6 +14,7 @@ members = [
     "../sdk/rust/hashgram-sdk",
     "../apps/desktop/src-tauri",
     "../apps/desktop/service",
+    "../services/mail-gateway",
 ]
 
 [workspace.package]
