@@ -178,6 +178,25 @@ impl Account {
         })
     }
 
+    /// Writes a new vault from given contents (used by backup import).
+    pub fn from_contents(
+        vault_path: &Path,
+        passphrase: &str,
+        contents: VaultContents,
+        kdf: KdfCost,
+    ) -> Result<Self, SdkError> {
+        let vault = Vault::at(vault_path);
+        vault.create(passphrase, &contents, kdf)?;
+        let key = vault.open_with_key(passphrase).ok().map(|(_, k)| k);
+        Ok(Self {
+            vault,
+            passphrase: passphrase.to_owned(),
+            contents,
+            kdf,
+            key,
+        })
+    }
+
     /// Opens an existing vault. The derived key is kept for the session so
     /// [`Self::save`] does not repeat the KDF.
     pub fn open(vault_path: &Path, passphrase: &str, kdf: KdfCost) -> Result<Self, SdkError> {

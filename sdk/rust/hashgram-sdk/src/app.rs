@@ -239,6 +239,10 @@ impl HashgramOne {
     pub fn network_api(&mut self) -> crate::network::Network<'_> {
         crate::network::Network { one: self }
     }
+    /// Paid storage leases.
+    pub fn leases(&mut self) -> crate::storage_lease::Lease<'_> {
+        crate::storage_lease::Lease { one: self }
+    }
 
     // -----------------------------------------------------------------------
     // Group plumbing shared by the applications

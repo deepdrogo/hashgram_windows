@@ -29,6 +29,9 @@ pub enum AppPurpose {
     /// A Drive capability grant (reserved; capabilities are currently
     /// authenticated by the MLS channel they travel in).
     DriveCapability,
+    /// A paid storage lease between a client and a provider
+    /// (`docs/ADR_HASH_STORAGE_MARKET.md` §5).
+    StorageLease,
 }
 
 impl AppPurpose {
@@ -38,6 +41,7 @@ impl AppPurpose {
         match self {
             Self::SpaceEvent => "space-event",
             Self::DriveCapability => "drive-capability",
+            Self::StorageLease => "storage-lease",
         }
     }
 }

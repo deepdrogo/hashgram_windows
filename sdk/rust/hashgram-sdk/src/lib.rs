@@ -35,6 +35,8 @@
 //! | [`provider`] | Earn: provider lifecycle and earnings |
 //! | [`network`] | Peers, validators, supply, indexer read model |
 //! | [`store`] | Encrypted local store |
+//! | [`backup`] | Encrypted vault backup export/import |
+//! | [`storage_lease`] | Paid storage leases (ADR option B) |
 //! | [`ai`] | Hash AI interfaces (no implementation transmits anything) |
 //!
 //! **Protocol layer** (what the application layer is built on):
@@ -62,6 +64,7 @@
 pub mod account;
 pub mod ai;
 pub mod app;
+pub mod backup;
 pub mod blob;
 pub mod calls;
 pub mod chain_relay;
@@ -77,6 +80,7 @@ pub mod people;
 pub mod provider;
 pub mod social;
 pub mod spaces;
+pub mod storage_lease;
 pub mod store;
 pub mod sync;
 pub mod wallet;

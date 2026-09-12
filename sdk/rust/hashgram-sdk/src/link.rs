@@ -417,10 +417,9 @@ impl Link {
         // walk lasts until the 30 s query timeout, and every caller falls
         // back to its connected store peers. Whatever is known within the
         // bound is returned; nothing is an acceptable answer.
-        match tokio::time::timeout(PROVIDER_QUERY_TIMEOUT, self.handle.get_providers(key)).await {
-            Ok(v) => v,
-            Err(_) => Vec::new(),
-        }
+        tokio::time::timeout(PROVIDER_QUERY_TIMEOUT, self.handle.get_providers(key))
+            .await
+            .unwrap_or_default()
     }
 
     /// Node announcements from any verified peer.
