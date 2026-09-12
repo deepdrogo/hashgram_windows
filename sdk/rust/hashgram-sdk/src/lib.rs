@@ -18,6 +18,27 @@
 //!
 //! # Layers
 //!
+//! **Hashgram One application layer** (what a client program calls):
+//!
+//! | Module | Does |
+//! | --- | --- |
+//! | [`app`] | [`app::HashgramOne`] facade: opens the account, connects, exposes the APIs below |
+//! | [`mail`] | HashMail: send/receive/thread/file E2EE mail |
+//! | [`drive`] | HashDrive: encrypted files, folders, versions, sharing |
+//! | [`people`] | Lookup, contact requests, friends, blocks, profiles |
+//! | [`feed`] | Public posts/comments/reactions, chronological feeds |
+//! | [`circles`] | Private groups over MLS |
+//! | [`spaces`] | Shared environments with roles (signed event log) |
+//! | [`devices`] | Multi-device reconciliation and bootstrap |
+//! | [`sync`] | The sync engine state machine |
+//! | [`wallet`] | Balances, send, stake, usernames |
+//! | [`provider`] | Earn: provider lifecycle and earnings |
+//! | [`network`] | Peers, validators, supply, indexer read model |
+//! | [`store`] | Encrypted local store |
+//! | [`ai`] | Hash AI interfaces (no implementation transmits anything) |
+//!
+//! **Protocol layer** (what the application layer is built on):
+//!
 //! | Module | Does |
 //! | --- | --- |
 //! | [`account`] | Encrypted vault; wallet, root and device keys; on-chain identity |
@@ -25,6 +46,7 @@
 //! | [`messaging`] | MLS groups over store-and-forward mailboxes |
 //! | [`social`] | Signed social events |
 //! | [`blob`] | Upload, download, verify, private encryption |
+//! | [`chain_relay`] | Chain reads/broadcast through the P2P relay, cross-checked |
 
 #![forbid(unsafe_code)]
 #![cfg_attr(
@@ -38,12 +60,29 @@
 )]
 
 pub mod account;
+pub mod ai;
+pub mod app;
 pub mod blob;
 pub mod calls;
 pub mod chain_relay;
+pub mod circles;
+pub mod devices;
+pub mod drive;
+pub mod feed;
 pub mod link;
+pub mod mail;
 pub mod messaging;
+pub mod network;
+pub mod people;
+pub mod provider;
 pub mod social;
+pub mod spaces;
+pub mod store;
+pub mod sync;
+pub mod wallet;
+
+pub use app::{Config, HashgramOne, Paths};
+pub use hashgram_app::{self as protocol, AppError};
 
 pub use hashgram_chain::{
     self as chain, ChainTransport, Client as ChainClient, Verification, Wallet,
@@ -121,6 +160,12 @@ pub enum SdkError {
     /// A peer served corrupt data.
     #[error("corrupt data: {0}")]
     Corrupt(String),
+    /// The local store.
+    #[error("local store: {0}")]
+    Store(String),
+    /// A message or object from a newer protocol generation.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
 }
 
 impl link::Link {

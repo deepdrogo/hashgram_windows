@@ -162,6 +162,34 @@ pub fn ciphertext_size(size: u64) -> u64 {
     size + segment_count(size) * TAG_LEN as u64
 }
 
+/// Number of sealed segments in a ciphertext of `ct_len` bytes (one per
+/// blob chunk).
+#[must_use]
+pub fn segment_count_for_ciphertext(ct_len: u64) -> u64 {
+    ct_len.div_ceil(CHUNK_SIZE as u64).max(1)
+}
+
+/// Opens a sealed object when only the key is known (e.g. a manifest whose
+/// reference another device has not sent yet): the plaintext size is
+/// derived from the ciphertext length. The caller verifies content by
+/// decoding it; there is no plaintext hash to compare against.
+pub fn open_object_with_key(ciphertext: &[u8], key: ObjectKey) -> Result<Vec<u8>, AppError> {
+    let ct_len = ciphertext.len() as u64;
+    let segs = segment_count_for_ciphertext(ct_len);
+    let plaintext_size = ct_len
+        .checked_sub(segs * TAG_LEN as u64)
+        .ok_or_else(|| AppError::Integrity("ciphertext shorter than its tags".into()))?;
+    let mut dec = SegmentDecryptor::new(key, plaintext_size)?;
+    let mut out = Vec::with_capacity(plaintext_size as usize);
+    for chunk in ciphertext.chunks(CHUNK_SIZE) {
+        out.extend_from_slice(&dec.open(chunk)?);
+    }
+    if !dec.finished() {
+        return Err(AppError::Integrity("object is incomplete".into()));
+    }
+    Ok(out)
+}
+
 /// Streaming encryptor. Feed plaintext segments in order (each exactly
 /// [`SEGMENT_PLAINTEXT`] bytes except the last), get one sealed chunk each.
 pub struct SegmentEncryptor {

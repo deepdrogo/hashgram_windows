@@ -238,6 +238,24 @@ impl Messaging {
         &self.mls
     }
 
+    /// Mutable MLS client, for group operations the higher layers drive
+    /// directly (device reconciliation, single-member Space groups).
+    pub fn mls_mut(&mut self) -> &mut MlsClient {
+        &mut self.mls
+    }
+
+    /// Delivers raw MLS bytes to one device's mailbox (see [`Self::deliver`]).
+    pub async fn deliver_raw(
+        &self,
+        link: &Link,
+        network: &NetworkIdentity,
+        device_pubkey: &[u8],
+        kind: pb::EnvelopeKind,
+        ciphertext: &[u8],
+    ) -> Result<(), SdkError> {
+        self.deliver(link, network, device_pubkey, kind, ciphertext).await
+    }
+
     /// Publishes key packages to every store peer, and so registers this
     /// device's mailbox with them: a last-resort package plus enough
     /// one-time packages to bring each store's queue to
