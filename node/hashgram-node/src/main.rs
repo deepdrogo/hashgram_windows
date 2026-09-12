@@ -338,9 +338,13 @@ async fn run(home: PathBuf, config: PathBuf, insecure_no_chain: bool) -> anyhow:
     let mut services = app::Services::default();
     if cfg.stores() {
         let db = store::open(&home, "mailbox")?;
-        services.mailbox = Some(mailbox::MailboxService::open(db, &identity.network_id)?);
+        let mailbox = mailbox::MailboxService::open(db, &identity.network_id)?;
+        mailbox.register_metrics(&mut registry);
+        services.mailbox = Some(mailbox);
         let db = store::open(&home, "blobs")?;
-        services.blob = Some(blob::BlobService::open(db, cfg.storage_quota_bytes)?);
+        let blob = blob::BlobService::open(db, cfg.storage_quota_bytes)?;
+        blob.register_metrics(&mut registry);
+        services.blob = Some(blob);
         info!(quota = cfg.storage_quota_bytes, "store services enabled");
     }
     {
@@ -408,6 +412,7 @@ async fn run(home: PathBuf, config: PathBuf, insecure_no_chain: bool) -> anyhow:
                 sec,
                 announce_signer.clone(),
             )?;
+            agent.register_metrics(&mut registry);
             info!(operator = %agent.operator(), reward = %cfg.reward_address, "useful-service agent enabled");
             Some(agent)
         }
@@ -451,6 +456,9 @@ async fn run(home: PathBuf, config: PathBuf, insecure_no_chain: bool) -> anyhow:
                     }
                 }
                 if let Some(b) = &shared.services.blob {
+                    if let Err(e) = b.expire_incomplete(store::now()) {
+                        warn!(error = %e, "incomplete upload sweep failed");
+                    }
                     b.repair_pass(&shared, 8).await;
                 }
                 if let Some(agent) = &shared.rewards {

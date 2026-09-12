@@ -23,6 +23,8 @@ use std::time::Duration;
 use anyhow::{bail, Context};
 use clap::{Parser, Subcommand};
 use hashgram_sdk::account::{self, Account};
+
+mod one;
 use hashgram_sdk::link::Link;
 use hashgram_sdk::messaging::Messaging;
 use hashgram_sdk::social::{payload_json, Social};
@@ -162,6 +164,11 @@ enum Cmd {
     Call {
         #[command(subcommand)]
         cmd: CallCmd,
+    },
+    /// Hashgram One: Mail, Drive, People, Feed, Circles, Spaces, Earn, Network.
+    One {
+        #[command(subcommand)]
+        cmd: one::OneCmd,
     },
 }
 
@@ -596,6 +603,21 @@ async fn run() -> anyhow::Result<()> {
 
     match cli.cmd {
         Cmd::Configure { .. } => unreachable!(),
+        Cmd::One { cmd } => {
+            one::run(
+                one::OneCtx {
+                    home: &ctx.home,
+                    network: ctx.network.clone(),
+                    passphrase: &ctx.passphrase,
+                    kdf: ctx.kdf,
+                    chain_api: ctx.profile.chain_api.clone(),
+                    bootstrap: ctx.profile.bootstrap.clone(),
+                    json: ctx.json,
+                },
+                cmd,
+            )
+            .await
+        }
         Cmd::Identity { cmd } => identity(&ctx, cmd).await,
         Cmd::Wallet { cmd } => wallet(&ctx, cmd).await,
         Cmd::Message { cmd } => message(&ctx, cmd).await,
