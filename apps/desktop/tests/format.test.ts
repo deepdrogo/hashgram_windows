@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { formatHashSdk, parseAmount, formatHash, truncateMiddle, handle, splitRecipients, shortWhen } from "~/lib/format";
 import { linkify, sandboxDocument } from "~/lib/linkify";
+import { errText, errCode } from "~/lib/ipc";
 
 describe("parity with hashgram_sdk::wallet", () => {
   it("parse_amount vectors", () => {
@@ -73,5 +74,18 @@ describe("linkify and sandbox", () => {
     expect(doc).toMatch(/connect-src 'none'/);
     // The remote image tag survives as markup but the CSP forbids the load.
     expect(doc).toContain('img src="http://evil.example/x.png"');
+  });
+});
+
+describe("errors shown to people", () => {
+  it("reads a UiError even when a resource wrapped it in an Error", () => {
+    const ui = { code: "unsupported", message: "this node does not keep social events", retryable: false };
+    const wrapped = new Error("Unknown error", { cause: ui });
+    expect(errText(wrapped)).toBe("this node does not keep social events");
+    expect(errCode(wrapped)).toBe("unsupported");
+    expect(errText(ui)).toBe(ui.message);
+    expect(errText(new Error("plain"))).toBe("plain");
+    expect(errText("str")).toBe("str");
+    expect(errCode(new Error("plain"))).toBe("internal");
   });
 });

@@ -28,6 +28,43 @@ const NS_WALLS: &str = "feed/walls";
 /// Most nodes tried for one Explore page before giving up.
 const EXPLORE_ATTEMPTS: usize = 3;
 
+/// Shown with every page or digest assembled from this device's own cache
+/// because no connected node could answer.
+pub const LOCAL_FALLBACK_NOTE: &str = "Computed on this device from what it already holds: the connected nodes run an older Hashgram node release that cannot answer Explore queries yet. Ask their operators to update; results will fill in on their own.";
+
+/// Per-node memory of whether it answers Explore queries. A node running a
+/// release from before the digest existed answers `invalid: empty request`
+/// (it cannot decode the request body); it is asked once, then treated as
+/// legacy until the link reconnects.
+#[derive(Debug, Default)]
+pub struct ExploreCaps {
+    caps: std::collections::HashMap<crate::PeerId, bool>,
+}
+
+impl ExploreCaps {
+    fn get(&self, p: &crate::PeerId) -> Option<bool> {
+        self.caps.get(p).copied()
+    }
+    fn set(&mut self, p: crate::PeerId, ok: bool) {
+        // Bounded: a client never talks to more than a handful of nodes.
+        if self.caps.len() > 256 {
+            self.caps.clear();
+        }
+        self.caps.insert(p, ok);
+    }
+}
+
+/// Whether an error means "this node predates the request type".
+fn legacy_node_error(e: &SdkError) -> bool {
+    match e {
+        SdkError::Link(crate::link::LinkError::Refused { code, message }) => {
+            code == "invalid" && message.contains("empty request")
+        }
+        SdkError::Link(crate::link::LinkError::Unexpected) => true,
+        _ => false,
+    }
+}
+
 /// A feed item for display.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FeedItem {
@@ -90,6 +127,9 @@ pub struct ExplorePage {
     pub source_operator: String,
     /// Measured round-trip to that node, ms, once known.
     pub source_rtt_ms: Option<u64>,
+    /// Empty when a node answered; otherwise why this came from the local
+    /// cache instead (see [`LOCAL_FALLBACK_NOTE`]).
+    pub note: String,
 }
 
 /// A remote timeline query.
@@ -190,6 +230,9 @@ pub struct Digest {
     pub source_operator: String,
     /// Round-trip to it, ms.
     pub source_rtt_ms: Option<u64>,
+    /// Empty when a node answered; otherwise why this came from the local
+    /// cache instead (see [`LOCAL_FALLBACK_NOTE`]).
+    pub note: String,
 }
 
 /// My own public activity, as counted from my event chain.
@@ -729,12 +772,16 @@ impl<'a> Feed<'a> {
             channel,
             ..Default::default()
         };
-        let ranked = self.one.link.peers_ranked().await;
-        if ranked.is_empty() {
-            return Err(SdkError::Link(crate::link::LinkError::NoPeer("any")));
+        let (capable, legacy) = self.explore_peers(&s).await?;
+        if capable.is_empty() {
+            // Every reachable node is a legacy release: it would answer a
+            // timeline query with an empty page, which is not "nothing is
+            // happening". Say so and serve the local cache instead.
+            debug_assert!(legacy > 0);
+            return self.local_explore(q, &query.types);
         }
         let mut last: Option<SdkError> = None;
-        for rp in ranked.iter().take(EXPLORE_ATTEMPTS) {
+        for rp in capable.iter().take(EXPLORE_ATTEMPTS) {
             match s
                 .fetch_from(&self.one.link, &self.one.network, rp.peer.peer, query.clone())
                 .await
@@ -761,12 +808,267 @@ impl<'a> Feed<'a> {
                         source_peer: rp.peer.peer.to_string(),
                         source_operator: rp.peer.operator.clone(),
                         source_rtt_ms: rp.rtt_ms,
+                        note: String::new(),
                     });
                 }
-                Err(e) => last = Some(e),
+                Err(e) => {
+                    if legacy_node_error(&e) {
+                        self.one.explore_caps.set(rp.peer.peer, false);
+                    }
+                    last = Some(e);
+                }
             }
         }
-        Err(last.unwrap_or(SdkError::Link(crate::link::LinkError::NoPeer("any"))))
+        match last {
+            Some(e) if legacy_node_error(&e) => self.local_explore(q, &query.types),
+            Some(e) => Err(e),
+            None => Err(SdkError::Link(crate::link::LinkError::NoPeer("any"))),
+        }
+    }
+
+    /// Nearest nodes that answer Explore queries, and how many legacy nodes
+    /// were skipped. Unknown nodes are probed once with a tiny digest.
+    /// `Err(NoPeer)` when nothing is connected at all.
+    async fn explore_peers(
+        &mut self,
+        s: &Social,
+    ) -> Result<(Vec<crate::link::RankedPeer>, usize), SdkError> {
+        let ranked = self.one.link.peers_ranked().await;
+        if ranked.is_empty() {
+            return Err(SdkError::Link(crate::link::LinkError::NoPeer("any")));
+        }
+        let mut capable = Vec::new();
+        let mut legacy = 0usize;
+        for rp in ranked.into_iter().take(EXPLORE_ATTEMPTS + 2) {
+            let known = self.one.explore_caps.get(&rp.peer.peer);
+            let ok = match known {
+                Some(v) => v,
+                None => match s.digest_from(&self.one.link, rp.peer.peer, 1, 1).await {
+                    Ok(_) => {
+                        self.one.explore_caps.set(rp.peer.peer, true);
+                        true
+                    }
+                    Err(e) if legacy_node_error(&e) => {
+                        tracing::info!(peer = %rp.peer.peer, "node predates Explore; skipping it");
+                        self.one.explore_caps.set(rp.peer.peer, false);
+                        false
+                    }
+                    // A timeout or transport error says nothing about the
+                    // release; try again next time.
+                    Err(_) => continue,
+                },
+            };
+            if ok {
+                capable.push(rp);
+            } else {
+                legacy += 1;
+            }
+        }
+        Ok((capable, legacy))
+    }
+
+    /// An Explore page from the local cache: what this device has already
+    /// verified (own posts, followed authors, friends, opened threads).
+    fn local_explore(&self, q: &ExploreQuery, types: &[String]) -> Result<ExplorePage, SdkError> {
+        let kinds: Vec<&str> = types.iter().map(String::as_str).collect();
+        let limit = q.limit.clamp(1, 100) as usize;
+        let tag = q.hashtag.trim().trim_start_matches('#').to_lowercase();
+        let channel = q.channel.to_lowercase();
+        // Over-fetch, then filter by tag / wall which `timeline` does not know.
+        let all = self.timeline(&BTreeSet::new(), &kinds, q.before, 5_000)?;
+        let mut items: Vec<FeedItem> = all
+            .into_iter()
+            .filter(|it| channel.is_empty() || it.channel == channel)
+            .filter(|it| {
+                if tag.is_empty() {
+                    return true;
+                }
+                it.payload
+                    .get("hashtags")
+                    .and_then(|h| h.as_array())
+                    .is_some_and(|arr| {
+                        arr.iter().any(|t| {
+                            t.as_str()
+                                .map(|s| s.trim_start_matches('#').to_lowercase() == tag)
+                                .unwrap_or(false)
+                        })
+                    })
+            })
+            .collect();
+        let more = items.len() > limit;
+        items.truncate(limit);
+        let next_before = if more {
+            items.last().map(|i| i.timestamp).unwrap_or(0)
+        } else {
+            0
+        };
+        Ok(ExplorePage {
+            items,
+            next_before,
+            source_peer: String::new(),
+            source_operator: String::new(),
+            source_rtt_ms: None,
+            note: LOCAL_FALLBACK_NOTE.to_owned(),
+        })
+    }
+
+    /// A digest over the local cache, shaped like a node's answer.
+    fn local_digest(&self, window_secs: u64, limit: u32) -> Result<Digest, SdkError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let since = now.saturating_sub(window_secs.max(1));
+        let limit = limit.clamp(1, 50) as usize;
+        let blocked = self.blocked_authors();
+        let pinned = self.pinned_ids();
+        let events: Vec<pb::SocialEvent> = self
+            .one
+            .store
+            .scan::<pb::SocialEvent>(NS_EVENTS)?
+            .into_iter()
+            .filter(|(k, _)| !k.starts_with(b"cursor/"))
+            .map(|(_, e)| e)
+            .filter(|e| !blocked.contains(&e.author))
+            .collect();
+        let mut deleted: BTreeSet<Vec<u8>> = BTreeSet::new();
+        let mut author_of: BTreeMap<Vec<u8>, String> = BTreeMap::new();
+        for ev in &events {
+            author_of.insert(ev.id.clone(), ev.author.clone());
+            if ev.r#type == "POST_DELETE" {
+                if let Ok(d) = pb::PostDelete::decode(ev.payload.as_slice()) {
+                    deleted.insert(d.post);
+                }
+            }
+        }
+        let mut total_authors: BTreeSet<&str> = BTreeSet::new();
+        let mut in_window = 0u64;
+        let mut active: BTreeSet<&str> = BTreeSet::new();
+        let mut authors: BTreeMap<String, AuthorActivity> = BTreeMap::new();
+        let mut tags: BTreeMap<String, (u32, BTreeSet<String>, u64)> = BTreeMap::new();
+        let mut walls: BTreeMap<String, WallInfo> = BTreeMap::new();
+        let mut wall_posts: BTreeMap<String, (u32, BTreeSet<String>, u64)> = BTreeMap::new();
+        for ev in &events {
+            total_authors.insert(&ev.author);
+            if let Some(w) = wall_from_event(ev) {
+                walls.insert(w.id.clone(), w);
+            }
+            if ev.timestamp < since || deleted.contains(&ev.id) {
+                continue;
+            }
+            in_window += 1;
+            active.insert(&ev.author);
+            let a = authors.entry(ev.author.clone()).or_insert_with(|| AuthorActivity {
+                author: ev.author.clone(),
+                ..Default::default()
+            });
+            a.last_active = a.last_active.max(ev.timestamp);
+            match ev.r#type.as_str() {
+                "POST_CREATE" | "REEL_CREATE" => {
+                    a.posts += 1;
+                    if let Ok(p) = pb::PostCreate::decode(ev.payload.as_slice()) {
+                        for t in p.hashtags {
+                            let t = t.trim_start_matches('#').to_lowercase();
+                            if t.is_empty() {
+                                continue;
+                            }
+                            let e = tags.entry(t).or_insert((0, BTreeSet::new(), 0));
+                            e.0 += 1;
+                            e.1.insert(ev.author.clone());
+                            e.2 = e.2.max(ev.timestamp);
+                        }
+                        if !p.channel.is_empty() {
+                            let e = wall_posts
+                                .entry(hex::encode(&p.channel))
+                                .or_insert((0, BTreeSet::new(), 0));
+                            e.0 += 1;
+                            e.1.insert(ev.author.clone());
+                            e.2 = e.2.max(ev.timestamp);
+                        }
+                    }
+                }
+                "COMMENT_CREATE" => {
+                    a.comments += 1;
+                    if let Ok(c) = pb::CommentCreate::decode(ev.payload.as_slice()) {
+                        if let Some(owner) = author_of.get(&c.post).cloned() {
+                            if owner != ev.author {
+                                authors
+                                    .entry(owner.clone())
+                                    .or_insert_with(|| AuthorActivity { author: owner, ..Default::default() })
+                                    .comments_received += 1;
+                            }
+                        }
+                    }
+                }
+                "REACTION" => {
+                    if let Ok(r) = pb::Reaction::decode(ev.payload.as_slice()) {
+                        if let Some(owner) = author_of.get(&r.target).cloned() {
+                            if owner != ev.author {
+                                authors
+                                    .entry(owner.clone())
+                                    .or_insert_with(|| AuthorActivity { author: owner, ..Default::default() })
+                                    .reactions_received += 1;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Walls we know by description only (digest cache) count too.
+        for (k, w) in self.one.store.scan::<WallInfo>(NS_WALLS)? {
+            if k.starts_with(b"info/") && !walls.contains_key(&w.id) && !blocked.contains(&w.creator) {
+                walls.insert(w.id.clone(), w);
+            }
+        }
+        let mut walls: Vec<WallInfo> = walls
+            .into_values()
+            .map(|mut w| {
+                if let Some((posts, people, last)) = wall_posts.get(&w.id) {
+                    w.posts = *posts;
+                    w.authors = people.len() as u32;
+                    w.last_post = *last;
+                }
+                w.pinned = pinned.contains(&w.id);
+                w
+            })
+            .collect();
+        walls.sort_by(|a, b| b.last_post.max(b.created_at).cmp(&a.last_post.max(a.created_at)));
+        walls.truncate(limit);
+        let mut top_authors: Vec<AuthorActivity> = authors
+            .into_values()
+            .filter(|a| a.posts + a.comments + a.reactions_received + a.comments_received > 0)
+            .collect();
+        top_authors.sort_by(|a, b| {
+            (b.posts, b.comments, b.reactions_received).cmp(&(a.posts, a.comments, a.reactions_received))
+        });
+        top_authors.truncate(limit);
+        let mut top_hashtags: Vec<HashtagActivity> = tags
+            .into_iter()
+            .map(|(tag, (posts, people, last))| HashtagActivity {
+                tag,
+                posts,
+                authors: people.len() as u32,
+                last_used: last,
+            })
+            .collect();
+        top_hashtags.sort_by(|a, b| (b.posts, b.authors).cmp(&(a.posts, a.authors)));
+        top_hashtags.truncate(limit);
+        Ok(Digest {
+            window_secs,
+            events: in_window,
+            authors: active.len() as u64,
+            total_events: events.len() as u64,
+            total_authors: total_authors.len() as u64,
+            top_authors,
+            top_hashtags,
+            walls,
+            computed_at: now,
+            source_peer: String::new(),
+            source_operator: String::new(),
+            source_rtt_ms: None,
+            note: LOCAL_FALLBACK_NOTE.to_owned(),
+        })
     }
 
     /// Addresses we have blocked; their public posts are hidden locally.
@@ -783,14 +1085,14 @@ impl<'a> Feed<'a> {
     /// What is active, according to the nearest node that answers.
     pub async fn digest(&mut self, window_secs: u64, limit: u32) -> Result<Digest, SdkError> {
         let s = self.social()?;
-        let ranked = self.one.link.peers_ranked().await;
-        if ranked.is_empty() {
-            return Err(SdkError::Link(crate::link::LinkError::NoPeer("any")));
+        let (capable, _legacy) = self.explore_peers(&s).await?;
+        if capable.is_empty() {
+            return self.local_digest(window_secs, limit);
         }
         let pinned = self.pinned_ids();
         let blocked = self.blocked_authors();
         let mut last: Option<SdkError> = None;
-        for rp in ranked.iter().take(EXPLORE_ATTEMPTS) {
+        for rp in capable.iter().take(EXPLORE_ATTEMPTS) {
             match s
                 .digest_from(&self.one.link, rp.peer.peer, window_secs, limit)
                 .await
@@ -858,12 +1160,22 @@ impl<'a> Feed<'a> {
                         source_peer: rp.peer.peer.to_string(),
                         source_operator: rp.peer.operator.clone(),
                         source_rtt_ms: rp.rtt_ms,
+                        note: String::new(),
                     });
                 }
-                Err(e) => last = Some(e),
+                Err(e) => {
+                    if legacy_node_error(&e) {
+                        self.one.explore_caps.set(rp.peer.peer, false);
+                    }
+                    last = Some(e);
+                }
             }
         }
-        Err(last.unwrap_or(SdkError::Link(crate::link::LinkError::NoPeer("any"))))
+        match last {
+            Some(e) if legacy_node_error(&e) => self.local_digest(window_secs, limit),
+            Some(e) => Err(e),
+            None => Err(SdkError::Link(crate::link::LinkError::NoPeer("any"))),
+        }
     }
 
     /// Opens a post from the network: the post itself plus every comment,

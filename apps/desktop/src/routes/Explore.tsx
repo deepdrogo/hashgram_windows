@@ -72,7 +72,7 @@ export function ExploreRoute() {
               <Show when={digest()} fallback={<div class="flex flex-col gap-2"><div class="skeleton h-14 w-full" /><div class="skeleton h-14 w-full" /><div class="skeleton h-14 w-full" /></div>}>
                 {(d) => (
                   <>
-                    <SourceLine page={{ items: [], next_before: 0, source_peer: d().source_peer, source_operator: d().source_operator, source_rtt_ms: d().source_rtt_ms }} />
+                    <SourceLine page={{ items: [], next_before: 0, source_peer: d().source_peer, source_operator: d().source_operator, source_rtt_ms: d().source_rtt_ms, note: d().note }} />
                     <div class="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <Stat label="Posts in window" value={<span class="tnum">{d().events}</span>} />
                       <Stat label="People active" value={<span class="tnum">{d().authors}</span>} />

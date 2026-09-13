@@ -171,12 +171,26 @@ pub async fn reattach_link(state: &Arc<AppState>) {
 }
 
 fn link_needs_restart(unhealthy_checks: &mut u8, peers: usize, has_store: bool) -> bool {
+    link_needs_restart_with(unhealthy_checks, peers, has_store, 0)
+}
+
+/// `transport_rejections`: handshakes that died at the transport in the
+/// last check period. With no peers left and a node hanging up on every
+/// fresh connection, waiting a second check only lengthens the outage: a
+/// new link (new ephemeral identity) connects at once.
+fn link_needs_restart_with(
+    unhealthy_checks: &mut u8,
+    peers: usize,
+    has_store: bool,
+    transport_rejections: usize,
+) -> bool {
     if peers == 0 || !has_store {
         *unhealthy_checks = unhealthy_checks.saturating_add(1);
     } else {
         *unhealthy_checks = 0;
     }
-    if *unhealthy_checks >= 2 {
+    let fast = peers == 0 && transport_rejections >= 2;
+    if *unhealthy_checks >= 2 || (fast && *unhealthy_checks >= 1) {
         *unhealthy_checks = 0;
         true
     } else {
@@ -475,14 +489,18 @@ pub fn spawn_housekeeping(app: AppHandle, state: Arc<AppState>) {
                 lock(&app, &state).await;
             }
             if n.is_multiple_of(3) {
-                let (peers, has_store) = match state.link.read().await.as_ref() {
-                    Some(l) => {
-                        let peers = l.peers().await.len();
-                        let has_store = !l.peers_with_role("store").await.is_empty();
-                        (peers, has_store)
-                    }
-                    None => (0, false),
-                };
+                let (peers, has_store, transport_rejections) =
+                    match state.link.read().await.as_ref() {
+                        Some(l) => {
+                            let peers = l.peers().await.len();
+                            let has_store = !l.peers_with_role("store").await.is_empty();
+                            let tr = l
+                                .transport_rejections_within(Duration::from_secs(15))
+                                .await;
+                            (peers, has_store, tr)
+                        }
+                        None => (0, false, 0),
+                    };
                 state.sync.write().await.peers = peers;
                 let _ = app.emit("net:changed", ());
 
@@ -490,12 +508,20 @@ pub fn spawn_housekeeping(app: AppHandle, state: Arc<AppState>) {
                 // dead. Previously `spawn_link` saw `Some(link)` and returned,
                 // so only restarting the process recovered after an internet
                 // outage. Two unhealthy 15-second checks trigger a clean
-                // redial while keeping local data and the unlocked session.
-                if link_needs_restart(&mut unhealthy_link_checks, peers, has_store) {
+                // redial while keeping local data and the unlocked session;
+                // one check is enough when nodes are hanging up on fresh
+                // connections (a new identity gets through at once).
+                if link_needs_restart_with(
+                    &mut unhealthy_link_checks,
+                    peers,
+                    has_store,
+                    transport_rejections,
+                ) {
                     tracing::warn!(
                         peers,
                         has_store,
-                        "network link unhealthy for 30 seconds; reconnecting automatically"
+                        transport_rejections,
+                        "network link unhealthy; reconnecting automatically"
                     );
                     *state.link_error.write().await =
                         Some("connection lost; reconnecting automatically".into());
@@ -520,6 +546,21 @@ mod tests {
         assert!(!link_needs_restart(&mut checks, 1, false));
         assert!(link_needs_restart(&mut checks, 0, false));
         assert_eq!(checks, 0);
+    }
+
+    #[test]
+    fn nodes_hanging_up_on_fresh_connections_restart_after_one_check() {
+        use super::link_needs_restart_with;
+        let mut checks = 0;
+        // One transport rejection is not a pattern.
+        assert!(!link_needs_restart_with(&mut checks, 0, false, 1));
+        assert_eq!(checks, 1);
+        checks = 0;
+        // Two within the period, with no peers left: reconnect now.
+        assert!(link_needs_restart_with(&mut checks, 0, false, 2));
+        assert_eq!(checks, 0);
+        // With a peer still connected the fast path does not apply.
+        assert!(!link_needs_restart_with(&mut checks, 1, false, 5));
     }
 }
 

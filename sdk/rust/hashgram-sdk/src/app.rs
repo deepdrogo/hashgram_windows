@@ -127,6 +127,9 @@ pub struct HashgramOne {
     pub(crate) spaces_state: crate::spaces::SpacesState,
     pub(crate) circles_state: crate::circles::CirclesState,
     pub(crate) sync_state: crate::sync::SyncState,
+    /// Which connected nodes answer Explore queries (digest / timeline);
+    /// nodes running an older release do not, and are not asked twice.
+    pub(crate) explore_caps: crate::feed::ExploreCaps,
 }
 
 impl HashgramOne {
@@ -197,6 +200,7 @@ impl HashgramOne {
             spaces_state: crate::spaces::SpacesState::load(&store)?,
             circles_state: crate::circles::CirclesState::load(&store)?,
             sync_state: crate::sync::SyncState::default(),
+            explore_caps: crate::feed::ExploreCaps::default(),
             account,
             network: config.network,
             link,

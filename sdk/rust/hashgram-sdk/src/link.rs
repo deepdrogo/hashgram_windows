@@ -87,6 +87,8 @@ pub struct RejectedPeer {
     pub reason: String,
     /// Seconds since the Unix epoch when it was rejected.
     pub at: u64,
+    /// How many times in a row this peer was rejected for the same reason.
+    pub count: u32,
 }
 
 /// How long a client waits for DHT provider records before proceeding
@@ -139,6 +141,9 @@ impl Link {
         cfg.bootstrap_peers = bootstrap.iter().map(ToString::to_string).collect();
         cfg.min_peers = 2;
         cfg.serve_relay = Some(false);
+        // A client behind NAT keeps a TCP connection far longer than a QUIC
+        // one (see `NodeConfig::prefer_tcp`).
+        cfg.prefer_tcp = true;
         if let Some(p) = peerstore_path {
             cfg.peerstore_path = p.display().to_string();
         }
@@ -181,11 +186,16 @@ impl Link {
                     Event::PeerRejected { peer, reason } => {
                         info!(%peer, reason, "peer rejected");
                         let mut r = rejected_for_task.write().await;
+                        let count = r
+                            .iter()
+                            .find(|x| x.peer == peer && x.reason == reason)
+                            .map_or(1, |x| x.count.saturating_add(1));
                         r.retain(|x| x.peer != peer);
                         r.push(RejectedPeer {
                             peer,
                             reason,
                             at: unix_now(),
+                            count,
                         });
                         // Bounded: a flood of strangers cannot grow this.
                         if r.len() > 64 {
@@ -254,6 +264,26 @@ impl Link {
     /// malformed), most recent last.
     pub async fn rejected(&self) -> Vec<RejectedPeer> {
         self.rejected.read().await.clone()
+    }
+
+    /// Peers whose handshake failed at the transport (the connection was
+    /// lost mid-handshake rather than refused) within the last `within`.
+    /// A node that keeps hanging up on a fresh connection usually still
+    /// counts this client's previous, dead connection against it; a new
+    /// link (new ephemeral identity) gets through at once, so the desktop
+    /// watchdog uses this to reconnect early instead of waiting.
+    pub async fn transport_rejections_within(&self, within: Duration) -> usize {
+        let now = unix_now();
+        self.rejected
+            .read()
+            .await
+            .iter()
+            .filter(|r| {
+                now.saturating_sub(r.at) <= within.as_secs()
+                    && r.reason.contains("handshake transport failure")
+            })
+            .map(|r| r.count as usize)
+            .sum()
     }
 
     /// The swarm handle.

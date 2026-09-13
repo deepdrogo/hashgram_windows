@@ -88,11 +88,21 @@ export function SourceLine(props: { page: ExplorePage | null }) {
   return (
     <Show when={props.page}>
       {(p) => (
-        <p class="mb-2 text-[11px] text-muted" data-source-peer={p().source_peer}>
-          {t("explore_nearest")}
-          <Show when={p().source_rtt_ms !== null}> · {p().source_rtt_ms} ms</Show>
-          <Show when={p().source_operator}> · operator <span class="mono">{p().source_operator.slice(0, 12)}…</span></Show>
-        </p>
+        <Show
+          when={!p().note}
+          fallback={
+            <p class="mb-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-[11px] text-muted" data-source-peer="local" role="note">
+              <span class="font-medium text-fg">From this device. </span>
+              {p().note}
+            </p>
+          }
+        >
+          <p class="mb-2 text-[11px] text-muted" data-source-peer={p().source_peer}>
+            {t("explore_nearest")}
+            <Show when={p().source_rtt_ms !== null}> · {p().source_rtt_ms} ms</Show>
+            <Show when={p().source_operator}> · operator <span class="mono">{p().source_operator.slice(0, 12)}…</span></Show>
+          </p>
+        </Show>
       )}
     </Show>
   );

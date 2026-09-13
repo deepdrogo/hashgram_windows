@@ -18,14 +18,35 @@ export function isUiError(e: unknown): e is UiError {
   return !!e && typeof e === "object" && "code" in e && "message" in e;
 }
 
+/** The UiError inside `e`, looking through Error.cause chains (SolidJS
+ *  `createResource` wraps non-Error rejections in an Error whose `cause`
+ *  is the original value). */
+export function uiError(e: unknown): UiError | null {
+  let cur: unknown = e;
+  for (let depth = 0; depth < 5 && cur !== undefined && cur !== null; depth++) {
+    if (isUiError(cur)) return cur;
+    if (cur instanceof Error && "cause" in cur) {
+      cur = (cur as Error & { cause?: unknown }).cause;
+      continue;
+    }
+    break;
+  }
+  return null;
+}
+
 export function errText(e: unknown): string {
-  if (isUiError(e)) return e.message;
+  const u = uiError(e);
+  if (u) return u.message;
   if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string") {
+    return (e as { message: string }).message;
+  }
   return String(e);
 }
 
 export function errCode(e: unknown): string {
-  return isUiError(e) ? e.code : "internal";
+  return uiError(e)?.code ?? "internal";
 }
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -383,6 +404,8 @@ export interface ExplorePage {
   source_peer: string;
   source_operator: string;
   source_rtt_ms: number | null;
+  /** Empty when a node answered; otherwise why this came from the local cache. */
+  note: string;
 }
 export interface WallInfo {
   id: string;
@@ -423,6 +446,8 @@ export interface Digest {
   source_peer: string;
   source_operator: string;
   source_rtt_ms: number | null;
+  /** Empty when a node answered; otherwise why this came from the local cache. */
+  note: string;
 }
 export interface MyActivity {
   posts: number;

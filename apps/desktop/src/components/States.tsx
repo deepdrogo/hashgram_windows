@@ -1,6 +1,6 @@
 // Shared empty / loading / error / offline states, so every screen tells
 // the same truth the same way.
-import { Show, type JSX, type ParentProps } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, type JSX, type ParentProps } from "solid-js";
 import { WifiOff, AlertTriangle, RefreshCw } from "lucide-solid";
 import { Button, Skeleton } from "./ui";
 import { store, isOffline } from "~/lib/store";
@@ -62,10 +62,40 @@ export function Resource<T>(props: {
   );
 }
 
-/** The thin banner every screen shows when there is no peer. */
+/** How long the link must stay peerless before the banner appears. A
+ *  redial after a dropped connection takes a few seconds; showing
+ *  "offline" for each one made the app look broken when it was not. */
+export const OFFLINE_GRACE_MS = 8_000;
+
+/** True once `offline` has been continuously true for `graceMs`. */
+export function useSustained(offline: () => boolean, graceMs = OFFLINE_GRACE_MS): () => boolean {
+  const [sustained, setSustained] = createSignal(false);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  createEffect(() => {
+    if (offline()) {
+      if (timer === undefined && !sustained()) {
+        timer = setTimeout(() => {
+          timer = undefined;
+          setSustained(true);
+        }, graceMs);
+      }
+    } else {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      setSustained(false);
+    }
+  });
+  onCleanup(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+  return sustained;
+}
+
+/** The thin banner every screen shows when there has been no peer for a while. */
 export function OfflineBanner() {
+  const sustained = useSustained(() => !store.locked() && isOffline(store.phase()));
   return (
-    <Show when={!store.locked() && isOffline(store.phase())}>
+    <Show when={sustained()}>
       <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 text-xs text-muted" role="status">
         <WifiOff size={12} />
         <span>{t("offline_banner")}</span>

@@ -471,6 +471,8 @@ struct Runner {
     rtt: HashMap<PeerId, f64>,
     /// Connections refused by the limits and closed before being counted.
     refused: HashSet<ConnectionId>,
+    /// Dial attempts per peer since start, for TCP/QUIC alternation.
+    dial_attempts: HashMap<PeerId, u32>,
     limits: ConnectionLimits,
     scores: Scoreboard,
     peerstore: Peerstore,
@@ -634,6 +636,7 @@ pub fn start(
         ping_failures: HashMap::new(),
         rtt: HashMap::new(),
         refused: HashSet::new(),
+        dial_attempts: HashMap::new(),
         limits,
         scores: Scoreboard::new(),
         peerstore,
@@ -717,6 +720,41 @@ fn peer_of(addr: &Multiaddr) -> Option<PeerId> {
         Protocol::P2p(id) => Some(id),
         _ => None,
     })
+}
+
+/// "tcp", "quic", "relay" or "other" for a multiaddr, for logs.
+fn transport_of(addr: &Multiaddr) -> &'static str {
+    let mut kind = "other";
+    for p in addr.iter() {
+        match p {
+            Protocol::P2pCircuit => return "relay",
+            Protocol::QuicV1 | Protocol::Quic => kind = "quic",
+            Protocol::Tcp(_) => kind = "tcp",
+            _ => {}
+        }
+    }
+    kind
+}
+
+fn is_tcp(addr: &Multiaddr) -> bool {
+    transport_of(addr) == "tcp"
+}
+
+/// The addresses one dial attempt should use. With `prefer_tcp`, attempts
+/// alternate: the first (and every even one) uses only the TCP addresses
+/// when there are any, so QUIC cannot win the race just by finishing its
+/// handshake first; odd attempts use everything so a TCP-filtered network
+/// still connects over QUIC.
+fn addresses_for_attempt(addrs: Vec<Multiaddr>, prefer_tcp: bool, attempt: u32) -> Vec<Multiaddr> {
+    if !prefer_tcp || attempt % 2 == 1 {
+        return addrs;
+    }
+    let tcp: Vec<Multiaddr> = addrs.iter().filter(|a| is_tcp(a)).cloned().collect();
+    if tcp.is_empty() {
+        addrs
+    } else {
+        tcp
+    }
 }
 
 fn reason_code(err: &HandshakeError) -> ReasonCode {
@@ -1051,8 +1089,22 @@ impl Runner {
                 connection_id,
                 endpoint,
                 num_established,
-                ..
-            } => self.on_closed(peer_id, connection_id, &endpoint, num_established),
+                cause,
+            } => {
+                if self.verified.contains_key(&peer_id) {
+                    // Info, not debug: when a client keeps losing its node
+                    // this line is what tells the operator whether it was
+                    // QUIC or TCP and who hung up.
+                    info!(
+                        peer = %peer_id,
+                        transport = transport_of(remote_addr(&endpoint)),
+                        cause = %cause.as_ref().map(ToString::to_string).unwrap_or_else(|| "closed by us or by the peer".into()),
+                        remaining = num_established,
+                        "connection closed"
+                    );
+                }
+                self.on_closed(peer_id, connection_id, &endpoint, num_established);
+            }
             SwarmEvent::OutgoingConnectionError {
                 peer_id: Some(peer),
                 error,
@@ -1761,6 +1813,16 @@ impl Runner {
             if self.connected.contains_key(&peer) || self.banned.contains_key(&peer) {
                 continue;
             }
+            let attempt = {
+                let n = self.dial_attempts.entry(peer).or_insert(0);
+                let cur = *n;
+                *n = n.wrapping_add(1);
+                cur
+            };
+            if self.dial_attempts.len() > 4_096 {
+                self.dial_attempts.clear();
+            }
+            let list = addresses_for_attempt(list, self.cfg.prefer_tcp, attempt);
             let opts = DialOpts::peer_id(peer)
                 .addresses(list)
                 .condition(PeerCondition::DisconnectedAndNotDialing)
@@ -1968,6 +2030,24 @@ mod tests {
 
     fn roles(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn prefer_tcp_alternates_tcp_only_and_everything() {
+        let quic: Multiaddr = "/ip4/203.0.113.1/udp/26670/quic-v1".parse().unwrap();
+        let tcp: Multiaddr = "/ip4/203.0.113.1/tcp/26670".parse().unwrap();
+        let both = vec![quic.clone(), tcp.clone()];
+        assert_eq!(transport_of(&quic), "quic");
+        assert_eq!(transport_of(&tcp), "tcp");
+        // Even attempts: TCP only.
+        assert_eq!(addresses_for_attempt(both.clone(), true, 0), vec![tcp.clone()]);
+        assert_eq!(addresses_for_attempt(both.clone(), true, 2), vec![tcp.clone()]);
+        // Odd attempts: everything, so a TCP-filtered network still connects.
+        assert_eq!(addresses_for_attempt(both.clone(), true, 1), both);
+        // No TCP address: nothing to prefer.
+        assert_eq!(addresses_for_attempt(vec![quic.clone()], true, 0), vec![quic.clone()]);
+        // Preference off: untouched.
+        assert_eq!(addresses_for_attempt(both.clone(), false, 0), both);
     }
 
     #[test]
