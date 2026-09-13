@@ -23,7 +23,7 @@ one native desktop application talking to Hashgram's peer-to-peer network, never
 
 <br>
 
-[**Download v0.2.1**](https://github.com/deepdrogo/hashgram_windows/releases/latest) ·
+[**Download v0.2.2**](https://github.com/deepdrogo/hashgram_windows/releases/latest) ·
 [**Explore the network**](https://hashgram.io) ·
 [**Protocol source**](https://github.com/deepdrogo/hashgram) ·
 [**Security model**](docs/SECURITY.md) ·
@@ -46,15 +46,15 @@ contacts, file names, folder trees, private feeds and Space activity travel
 inside MLS ciphertext that relay and storage nodes cannot read.
 
 The Windows application is the first complete desktop client for that model.
-Version **0.2.1** was published on **13 September 2026**. It keeps the complete
-v0.2 workspace and adds automatic P2P reconnection after an Internet or
-adapter outage, an actionable identity-device setup flow, submission gates
-until the PC is registered on chain, a safe local-vault sign-out action and
-additional eventual-delivery coverage.
+Version **0.2.2** was published on **13 September 2026**. It keeps the complete
+workspace and the v0.2.1 device/setup improvements, then completes outage
+recovery by detecting repeated liveness failures, closing half-open or zombie
+P2P connections, clearing stale peer state and re-enabling bootstrap redial
+without restarting Hashgram.
 
 | | |
 |---|---|
-| **Application** | Hashgram One 0.2.1 |
+| **Application** | Hashgram One 0.2.2 |
 | **Platform** | Windows 10/11 x64 · Tauri 2 · WebView2 |
 | **Identity** | One locally generated or restored 24-word identity |
 | **Network** | Hashgram Mainnet (`hashgram-1`) through the peer-to-peer SDK |
@@ -139,7 +139,7 @@ additional eventual-delivery coverage.
 </table>
 
 > The desktop images are rendered from the application's built-in development
-> data shim. They show the real v0.2.1 UI and routes without exposing a real
+> data shim. They show the real v0.2.2 UI and routes without exposing a real
 > identity, message, wallet or network credential.
 
 ---
@@ -208,16 +208,16 @@ flowchart LR
 ## Download
 
 The latest public release is
-**[Hashgram One for Windows v0.2.1](https://github.com/deepdrogo/hashgram_windows/releases/tag/v0.2.1)**.
+**[Hashgram One for Windows v0.2.2](https://github.com/deepdrogo/hashgram_windows/releases/tag/v0.2.2)**.
 
 | File | Use |
 |---|---|
-| `Hashgram.One_0.2.1_x64-setup.exe` | Recommended per-user NSIS installer |
-| `Hashgram.One_0.2.1_x64_en-US.msi` | MSI package |
+| `Hashgram.One_0.2.2_x64-setup.exe` | Recommended per-user NSIS installer |
+| `Hashgram.One_0.2.2_x64_en-US.msi` | MSI package |
 | `SHA256SUMS.txt` | Published SHA-256 checksums |
 | `latest.json` + `.sig` files | Signed updater manifest and package signatures |
 
-The updater refuses an unsigned or foreign manifest. The v0.2.1 preview is
+The updater refuses an unsigned or foreign manifest. The v0.2.2 preview is
 **not Authenticode-signed yet**, so Windows SmartScreen may warn on first
 install. Verify the package against `SHA256SUMS.txt`. This limitation is stated
 explicitly rather than hidden.
@@ -226,7 +226,7 @@ explicitly rather than hidden.
 
 ## Current release status
 
-Implemented and shipped in v0.2.1:
+Implemented and shipped in v0.2.2:
 
 - Mail, Drive, People, Feed, private Circles and role-based Spaces.
 - Earn, Wallet, Network, Settings, Help and encrypted backup/restore.
@@ -239,6 +239,9 @@ Implemented and shipped in v0.2.1:
 - Explicit network requirements: at least 0.01 HASH for device registration;
   username registration additionally costs 1 HASH.
 - Safe sign-out that removes the local vault only after a destructive warning.
+- Three-failure liveness tracking that evicts half-open/zombie peers through
+  the normal connection-close path and allows bootstrap redial without an app
+  restart.
 
 Remaining QA:
 
