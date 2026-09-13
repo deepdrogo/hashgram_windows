@@ -170,7 +170,7 @@ module's doc comment explains its model.
 §6: G1 (score submitter of forged receipts), G2 (prune challenges), G3–G6
 pagination/checks, `x/identity` `MsgUpdateParams`, `x/storagemarket`.
 
-## 12. Desktop (Hashgram One for Windows, `apps/desktop`, v0.2.0)
+## 12. Desktop (Hashgram One for Windows, `apps/desktop`, v0.2.1)
 
 Built 2026-09-12 to `docs/DESKTOP_APP_MASTER_PROMPT.md` on branch
 `hashgram-one`; progress is ticked in
@@ -188,6 +188,10 @@ the chain proxy (`chain_proxy.rs`, loopback gateway for a node on this PC)
 and Network → overview work while locked. A sync task runs
 `sync().round()` → `save()` → emits `sync:phase` / `sync:event` /
 `sync:tick`, sleeps `next_delay()`, and is woken by `sync_now`.
+Since v0.2.1 housekeeping also treats two consecutive 15-second snapshots
+with no store peer as a dead transport, shuts it down with a timeout, starts
+a fresh link and reattaches the open session. This fixes recovery after a
+Windows network-adapter or Internet outage without restarting the app.
 `views.rs` strips key material (BlobRef key/nonce, Drive object keys,
 capability keys) before anything reaches the webview; unit tests assert it.
 
@@ -228,7 +232,9 @@ sandbox, format parity with `format_hash`/`parse_amount`, forbidden view
 fields, component behaviour). Real-app smoke on Mainnet 2026-09-12:
 onboarding → vault → Mail, link to the genesis node + indexer, wallet and
 network reads over the relay, 27 MiB Drive upload committed, lock / wrong
-passphrase / unlock.
+passphrase / unlock. v0.2.1 adds an inactive-device guard in the shell,
+Feed, Mail and usernames, a sync-aware Mail settings read, safe local
+sign-out, actionable error mapping, and a reconnect-health unit test.
 
 **Known issues / desktop TODOs.**
 

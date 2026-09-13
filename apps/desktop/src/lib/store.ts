@@ -1,6 +1,6 @@
 // Global reactive state: explicit signals, no framework beyond Solid.
 import { createSignal, createRoot } from "solid-js";
-import { ipc, on, errText, type AppStatus, type Settings, type SyncStatus, type SyncPhase, type FolderCounts, type SyncEvent } from "./ipc";
+import { ipc, on, errText, type AppStatus, type Settings, type SyncStatus, type SyncPhase, type FolderCounts, type SyncEvent, type IdentityStatus } from "./ipc";
 import { setLocale } from "./i18n";
 
 export interface Toast {
@@ -23,9 +23,11 @@ function createStore() {
   const [locked, setLocked] = createSignal(true);
   const [pendingTx, setPendingTx] = createSignal<number>(0);
   const [balance, setBalance] = createSignal<string | null>(null);
+  const [identity, setIdentity] = createSignal<IdentityStatus | null>(null);
   // A monotonically increasing tick per area; screens re-fetch when it changes.
   const [ticks, setTicks] = createSignal<Record<Refresh, number>>({ mail: 0, drive: 0, people: 0, feed: 0, circles: 0, spaces: 0, wallet: 0, network: 0 });
   let toastId = 0;
+  let registrationReadyNotified = false;
 
   const toast = (text: string, kind: Toast["kind"] = "info", action?: Toast["action"]) => {
     const id = ++toastId;
@@ -104,6 +106,20 @@ function createStore() {
       /* ignore */
     }
   };
+  const refreshIdentity = async () => {
+    if (locked()) {
+      setIdentity(null);
+      return null;
+    }
+    try {
+      const value = await ipc.identityStatus();
+      setIdentity(value);
+      return value;
+    } catch {
+      // Keep the last known registration state during a short outage.
+      return identity();
+    }
+  };
 
   const onSyncEvent = (ev: SyncEvent) => {
     switch (ev.kind) {
@@ -129,6 +145,19 @@ function createStore() {
         break;
       case "balance":
         setBalance(ev.uhash);
+        if (
+          !registrationReadyNotified &&
+          identity()?.this_device_registered === false &&
+          BigInt(ev.uhash || "0") > 0n
+        ) {
+          registrationReadyNotified = true;
+          toast("HASH received — this PC is ready for identity registration.", "info", {
+            label: "Finish setup",
+            run: () => {
+              window.location.hash = "/wallet/devices";
+            },
+          });
+        }
         break;
       case "round_done":
         if (ev.mail || ev.drive || ev.people || ev.circles || ev.spaces || ev.feed || ev.drive_committed !== null) {
@@ -159,6 +188,8 @@ function createStore() {
       setLocked(true);
       setCounts({});
       setRequestsIn(0);
+      setIdentity(null);
+      registrationReadyNotified = false;
       setPhase("Offline");
       void refreshStatus();
     });
@@ -167,11 +198,13 @@ function createStore() {
       void refreshStatus();
       void refreshCounts();
       void refreshSync();
+      void refreshIdentity();
     });
     await on("settings:changed", () => void refreshSettings());
     await on("net:changed", () => {
       void refreshStatus();
       void refreshSync();
+      if (!identity() || !identity()!.online) void refreshIdentity();
       bump("network");
     });
     await on("sync:phase", (p) => setPhase(p));
@@ -180,7 +213,10 @@ function createStore() {
     await on("tx:update", (p) => {
       void refreshPending();
       bump("wallet");
-      if (p.state === "committed") toast(`Transaction committed at height ${p.height ?? "?"}`);
+      if (p.state === "committed") {
+        toast(`Transaction committed at height ${p.height ?? "?"}`);
+        void refreshIdentity();
+      }
       if (p.state === "failed") toast(`Transaction failed: ${p.raw_log ?? ""}`, "error");
     });
     window.matchMedia?.("(prefers-color-scheme: light)").addEventListener?.("change", () => applyAppearance(settings()));
@@ -197,6 +233,7 @@ function createStore() {
     locked,
     pendingTx,
     balance,
+    identity,
     ticks,
     setLocked,
     toast,
@@ -207,6 +244,7 @@ function createStore() {
     refreshSync,
     refreshCounts,
     refreshPending,
+    refreshIdentity,
     applyAppearance,
     wire,
   };

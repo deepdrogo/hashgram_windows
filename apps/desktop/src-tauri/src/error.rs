@@ -57,6 +57,15 @@ impl UiError {
     pub fn offline(message: impl Into<String>) -> Self {
         Self::new("offline", message, true)
     }
+    /// This local device has not been authorised on chain yet.
+    #[must_use]
+    pub fn identity_not_registered() -> Self {
+        Self::new(
+            "identity_not_registered",
+            "This PC is not registered for your identity yet. Receive at least 0.01 HASH, then open Wallet → Devices and register this device before posting or sending mail.",
+            false,
+        )
+    }
 }
 
 impl From<SdkError> for UiError {
@@ -65,7 +74,14 @@ impl From<SdkError> for UiError {
             SdkError::Link(hashgram_sdk::link::LinkError::NoPeer(role)) => Self::offline(format!(
                 "offline — no {role} node is reachable yet; showing what is on this device"
             )),
-            SdkError::Link(other) => Self::new("offline", format!("network: {other}"), true),
+            SdkError::Link(other) => {
+                let message = other.to_string();
+                if message.to_ascii_lowercase().contains("not an active device") {
+                    Self::identity_not_registered()
+                } else {
+                    Self::new("offline", format!("network: {message}"), true)
+                }
+            }
             SdkError::NoRecipients | SdkError::NoKeyPackage(_) => Self::new(
                 "no_recipient_device",
                 "the recipient has no device online yet — they must open Hashgram once while connected",
@@ -111,7 +127,13 @@ impl From<SdkError> for UiError {
                     Self::new("chain", format!("chain: {s}"), true)
                 }
             }
-            SdkError::Delivery(d) => Self::new("delivery", format!("not delivered: {d}"), true),
+            SdkError::Delivery(d) => {
+                if d.to_ascii_lowercase().contains("not an active device") {
+                    Self::identity_not_registered()
+                } else {
+                    Self::new("delivery", format!("not delivered: {d}"), true)
+                }
+            }
             SdkError::Invalid(m) => Self::invalid(m),
             SdkError::NotFound(m) => Self::not_found(format!("not found: {m}")),
             SdkError::Corrupt(m) => Self::new("corrupt", format!("a node served corrupt data: {m}"), true),
@@ -184,6 +206,13 @@ mod tests {
         assert_eq!(e.code, "no_recipient_device");
         let e: UiError = SdkError::NoKeyPackage("abcd".into()).into();
         assert_eq!(e.code, "no_recipient_device");
+        let e: UiError = SdkError::Link(hashgram_sdk::link::LinkError::Refused {
+            code: "invalid".into(),
+            message: "device abc is not an active device of hash1x".into(),
+        })
+        .into();
+        assert_eq!(e.code, "identity_not_registered");
+        assert!(!e.retryable);
         let e: UiError = SdkError::Unsupported("mail v9".into()).into();
         assert_eq!(e.code, "unsupported");
         assert!(e.message.contains("update"));

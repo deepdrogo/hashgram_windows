@@ -3,7 +3,7 @@
 // toasts. Keyboard: Ctrl+K search, Ctrl+L lock, Alt+1..9 sections.
 import { For, Show, createEffect, createSignal, onMount, onCleanup, type ParentProps } from "solid-js";
 import { A, useLocation, useNavigate } from "@solidjs/router";
-import { Mail, HardDrive, Rss, Users, LayoutGrid, Coins, Wallet, Network, Settings, CircleHelp, Search, Lock, Download, X } from "lucide-solid";
+import { Mail, HardDrive, Rss, Users, LayoutGrid, Coins, Wallet, Network, Settings, CircleHelp, Search, Lock, Download, X, ShieldAlert, LogOut } from "lucide-solid";
 import { store } from "~/lib/store";
 import { updates } from "~/lib/updates";
 import { ipc } from "~/lib/ipc";
@@ -12,6 +12,7 @@ import { CommandPalette } from "./CommandPalette";
 import { PerfPanel } from "./PerfPanel";
 import { SyncIndicator } from "./SyncIndicator";
 import { Kbd, Button } from "./ui";
+import { confirm } from "~/lib/dialogs";
 
 export const NAV: { to: string; key: Key; icon: typeof Mail; accel: string }[] = [
   { to: "/mail", key: "nav_mail", icon: Mail, accel: "1" },
@@ -30,6 +31,15 @@ export function Shell(props: ParentProps) {
   const [perf, setPerf] = createSignal(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const signOut = async () => {
+    const ok = await confirm(
+      "Sign out and remove this account from this PC?\n\nThis deletes the local vault, mail and files. Make sure you have the 24 words or an encrypted backup. This cannot be undone.",
+    );
+    if (!ok) return;
+    await ipc.lock();
+    await ipc.wipeLocalData("DELETE");
+    window.location.reload();
+  };
 
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -155,6 +165,10 @@ export function Shell(props: ParentProps) {
               <span class="flex-1 text-left">{t("lock")}</span>
               <Kbd>Ctrl L</Kbd>
             </button>
+            <button type="button" class="row flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] text-muted hover:text-fg" onClick={() => void signOut()}>
+              <LogOut size={15} aria-hidden="true" />
+              <span class="flex-1 text-left">Sign out</span>
+            </button>
           </div>
         </nav>
         <div class="flex min-w-0 flex-1 flex-col">
@@ -174,6 +188,17 @@ export function Shell(props: ParentProps) {
               <Lock size={14} />
             </button>
           </header>
+          <Show when={store.identity() && !store.identity()!.this_device_registered}>
+            <div class="flex min-h-10 shrink-0 items-center gap-3 border-b border-border bg-surface-2 px-3 text-xs" role="alert">
+              <ShieldAlert size={15} class="text-brand" aria-hidden="true" />
+              <span class="flex-1">
+                This PC is not registered for your identity. Posting and mail need at least 0.01 HASH for the one-time registration; a username additionally costs 1 HASH.
+              </span>
+              <Button size="sm" variant="brand" onClick={() => navigate("/wallet/devices")}>
+                Finish setup
+              </Button>
+            </div>
+          </Show>
           <main class="min-h-0 min-w-0 flex-1 overflow-hidden" id="main">
             {props.children}
           </main>

@@ -486,6 +486,7 @@ function UsernamesTab() {
     (n) => (n.length >= 1 ? ipc.walletUsernameAvailability(n).catch(() => null) : Promise.resolve(null as UsernameAvailability | null)),
   );
   const [spec, setSpec] = createSignal<MsgSpec | null>(null);
+  const registered = () => store.identity()?.this_device_registered !== false;
   const regs = createMemo(() => arr(pick(mine(), "registrations")));
   return (
     <div class="flex max-w-2xl flex-col gap-4">
@@ -507,6 +508,14 @@ function UsernamesTab() {
       </Card>
       <Card title="Register a username">
         <div class="flex flex-col gap-3 p-4">
+          <Show when={!registered()}>
+            <Notice strong title="Register this PC first">
+              Usernames are on-chain records. Receive a small amount of HASH and complete the one-time identity registration in Wallet → Devices first.
+              <Button class="mt-2" size="sm" variant="secondary" onClick={() => { window.location.hash = "/wallet/devices"; }}>
+                Open Devices
+              </Button>
+            </Notice>
+          </Show>
           <Field
             label="Name"
             hint={avail() ? (avail()!.available ? `@${avail()!.normalized} is available` : `${REASONS[avail()!.reason] ?? avail()!.reason}${avail()!.conflicting_name ? ` (${avail()!.conflicting_name})` : ""}`) : "3–32 characters. 1 HASH, valid about a year, 30-day grace period."}
@@ -523,7 +532,7 @@ function UsernamesTab() {
             </div>
           </Field>
           <div class="flex justify-end">
-            <Button disabled={!avail()?.available} onClick={() => setSpec({ type: "register_username", name: avail()!.normalized })}>
+            <Button disabled={!registered() || !avail()?.available} onClick={() => setSpec({ type: "register_username", name: avail()!.normalized })}>
               <Plus size={14} /> Register @{avail()?.normalized || name()}
             </Button>
           </div>

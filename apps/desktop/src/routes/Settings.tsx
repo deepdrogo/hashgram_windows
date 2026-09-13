@@ -297,9 +297,18 @@ function SecurityTab(props: { s: Settings; patch: (f: (s: Settings) => void) => 
 function MailTab(props: { s: Settings; patch: (f: (s: Settings) => void) => void }) {
   const [ms, setMs] = createSignal<MailSettings | null>(null);
   createResource(
-    () => store.locked(),
-    async (locked) => {
-      if (!locked) setMs(await ipc.mailSettingsGet().catch(() => null));
+    () => ({ locked: store.locked(), phase: store.phase() }),
+    async ({ locked, phase }) => {
+      // The SDK sync round owns the facade mutex while it performs bounded
+      // network reads. Fetch this local setting as soon as the round reaches
+      // Idle instead of leaving the panel apparently stuck behind it.
+      const syncOwnsFacade =
+        phase === "Connecting" ||
+        phase === "Discovering" ||
+        (typeof phase === "object" && "Syncing" in phase);
+      if (!locked && !syncOwnsFacade && !ms()) {
+        setMs(await ipc.mailSettingsGet().catch(() => null));
+      }
       return null;
     },
   );

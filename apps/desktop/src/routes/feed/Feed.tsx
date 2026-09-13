@@ -530,11 +530,16 @@ function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircl
   const [multi, setMulti] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const registered = () => store.identity()?.this_device_registered !== false;
   const [circles] = createResource(
     () => (props.open ? store.ticks().circles : null),
     () => ipc.circlesList().catch(() => [] as CircleInfo[]),
   );
   const submit = async () => {
+    if (!registered()) {
+      setError("Finish identity setup before posting: receive at least 0.01 HASH, then register this PC in Wallet → Devices.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -609,13 +614,21 @@ function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircl
         <Show when={error()}>
           <Notice strong>{error()}</Notice>
         </Show>
+        <Show when={!registered()}>
+          <Notice strong title="Finish identity setup">
+            Nodes accept signed posts only from an active device. Receive at least 0.01 HASH, then register this PC once in Wallet → Devices.
+            <Button class="mt-2" size="sm" onClick={() => { props.onClose(); window.location.hash = "/wallet/devices"; }}>
+              Open Wallet → Devices
+            </Button>
+          </Notice>
+        </Show>
         <div class="flex items-center justify-between">
           <span class="text-[11px] text-muted">
             <Show when={target() === "public"} fallback={<><Eye size={10} class="mr-1 inline" />Encrypted to the circle's members only.</>}>
               Public and signed by your device key. Anyone can read it; you can delete it later (a tombstone).
             </Show>
           </span>
-          <Button loading={busy()} disabled={!text().trim() && !media().length && !(poll() && question().trim())} onClick={submit}>
+          <Button loading={busy()} disabled={!registered() || (!text().trim() && !media().length && !(poll() && question().trim()))} onClick={submit}>
             <Send size={12} /> {t("feed_post")}
           </Button>
         </div>

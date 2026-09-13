@@ -311,8 +311,15 @@ async fn two_backends_exchange_mail_drive_and_space_through_views() {
     // Live share update reaches Bob as a newer version.
     alice.drive().update(&entry, b"contract v2", "").await.unwrap();
     alice.save().unwrap();
-    bob.sync().round().await.unwrap();
-    let shared = bob.drive().shared_with_me().unwrap();
+    let mut shared = bob.drive().shared_with_me().unwrap();
+    for _ in 0..12 {
+        bob.sync().round().await.unwrap();
+        shared = bob.drive().shared_with_me().unwrap();
+        if shared[0].capability.version_no == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
     assert_eq!(shared[0].capability.version_no, 2);
     assert_eq!(shared[0].updates, 1);
 

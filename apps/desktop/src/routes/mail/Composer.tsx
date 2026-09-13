@@ -320,6 +320,9 @@ export function Composer(props: { open: ComposerOpen | null; onClose: () => void
   const problems = createMemo(() => {
     const all = [...to(), ...cc(), ...bcc()];
     const out: string[] = [];
+    if (store.identity()?.this_device_registered === false) {
+      out.push("finish identity setup in Wallet → Devices before sending mail");
+    }
     if (!all.length) out.push("add at least one recipient");
     if (all.some((c) => c.pending)) out.push("resolving recipients…");
     for (const c of all) if (c.res?.error) out.push(`${c.input}: ${c.res.error}`);

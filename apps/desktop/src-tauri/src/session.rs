@@ -138,7 +138,9 @@ pub fn spawn_link(app: AppHandle, state: Arc<AppState>) {
 pub async fn restart_link(app: &AppHandle, state: &Arc<AppState>, forget_peers: bool) {
     let old = state.link.write().await.take();
     if let Some(l) = old {
-        l.shutdown().await;
+        // A transport whose sockets died during an adapter/network change
+        // must not be allowed to stall recovery forever.
+        let _ = tokio::time::timeout(Duration::from_secs(5), l.shutdown()).await;
     }
     if forget_peers {
         let _ = std::fs::remove_file(paths::peerstore_path());
@@ -165,6 +167,20 @@ pub async fn reattach_link(state: &Arc<AppState>) {
     match one.replace_link(link, if chain_api.is_empty() { None } else { Some(&chain_api) }) {
         Ok(()) => tracing::info!("session re-attached to the network link"),
         Err(e) => tracing::warn!(error = %e, "could not re-attach the session to the link"),
+    }
+}
+
+fn link_needs_restart(unhealthy_checks: &mut u8, peers: usize, has_store: bool) -> bool {
+    if peers == 0 || !has_store {
+        *unhealthy_checks = unhealthy_checks.saturating_add(1);
+    } else {
+        *unhealthy_checks = 0;
+    }
+    if *unhealthy_checks >= 2 {
+        *unhealthy_checks = 0;
+        true
+    } else {
+        false
     }
 }
 
@@ -451,22 +467,60 @@ pub fn spawn_housekeeping(app: AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         let mut n: u64 = 0;
+        let mut unhealthy_link_checks: u8 = 0;
         loop {
             tick.tick().await;
             n += 1;
             if n.is_multiple_of(3) && state.auto_lock_due().await {
                 lock(&app, &state).await;
             }
-            if n.is_multiple_of(6) {
-                let peers = match state.link.read().await.as_ref() {
-                    Some(l) => l.peers().await.len(),
-                    None => 0,
+            if n.is_multiple_of(3) {
+                let (peers, has_store) = match state.link.read().await.as_ref() {
+                    Some(l) => {
+                        let peers = l.peers().await.len();
+                        let has_store = !l.peers_with_role("store").await.is_empty();
+                        (peers, has_store)
+                    }
+                    None => (0, false),
                 };
                 state.sync.write().await.peers = peers;
                 let _ = app.emit("net:changed", ());
+
+                // A Link object can survive while all of its sockets are
+                // dead. Previously `spawn_link` saw `Some(link)` and returned,
+                // so only restarting the process recovered after an internet
+                // outage. Two unhealthy 15-second checks trigger a clean
+                // redial while keeping local data and the unlocked session.
+                if link_needs_restart(&mut unhealthy_link_checks, peers, has_store) {
+                    tracing::warn!(
+                        peers,
+                        has_store,
+                        "network link unhealthy for 30 seconds; reconnecting automatically"
+                    );
+                    *state.link_error.write().await =
+                        Some("connection lost; reconnecting automatically".into());
+                    let _ = app.emit("net:changed", ());
+                    restart_link(&app, &state, false).await;
+                }
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::link_needs_restart;
+
+    #[test]
+    fn a_dead_link_restarts_after_two_checks_and_health_resets_the_streak() {
+        let mut checks = 0;
+        assert!(!link_needs_restart(&mut checks, 0, false));
+        assert!(!link_needs_restart(&mut checks, 1, true));
+        assert_eq!(checks, 0);
+        assert!(!link_needs_restart(&mut checks, 1, false));
+        assert!(link_needs_restart(&mut checks, 0, false));
+        assert_eq!(checks, 0);
+    }
 }
 
 /// Opens a vault by passphrase on a blocking thread (Argon2id).

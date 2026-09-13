@@ -407,7 +407,10 @@ export function IdentityStep(props: { info: AccountInfo; onDone: () => void; emb
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const balance = createMemo(() => BigInt(status()?.balance_uhash ?? "0"));
-  const funded = () => balance() > 0n;
+  // The relayed chain transport cannot simulate, so identity registration
+  // uses the SDK's conservative gas estimate. 0.01 HASH leaves ample room
+  // for that one-time fee instead of enabling a button that may still fail.
+  const funded = () => balance() >= 10_000n;
   const registered = () => !!status()?.this_device_registered;
   const register = async () => {
     setBusy(true);
@@ -454,7 +457,7 @@ export function IdentityStep(props: { info: AccountInfo; onDone: () => void; emb
             when={funded()}
             fallback={
               <Notice title={t("identity_needs_hash")}>
-                This account holds no HASH yet, so it cannot pay the registration fee. Send some HASH to the address above (scan the QR from a wallet that has some) and come back — the app checks on every sync. Drive, drafts and settings already work; mail needs the registration.
+                Send at least 0.01 HASH to the address above so this PC can pay the one-time identity registration fee. The app checks on every sync. Until then, Drive, drafts and settings work locally; posting, usernames, and sending or receiving mail do not.
               </Notice>
             }
           >
@@ -482,7 +485,7 @@ export function IdentityStep(props: { info: AccountInfo; onDone: () => void; emb
             </Button>
           </Show>
           <Button variant={registered() ? "primary" : "secondary"} onClick={props.onDone}>
-            {registered() ? "Open Hashgram" : "Continue without registering"}
+            {registered() ? "Open Hashgram" : "Use local features only"}
           </Button>
         </div>
       </div>

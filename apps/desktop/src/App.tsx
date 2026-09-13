@@ -57,12 +57,16 @@ export function App() {
     await store.wire();
     void store.refreshSync();
     void store.refreshPending();
-    if (s.unlocked) void store.refreshCounts();
+    if (s.unlocked) {
+      void store.refreshCounts();
+      void store.refreshIdentity();
+    }
     decide(!!s && !s.vault_exists);
     void ipc.perfMark("ui:interactive", Math.round((performance.now() - start) * 1000));
     await on("session:locked", () => setPhase("locked"));
     await on("session:unlocked", () => {
       void store.refreshCounts();
+      void store.refreshIdentity();
       setPhase("app");
     });
     let last = performance.now();
