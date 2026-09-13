@@ -27,7 +27,7 @@ const FOLDERS: { id: string; key: Key; icon: typeof Inbox }[] = [
 
 export function MailRoute() {
   const params = useParams<{ folder?: string; id?: string }>();
-  const [search, setSearch] = useSearchParams<{ compose?: string; q?: string; label?: string }>();
+  const [search, setSearch] = useSearchParams<{ compose?: string; q?: string; label?: string; subject?: string; body?: string }>();
   const navigate = useNavigate();
   const folder = () => params.folder || "inbox";
   const selected = () => params.id ?? null;
@@ -41,8 +41,8 @@ export function MailRoute() {
 
   createEffect(() => {
     if (search.compose) {
-      setComposer({ to: search.q ? [search.q] : undefined });
-      setSearch({ compose: undefined, q: undefined });
+      setComposer({ to: search.q ? [search.q] : undefined, subject: search.subject || undefined, body: search.body || undefined });
+      setSearch({ compose: undefined, q: undefined, subject: undefined, body: undefined });
     }
   });
 

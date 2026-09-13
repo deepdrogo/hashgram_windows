@@ -70,13 +70,14 @@ pub async fn network_overview(state: S<'_>) -> CmdResult<NetworkOverview> {
     let link_error = state.link_error.read().await.clone();
     let (peers, rejected) = match &link {
         Some(l) => (
-            l.peers()
+            l.peers_ranked()
                 .await
                 .into_iter()
                 .map(|p| PeerView {
-                    peer: p.peer.to_string(),
-                    roles: p.roles,
-                    operator: p.operator,
+                    peer: p.peer.peer.to_string(),
+                    roles: p.peer.roles,
+                    operator: p.peer.operator,
+                    rtt_ms: p.rtt_ms,
                 })
                 .collect::<Vec<_>>(),
             l.rejected()

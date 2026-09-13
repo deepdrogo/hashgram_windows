@@ -6,7 +6,7 @@ import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { Search, UserPlus, Mail, Check, X, Ban, ShieldCheck, VolumeX, Heart, IdCard, Users, Copy as CopyIcon } from "lucide-solid";
 import { Button, Checkbox, Dialog, Field, Input, Notice, Tabs, Textarea, Badge, Empty } from "~/components/ui";
 import { OfflineBanner, ErrorState } from "~/components/States";
-import { Avatar, Mono } from "~/components/identity";
+import { Avatar, Mono, forgetAvatar } from "~/components/identity";
 import { ipc, errText, type ContactRecord, type Resolved } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { t } from "~/lib/i18n";
@@ -393,7 +393,7 @@ export function AuthorFeed(props: { address: string }) {
   );
 }
 
-function MyProfileDialog(props: { open: boolean; onClose: () => void }) {
+export function MyProfileDialog(props: { open: boolean; onClose: () => void }) {
   const me = () => store.status()?.address ?? "";
   const [name, setName] = createSignal("");
   const [bio, setBio] = createSignal("");
@@ -441,6 +441,7 @@ function MyProfileDialog(props: { open: boolean; onClose: () => void }) {
                 try {
                   await ipc.feedProfileUpdate(name(), bio(), avatar() || undefined);
                   store.toast("Public profile published");
+                  if (avatar()) { forgetAvatar(me()); setAvatar(""); }
                   store.bump("people", "feed");
                 } catch (e) {
                   store.toast(errText(e), "error");

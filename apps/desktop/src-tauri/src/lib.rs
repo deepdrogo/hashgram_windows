@@ -28,6 +28,7 @@ pub mod chain_proxy;
 pub mod cmd_drive;
 pub mod cmd_earn;
 pub mod cmd_feed;
+pub mod cmd_hashwall;
 pub mod cmd_identity;
 pub mod cmd_mail;
 pub mod cmd_network;
@@ -387,6 +388,21 @@ pub fn run() {
             cmd_feed::circles_comments,
             cmd_feed::circles_merged,
             cmd_feed::circles_media_fetch,
+            // hashwall: explore, walls, profile, avatars, rich list
+            cmd_hashwall::hashwall_explore,
+            cmd_hashwall::hashwall_digest,
+            cmd_hashwall::hashwall_thread,
+            cmd_hashwall::walls_create,
+            cmd_hashwall::walls_info,
+            cmd_hashwall::walls_page,
+            cmd_hashwall::walls_pin,
+            cmd_hashwall::walls_pinned,
+            cmd_hashwall::people_profile_cached,
+            cmd_hashwall::people_avatar,
+            cmd_hashwall::profile_me,
+            cmd_hashwall::profile_my_events,
+            cmd_hashwall::network_holders,
+            cmd_hashwall::network_providers,
             // spaces
             cmd_spaces::spaces_list,
             cmd_spaces::spaces_create,

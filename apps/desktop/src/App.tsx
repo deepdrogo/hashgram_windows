@@ -1,5 +1,5 @@
 import { createSignal, onMount, Show, Switch, Match, lazy } from "solid-js";
-import { HashRouter, Route, Navigate, useNavigate } from "@solidjs/router";
+import { HashRouter, Route, Navigate, useNavigate, useParams } from "@solidjs/router";
 import { store } from "./lib/store";
 import { ipc, on } from "./lib/ipc";
 import { Splash } from "./components/Splash";
@@ -10,6 +10,8 @@ import { MailRoute } from "./routes/mail/Mail";
 
 const Drive = lazy(() => import("./routes/drive/Drive").then((m) => ({ default: m.DriveRoute })));
 const Feed = lazy(() => import("./routes/feed/Feed").then((m) => ({ default: m.FeedRoute })));
+const Explore = lazy(() => import("./routes/Explore").then((m) => ({ default: m.ExploreRoute })));
+const Me = lazy(() => import("./routes/Me").then((m) => ({ default: m.MeRoute })));
 const People = lazy(() => import("./routes/People").then((m) => ({ default: m.PeopleRoute })));
 const Spaces = lazy(() => import("./routes/spaces/Spaces").then((m) => ({ default: m.SpacesRoute })));
 const Earn = lazy(() => import("./routes/Earn").then((m) => ({ default: m.EarnRoute })));
@@ -129,7 +131,10 @@ export function App() {
           <Route path="/" component={() => <Navigate href="/mail/inbox" />} />
           <Route path="/mail/:folder?/:id?" component={MailRoute} />
           <Route path="/drive/:parent?" component={Drive} />
-          <Route path="/feed/:tab?/:id?" component={Feed} />
+          <Route path="/hashwall/:tab?/:id?" component={Feed} />
+          <Route path="/feed/:tab?/:id?" component={FeedRedirect} />
+          <Route path="/explore/:section?/:arg?" component={Explore} />
+          <Route path="/me" component={Me} />
           <Route path="/people/:address?" component={People} />
           <Route path="/spaces/:id?/:tab?" component={Spaces} />
           <Route path="/earn/:tab?" component={Earn} />
@@ -144,7 +149,14 @@ export function App() {
   );
 }
 
-/** hashgram:// links: mail/<id>, space/<id>, drive/<id>, user/<addr|@name>. */
+/** `/feed/…` → `/hashwall/…`, same tab and post. */
+function FeedRedirect() {
+  const params = useParams<{ tab?: string; id?: string }>();
+  const target = () => `/hashwall${params.tab ? `/${params.tab}` : ""}${params.id ? `/${params.id}` : ""}`;
+  return <Navigate href={target()} />;
+}
+
+/** hashgram:// links: mail/<id>, space/<id>, drive/<id>, user/<addr|@name>, wall/<id>, post/<id>, tag/<name>. */
 function DeepLinks() {
   const navigate = useNavigate();
   onMount(() => {
@@ -156,6 +168,9 @@ function DeepLinks() {
       else if (head === "space" && arg) navigate(`/spaces/${arg}`);
       else if (head === "drive" && arg) navigate(`/drive/?select=${arg}`);
       else if (head === "user" && arg) navigate(arg.startsWith("hash1") ? `/people/${arg}` : `/people?q=${encodeURIComponent(arg)}`);
+      else if (head === "wall" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/hashwall/walls/${arg.toLowerCase()}`);
+      else if (head === "post" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/hashwall/friends/${arg.toLowerCase()}`);
+      else if (head === "tag" && arg) navigate(`/explore/posts/${encodeURIComponent(arg.replace(/^#/, ""))}`);
       else if (/^hash1/.test(rest)) navigate(`/people/${rest}`);
       else if (rest.startsWith("@")) navigate(`/people?q=${encodeURIComponent(rest)}`);
       else store.toast(`Unrecognised link: ${url}`, "error");

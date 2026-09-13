@@ -106,6 +106,10 @@ pub struct PeerSummary {
     pub connected_secs: u64,
     /// Agent version from identify, if received.
     pub agent: String,
+    /// Smoothed round-trip time from the liveness pings, in milliseconds;
+    /// `None` until the first ping answers. The only notion of "near" the
+    /// network has: no addresses are geolocated.
+    pub rtt_ms: Option<u64>,
 }
 
 /// A snapshot of the swarm for the status API.
@@ -431,6 +435,12 @@ fn ping_streak_requires_disconnect(streak: &mut u8) -> bool {
     *streak >= PING_FAILURES_BEFORE_DISCONNECT
 }
 
+/// Exponentially weighted round-trip estimate (α = 1/4, like TCP's SRTT):
+/// one slow ping does not make a near node look far.
+fn smooth_rtt(previous_ms: f64, sample_ms: f64) -> f64 {
+    previous_ms * 0.75 + sample_ms * 0.25
+}
+
 /// The actor.
 struct Runner {
     swarm: Swarm<Behaviour>,
@@ -457,6 +467,8 @@ struct Runner {
     /// Consecutive failed liveness probes for verified peers. A Windows
     /// adapter change can leave a half-open connection without a close event.
     ping_failures: HashMap<PeerId, u8>,
+    /// Smoothed ping round-trip per peer (EWMA, milliseconds).
+    rtt: HashMap<PeerId, f64>,
     /// Connections refused by the limits and closed before being counted.
     refused: HashSet<ConnectionId>,
     limits: ConnectionLimits,
@@ -620,6 +632,7 @@ pub fn start(
         pending_reject: HashMap::new(),
         buckets: HashMap::new(),
         ping_failures: HashMap::new(),
+        rtt: HashMap::new(),
         refused: HashSet::new(),
         limits,
         scores: Scoreboard::new(),
@@ -1132,6 +1145,7 @@ impl Runner {
             self.identified.remove(&peer);
             self.buckets.remove(&peer);
             self.ping_failures.remove(&peer);
+            self.rtt.remove(&peer);
             if self.verified.remove(&peer).is_some() {
                 let _ = self.events.try_send(Event::PeerDisconnected(peer));
             }
@@ -1213,8 +1227,13 @@ impl Runner {
                 info!(status = self.reachability, "reachability changed");
             }
             BehaviourEvent::Ping(libp2p::ping::Event { peer, result, .. }) => {
-                if result.is_ok() {
+                if let Ok(rtt) = result {
                     self.ping_failures.remove(&peer);
+                    let sample = rtt.as_secs_f64() * 1000.0;
+                    self.rtt
+                        .entry(peer)
+                        .and_modify(|v| *v = smooth_rtt(*v, sample))
+                        .or_insert(sample);
                 } else {
                     self.score(peer, ScoreEvent::RequestTimedOut);
                     if self.verified.contains_key(&peer) {
@@ -1893,6 +1912,7 @@ impl Runner {
                     .get(peer)
                     .map(|(_, a)| a.clone())
                     .unwrap_or_default(),
+                rtt_ms: self.rtt.get(peer).map(|v| v.round() as u64),
             })
             .collect()
     }

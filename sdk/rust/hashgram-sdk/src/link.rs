@@ -61,6 +61,15 @@ pub struct KnownPeer {
     pub operator: String,
 }
 
+/// A verified peer with its measured network distance.
+#[derive(Debug, Clone)]
+pub struct RankedPeer {
+    /// The peer.
+    pub peer: KnownPeer,
+    /// Smoothed ping round-trip in milliseconds, once measured.
+    pub rtt_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 struct PeerInfo {
     roles: Vec<String>,
@@ -265,6 +274,39 @@ impl Link {
                 operator: i.operator.clone(),
             })
             .collect()
+    }
+
+    /// Verified peers ordered nearest first: by measured ping round-trip
+    /// (peers not yet measured come last), with store nodes preferred at
+    /// equal distance because they hold the public log. This is the whole
+    /// notion of "nodes near me" — network distance, not geography; the
+    /// client never geolocates anyone.
+    pub async fn peers_ranked(&self) -> Vec<RankedPeer> {
+        let known = self.peers().await;
+        if known.is_empty() {
+            return Vec::new();
+        }
+        let live = self.handle.peers().await;
+        let mut out: Vec<RankedPeer> = known
+            .into_iter()
+            .map(|k| {
+                let rtt_ms = live
+                    .iter()
+                    .find(|s| s.peer_id == k.peer.to_string())
+                    .and_then(|s| s.rtt_ms);
+                RankedPeer { peer: k, rtt_ms }
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            let da = a.rtt_ms.unwrap_or(u64::MAX);
+            let db = b.rtt_ms.unwrap_or(u64::MAX);
+            da.cmp(&db).then_with(|| {
+                let sa = a.peer.roles.iter().any(|r| r == "store");
+                let sb = b.peer.roles.iter().any(|r| r == "store");
+                sb.cmp(&sa)
+            })
+        });
+        out
     }
 
     /// The operator address a peer claimed, if any.

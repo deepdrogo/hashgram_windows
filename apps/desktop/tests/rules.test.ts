@@ -69,7 +69,9 @@ describe("no mining", () => {
   it("the section is called Earn and the rail is in the specified order", () => {
     const shell = readFileSync(join(DESKTOP, "src", "components", "Shell.tsx"), "utf8");
     const keys = [...shell.matchAll(/key:\s*"nav_([a-z]+)"/g)].map((m) => m[1]);
-    expect(keys).toEqual(["mail", "drive", "feed", "people", "spaces", "earn", "wallet", "network", "settings"]);
+    // Explore and My profile were added later; the original sections keep their relative order.
+    expect(keys).toEqual(["mail", "drive", "feed", "explore", "people", "spaces", "earn", "wallet", "network", "me", "settings"]);
+    expect(keys.filter((k) => !["explore", "me"].includes(k ?? ""))).toEqual(["mail", "drive", "feed", "people", "spaces", "earn", "wallet", "network", "settings"]);
   });
 });
 

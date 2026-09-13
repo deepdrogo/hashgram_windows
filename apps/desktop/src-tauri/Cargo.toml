@@ -2,7 +2,7 @@
 name = "hashgram-desktop"
 workspace = "../../../node"
 description = "Hashgram One for Windows: one identity, one inbox, one vault, one network"
-version = "0.2.2"
+version = "0.3.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

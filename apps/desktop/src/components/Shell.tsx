@@ -3,7 +3,7 @@
 // toasts. Keyboard: Ctrl+K search, Ctrl+L lock, Alt+1..9 sections.
 import { For, Show, createEffect, createSignal, onMount, onCleanup, type ParentProps } from "solid-js";
 import { A, useLocation, useNavigate } from "@solidjs/router";
-import { Mail, HardDrive, Rss, Users, LayoutGrid, Coins, Wallet, Network, Settings, CircleHelp, Search, Lock, Download, X, ShieldAlert, LogOut } from "lucide-solid";
+import { Mail, HardDrive, Rss, Users, LayoutGrid, Coins, Wallet, Network, Settings, CircleHelp, Search, Lock, Download, X, ShieldAlert, LogOut, Compass, UserCircle } from "lucide-solid";
 import { store } from "~/lib/store";
 import { updates } from "~/lib/updates";
 import { ipc } from "~/lib/ipc";
@@ -17,13 +17,15 @@ import { confirm } from "~/lib/dialogs";
 export const NAV: { to: string; key: Key; icon: typeof Mail; accel: string }[] = [
   { to: "/mail", key: "nav_mail", icon: Mail, accel: "1" },
   { to: "/drive", key: "nav_drive", icon: HardDrive, accel: "2" },
-  { to: "/feed", key: "nav_feed", icon: Rss, accel: "3" },
-  { to: "/people", key: "nav_people", icon: Users, accel: "4" },
-  { to: "/spaces", key: "nav_spaces", icon: LayoutGrid, accel: "5" },
-  { to: "/earn", key: "nav_earn", icon: Coins, accel: "6" },
-  { to: "/wallet", key: "nav_wallet", icon: Wallet, accel: "7" },
-  { to: "/network", key: "nav_network", icon: Network, accel: "8" },
-  { to: "/settings", key: "nav_settings", icon: Settings, accel: "9" },
+  { to: "/hashwall", key: "nav_feed", icon: Rss, accel: "3" },
+  { to: "/explore", key: "nav_explore", icon: Compass, accel: "4" },
+  { to: "/people", key: "nav_people", icon: Users, accel: "5" },
+  { to: "/spaces", key: "nav_spaces", icon: LayoutGrid, accel: "6" },
+  { to: "/earn", key: "nav_earn", icon: Coins, accel: "7" },
+  { to: "/wallet", key: "nav_wallet", icon: Wallet, accel: "8" },
+  { to: "/network", key: "nav_network", icon: Network, accel: "9" },
+  { to: "/me", key: "nav_me", icon: UserCircle, accel: "0" },
+  { to: "/settings", key: "nav_settings", icon: Settings, accel: "" },
 ];
 
 export function Shell(props: ParentProps) {
@@ -52,8 +54,8 @@ export function Shell(props: ParentProps) {
       } else if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "l") {
         e.preventDefault();
         void ipc.lock();
-      } else if (e.altKey && /^[1-9]$/.test(e.key)) {
-        const item = NAV.find((n) => n.accel === e.key);
+      } else if (e.altKey && /^[0-9]$/.test(e.key)) {
+        const item = NAV.find((n) => n.accel && n.accel === e.key);
         if (item) {
           e.preventDefault();
           navigate(item.to);
@@ -139,7 +141,7 @@ export function Shell(props: ParentProps) {
                     href={item.to}
                     class={`row flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] ${isActive(item.to) ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"}`}
                     aria-current={isActive(item.to) ? "page" : undefined}
-                    title={`${t(item.key)} (Alt+${item.accel})`}
+                    title={item.accel ? `${t(item.key)} (Alt+${item.accel})` : t(item.key)}
                     data-nav={item.key}
                   >
                     <item.icon size={15} aria-hidden="true" class={isActive(item.to) ? "text-brand" : ""} />

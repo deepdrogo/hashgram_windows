@@ -102,6 +102,7 @@ pub async fn feed_thread(state: S<'_>, post: String) -> CmdResult<Option<PostThr
 }
 
 /// Creates a public post; `media_paths` are read here and uploaded.
+/// `channel` (optional, hex id) puts the post on a wall.
 #[tauri::command]
 pub async fn feed_post(
     state: S<'_>,
@@ -109,7 +110,12 @@ pub async fn feed_post(
     hashtags: Vec<String>,
     media_paths: Vec<String>,
     sensitive: bool,
+    channel: Option<String>,
 ) -> CmdResult<String> {
+    let channel = channel.map(|c| c.trim().to_ascii_lowercase()).unwrap_or_default();
+    if !channel.is_empty() && (channel.len() != 64 || !channel.chars().all(|c| c.is_ascii_hexdigit())) {
+        return Err(UiError::invalid("wall id"));
+    }
     if text.trim().is_empty() && media_paths.is_empty() {
         return Err(UiError::invalid("write something or add media"));
     }
@@ -131,7 +137,10 @@ pub async fn feed_post(
     for (bytes, mime, kind) in files {
         media.push(one.feed().upload_media(&bytes, &mime, &kind).await?);
     }
-    let id = one.feed().post(text.trim(), tags, media, sensitive).await?;
+    let id = one
+        .feed()
+        .post_on(text.trim(), tags, media, sensitive, &channel)
+        .await?;
     one.save()?;
     Ok(id)
 }

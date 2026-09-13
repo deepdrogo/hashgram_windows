@@ -3,6 +3,7 @@
 // or the middle-truncated address beside it, in the monospace face.
 import { Show, createResource } from "solid-js";
 import { Copy } from "lucide-solid";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { truncateMiddle } from "~/lib/format";
 import { copyText } from "~/lib/clipboard";
 import { ipc } from "~/lib/ipc";
@@ -125,6 +126,38 @@ export function Avatar(props: { address: string; size?: number; src?: string | n
       <img src={props.src ?? ""} width={size()} height={size()} class="shrink-0 rounded-md object-cover" alt="" />
     </Show>
   );
+}
+
+// Avatar resolution: address → profile (cached ≤15 min on the Rust side) →
+// avatar blob → local file. Memoised per session so a list of fifty posts
+// by the same author costs one lookup, and never repeated for an address
+// that has no avatar.
+const avatarCache = new Map<string, Promise<string | null>>();
+
+export function avatarSrc(address: string): Promise<string | null> {
+  let p = avatarCache.get(address);
+  if (!p) {
+    p = ipc
+      .peopleProfileCached(address)
+      .then((prof) => (prof.avatar_cid ? ipc.peopleAvatar(prof.avatar_cid).then(convertFileSrc) : null))
+      .catch(() => null);
+    avatarCache.set(address, p);
+  }
+  return p;
+}
+
+/** Forgets a cached avatar (after the user changes their own). */
+export function forgetAvatar(address: string) {
+  avatarCache.delete(address);
+}
+
+/** An address's network avatar, with the identicon until (or unless) one loads. */
+export function PersonAvatar(props: { address: string; size?: number }) {
+  const [src] = createResource(
+    () => ({ a: props.address, locked: store.locked() }),
+    (k) => (k.locked || !k.a ? Promise.resolve(null) : avatarSrc(k.a)),
+  );
+  return <Avatar address={props.address} size={props.size} src={src() ?? null} />;
 }
 
 export function Dot(props: { state: "ok" | "warn" | "bad" | "off"; title?: string; class?: string }) {

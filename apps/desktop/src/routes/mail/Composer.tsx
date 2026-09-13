@@ -17,6 +17,10 @@ export interface ComposerOpen {
   all?: boolean;
   forward?: string;
   to?: string[];
+  /** Prefilled subject for a fresh draft (e.g. a wall invitation). */
+  subject?: string;
+  /** Prefilled body for a fresh draft. */
+  body?: string;
 }
 
 const MAX_RECIPIENTS = 100;
@@ -214,9 +218,10 @@ export function Composer(props: { open: ComposerOpen | null; onClose: () => void
       setBcc(d.bcc.map((x) => ({ input: x, pending: true })));
       setShowCc(d.cc.length > 0);
       setShowBcc(d.bcc.length > 0);
-      setSubject(d.subject);
-      setBody(d.body_text);
-      dirty = false;
+      setSubject(d.subject || o.subject || "");
+      setBody(d.body_text || o.body || "");
+      dirty = !!(o.subject || o.body) && !d.subject && !d.body_text;
+      if (dirty) scheduleSave();
       queueMicrotask(() => {
         if (o.replyTo || o.to?.length) bodyRef?.focus();
       });

@@ -365,11 +365,106 @@ export interface FeedItem {
   payload: Record<string, unknown>;
   media: [string, string, number][];
   visibility: string;
+  /** Wall (channel) hex id, "" for none. */
+  channel: string;
+  /** Post replied to, hex id, "" for none. */
+  reply_to: string;
 }
 export interface PostThread {
   post: FeedItem;
   comments: FeedItem[];
   reactions: Record<string, number>;
+}
+/** One page of a remote timeline (Explore, wall, hashtag). */
+export interface ExplorePage {
+  items: FeedItem[];
+  /** `before` for the next page; 0 when exhausted. */
+  next_before: number;
+  source_peer: string;
+  source_operator: string;
+  source_rtt_ms: number | null;
+}
+export interface WallInfo {
+  id: string;
+  name: string;
+  description: string;
+  creator: string;
+  open_posting: boolean;
+  created_at: number;
+  posts: number;
+  authors: number;
+  last_post: number;
+  pinned: boolean;
+}
+export interface AuthorActivity {
+  author: string;
+  posts: number;
+  comments: number;
+  reactions_received: number;
+  comments_received: number;
+  last_active: number;
+}
+export interface HashtagActivity {
+  tag: string;
+  posts: number;
+  authors: number;
+  last_used: number;
+}
+export interface Digest {
+  window_secs: number;
+  events: number;
+  authors: number;
+  total_events: number;
+  total_authors: number;
+  top_authors: AuthorActivity[];
+  top_hashtags: HashtagActivity[];
+  walls: WallInfo[];
+  computed_at: number;
+  source_peer: string;
+  source_operator: string;
+  source_rtt_ms: number | null;
+}
+export interface MyActivity {
+  posts: number;
+  comments: number;
+  reactions: number;
+  reposts: number;
+  walls_created: number;
+  following: number;
+  events: number;
+  walls_posted: string[];
+  first_event: number;
+  last_event: number;
+  reactions_received: number;
+  comments_received: number;
+  score: number;
+}
+export interface MyProfile {
+  address: string;
+  username: string;
+  display_name: string;
+  bio: string;
+  avatar_cid: string;
+  balance: Balance | null;
+  activity: MyActivity;
+  refreshed: boolean;
+  walls: WallInfo[];
+  friends: number;
+  following: number;
+}
+export interface Holder {
+  rank: number;
+  address: string;
+  balance_uhash: string;
+  share_bps: number;
+  username: string;
+}
+export interface Holders {
+  holders: Holder[];
+  accounts_scanned: number;
+  complete: boolean;
+  total_uhash: string;
+  height: number | null;
 }
 export interface CircleInfo {
   id: string;
@@ -633,6 +728,8 @@ export interface PeerView {
   peer: string;
   roles: string[];
   operator: string;
+  /** Measured ping round-trip in ms; null until measured. */
+  rtt_ms: number | null;
 }
 export interface NetworkOverview {
   network_id: string;
@@ -806,7 +903,8 @@ export const ipc = {
   feedAuthor: (address: string, before?: number, limit?: number) => call<FeedItem[]>("feed_author", { address, before, limit }),
   feedExplore: (before?: number, limit?: number, tag?: string) => call<unknown | null>("feed_explore", { before, limit, tag }),
   feedThread: (post: string) => call<PostThread | null>("feed_thread", { post }),
-  feedPost: (text: string, hashtags: string[], mediaPaths: string[], sensitive: boolean) => call<string>("feed_post", { text, hashtags, mediaPaths, sensitive }),
+  feedPost: (text: string, hashtags: string[], mediaPaths: string[], sensitive: boolean, channel?: string) =>
+    call<string>("feed_post", { text, hashtags, mediaPaths, sensitive, channel }),
   feedComment: (post: string, text: string) => call<string>("feed_comment", { post, text }),
   feedReact: (target: string, reaction: string) => call<string>("feed_react", { target, reaction }),
   feedRepost: (post: string, comment: string) => call<string>("feed_repost", { post, comment }),
@@ -831,6 +929,22 @@ export const ipc = {
   circlesComments: (circle: string, post: string) => call<CircleItemView[]>("circles_comments", { circle, post }),
   circlesMerged: (beforeMs?: number, limit?: number) => call<MergedItem[]>("circles_merged", { beforeMs, limit }),
   circlesMediaFetch: (circle: string, item: string, index: number) => call<string>("circles_media_fetch", { circle, item, index }),
+
+  // hashwall: explore (P2P), walls, profile, avatars, rich list
+  hashwallExplore: (before?: number, limit?: number, tag?: string) => call<ExplorePage>("hashwall_explore", { before, limit, tag }),
+  hashwallDigest: (windowSecs?: number, limit?: number) => call<Digest>("hashwall_digest", { windowSecs, limit }),
+  hashwallThread: (post: string) => call<PostThread | null>("hashwall_thread", { post }),
+  wallsCreate: (name: string, description: string, openPosting: boolean) => call<WallInfo>("walls_create", { name, description, openPosting }),
+  wallsInfo: (wall: string) => call<WallInfo>("walls_info", { wall }),
+  wallsPage: (wall: string, before?: number, limit?: number) => call<ExplorePage>("walls_page", { wall, before, limit }),
+  wallsPin: (wall: string, on: boolean) => call<WallInfo[]>("walls_pin", { wall, on }),
+  wallsPinned: () => call<WallInfo[]>("walls_pinned"),
+  peopleProfileCached: (address: string) => call<Profile>("people_profile_cached", { address }),
+  peopleAvatar: (cid: string) => call<string>("people_avatar", { cid }),
+  profileMe: () => call<MyProfile>("profile_me"),
+  profileMyEvents: (before?: number, limit?: number) => call<FeedItem[]>("profile_my_events", { before, limit }),
+  networkHolders: (limit?: number) => call<Holders>("network_holders", { limit }),
+  networkProviders: () => call<ProviderStatus[]>("network_providers"),
 
   // spaces
   spacesList: () => call<SpaceSummary[]>("spaces_list"),

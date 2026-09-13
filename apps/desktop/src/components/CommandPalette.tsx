@@ -53,7 +53,7 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
     const lower = query.toLowerCase();
     if (!query) {
       out.push({ kind: "cmd", id: "compose", label: t("mail_compose"), hint: "c", run: () => navigate("/mail?compose=1") });
-      for (const n of NAV) out.push({ kind: "cmd", id: n.to, label: t(n.key), hint: `Alt+${n.accel}`, run: () => navigate(n.to) });
+      for (const n of NAV) out.push({ kind: "cmd", id: n.to, label: t(n.key), hint: n.accel ? `Alt+${n.accel}` : undefined, run: () => navigate(n.to) });
       return out;
     }
     for (const n of NAV) if (t(n.key).toLowerCase().includes(lower)) out.push({ kind: "cmd", id: n.to, label: t(n.key), run: () => navigate(n.to) });
