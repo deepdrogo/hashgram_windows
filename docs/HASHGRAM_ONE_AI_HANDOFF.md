@@ -170,7 +170,7 @@ module's doc comment explains its model.
 §6: G1 (score submitter of forged receipts), G2 (prune challenges), G3–G6
 pagination/checks, `x/identity` `MsgUpdateParams`, `x/storagemarket`.
 
-## 12. Desktop (Hashgram One for Windows, `apps/desktop`, v0.2.1)
+## 12. Desktop (Hashgram One for Windows, `apps/desktop`, v0.2.2)
 
 Built 2026-09-12 to `docs/DESKTOP_APP_MASTER_PROMPT.md` on branch
 `hashgram-one`; progress is ticked in
@@ -192,6 +192,9 @@ Since v0.2.1 housekeeping also treats two consecutive 15-second snapshots
 with no store peer as a dead transport, shuts it down with a timeout, starts
 a fresh link and reattaches the open session. This fixes recovery after a
 Windows network-adapter or Internet outage without restarting the app.
+v0.2.2 closes the remaining half-open case in `hashgram-p2p`: three
+consecutive failed pings force a verified peer's local connection closed,
+which clears the stale verified map and re-enables bootstrap redial.
 `views.rs` strips key material (BlobRef key/nonce, Drive object keys,
 capability keys) before anything reaches the webview; unit tests assert it.
 

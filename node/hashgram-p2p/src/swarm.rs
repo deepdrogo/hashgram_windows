@@ -424,6 +424,13 @@ struct Bucket {
     last: Instant,
 }
 
+const PING_FAILURES_BEFORE_DISCONNECT: u8 = 3;
+
+fn ping_streak_requires_disconnect(streak: &mut u8) -> bool {
+    *streak = streak.saturating_add(1);
+    *streak >= PING_FAILURES_BEFORE_DISCONNECT
+}
+
 /// The actor.
 struct Runner {
     swarm: Swarm<Behaviour>,
@@ -447,6 +454,9 @@ struct Runner {
     /// disconnecting. Closing first would swallow the reason.
     pending_reject: HashMap<PeerId, (ReasonCode, String, Instant)>,
     buckets: HashMap<PeerId, Bucket>,
+    /// Consecutive failed liveness probes for verified peers. A Windows
+    /// adapter change can leave a half-open connection without a close event.
+    ping_failures: HashMap<PeerId, u8>,
     /// Connections refused by the limits and closed before being counted.
     refused: HashSet<ConnectionId>,
     limits: ConnectionLimits,
@@ -609,6 +619,7 @@ pub fn start(
         banned: HashMap::new(),
         pending_reject: HashMap::new(),
         buckets: HashMap::new(),
+        ping_failures: HashMap::new(),
         refused: HashSet::new(),
         limits,
         scores: Scoreboard::new(),
@@ -1120,6 +1131,7 @@ impl Runner {
             self.unverified_since.remove(&peer);
             self.identified.remove(&peer);
             self.buckets.remove(&peer);
+            self.ping_failures.remove(&peer);
             if self.verified.remove(&peer).is_some() {
                 let _ = self.events.try_send(Event::PeerDisconnected(peer));
             }
@@ -1200,8 +1212,26 @@ impl Runner {
                 });
                 info!(status = self.reachability, "reachability changed");
             }
-            BehaviourEvent::Ping(libp2p::ping::Event { peer, result, .. }) if result.is_err() => {
-                self.score(peer, ScoreEvent::RequestTimedOut);
+            BehaviourEvent::Ping(libp2p::ping::Event { peer, result, .. }) => {
+                if result.is_ok() {
+                    self.ping_failures.remove(&peer);
+                } else {
+                    self.score(peer, ScoreEvent::RequestTimedOut);
+                    if self.verified.contains_key(&peer) {
+                        let disconnect = {
+                            let streak = self.ping_failures.entry(peer).or_default();
+                            ping_streak_requires_disconnect(streak)
+                        };
+                        if disconnect {
+                            self.ping_failures.remove(&peer);
+                            warn!(%peer, "peer failed three consecutive pings; disconnecting");
+                            // ConnectionClosed performs the authoritative map
+                            // cleanup and emits PeerDisconnected. Removing the
+                            // socket locally also unblocks bootstrap redial.
+                            let _ = self.swarm.disconnect_peer_id(peer);
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -1918,6 +1948,14 @@ mod tests {
 
     fn roles(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn three_consecutive_ping_failures_require_disconnect() {
+        let mut streak = 0;
+        assert!(!ping_streak_requires_disconnect(&mut streak));
+        assert!(!ping_streak_requires_disconnect(&mut streak));
+        assert!(ping_streak_requires_disconnect(&mut streak));
     }
 
     #[test]

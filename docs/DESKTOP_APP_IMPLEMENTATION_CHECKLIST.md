@@ -4,7 +4,7 @@ Ordered engineering stages for the desktop application described in
 `DESKTOP_APP_MASTER_PROMPT.md`. Each stage ends with a runnable build and
 its tests green. File paths refer to the actual repository layout.
 
-Status as of 2026-09-13 (branch `hashgram-one`, app v0.2.1): stages 0–15
+Status as of 2026-09-13 (branch `hashgram-one`, app v0.2.2): stages 0–15
 done; stage 16 partly (see the notes). Details in
 `HASHGRAM_ONE_AI_HANDOFF.md` §12.
 
