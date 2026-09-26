@@ -269,6 +269,22 @@ pub struct MyActivity {
     pub score: u64,
 }
 
+/// What a client needs to lay media out before the bytes arrive.
+///
+/// Sizes and durations are the author's claim, like the MIME type: a client
+/// uses them for layout and still checks what it decodes.
+#[derive(Debug, Clone, Default)]
+pub struct MediaMeta {
+    /// Pixel width, 0 when unknown.
+    pub width: u32,
+    /// Pixel height, 0 when unknown.
+    pub height: u32,
+    /// Duration for audio and video, 0 otherwise.
+    pub duration_ms: u32,
+    /// Poster frame or downscaled still, with its MIME type.
+    pub thumbnail: Option<(Vec<u8>, String)>,
+}
+
 /// The tabs a public profile is read through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProfileTab {
@@ -993,25 +1009,61 @@ impl<'a> Feed<'a> {
         mime: &str,
         kind: &str,
     ) -> Result<pb::MediaReference, SdkError> {
+        self.upload_media_with(bytes, mime, kind, &MediaMeta::default())
+            .await
+    }
+
+    /// Uploads public media together with what a client needs to lay it out
+    /// before the bytes arrive: pixel size, duration and a poster frame.
+    ///
+    /// The poster is its own public blob, so a feed of fifty videos costs
+    /// fifty thumbnails rather than fifty videos.
+    pub async fn upload_media_with(
+        &mut self,
+        bytes: &[u8],
+        mime: &str,
+        kind: &str,
+        meta: &MediaMeta,
+    ) -> Result<pb::MediaReference, SdkError> {
+        let thumbnail_cid = match &meta.thumbnail {
+            Some((thumb, thumb_mime)) if !thumb.is_empty() => {
+                let up = self.put_public(thumb, thumb_mime).await?;
+                hex::decode(&up.cid).unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        let up = self.put_public(bytes, mime).await?;
+        Ok(pb::MediaReference {
+            cid: hex::decode(&up.cid).unwrap_or_default(),
+            mime: mime.to_owned(),
+            size: bytes.len() as u64,
+            kind: kind.to_owned(),
+            width: meta.width,
+            height: meta.height,
+            duration_ms: meta.duration_ms,
+            thumbnail_cid,
+            content_hash: hex::decode(&up.plaintext_hash).unwrap_or_default(),
+        })
+    }
+
+    /// One public blob, pushed to as many providers as the network aims to
+    /// keep ([`crate::blob::PUBLIC_REPLICAS`]).
+    async fn put_public(
+        &mut self,
+        bytes: &[u8],
+        mime: &str,
+    ) -> Result<crate::blob::Uploaded, SdkError> {
         let device = self.one.account.device()?;
-        let up = crate::blob::upload(
+        crate::blob::upload(
             &self.one.link,
             &self.one.network,
             &device,
             bytes,
             mime,
             false,
-            2,
+            crate::blob::PUBLIC_REPLICAS,
         )
-        .await?;
-        Ok(pb::MediaReference {
-            cid: hex::decode(&up.cid).unwrap_or_default(),
-            mime: mime.to_owned(),
-            size: bytes.len() as u64,
-            kind: kind.to_owned(),
-            content_hash: hex::decode(&up.plaintext_hash).unwrap_or_default(),
-            ..Default::default()
-        })
+        .await
     }
 
     // -- Explore: pages from the nearest nodes --------------------------------

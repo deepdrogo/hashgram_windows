@@ -145,6 +145,130 @@ pub async fn feed_post(
     Ok(id)
 }
 
+/// One file the composer is publishing, with whatever the webview could
+/// measure about it (videos only; pictures are decoded on this side).
+#[derive(Debug, Clone, Deserialize)]
+pub struct MediaUpload {
+    /// Path the user picked.
+    pub path: String,
+    /// Width, height, duration and poster frame from `<video>`, if any.
+    #[serde(default)]
+    pub client: crate::media::ClientMeta,
+}
+
+/// How far a post with attachments has got.
+#[derive(Debug, Clone, Serialize)]
+struct MediaProgress {
+    op: String,
+    stage: &'static str,
+    index: usize,
+    total: usize,
+    name: String,
+}
+
+fn media_progress(app: &tauri::AppHandle, op: &str, stage: &'static str, index: usize, total: usize, name: &str) {
+    use tauri::Emitter;
+    let _ = app.emit(
+        "media:progress",
+        MediaProgress {
+            op: op.to_owned(),
+            stage,
+            index,
+            total,
+            name: name.to_owned(),
+        },
+    );
+}
+
+/// Creates a public post with pictures or video.
+///
+/// Each file is read, measured and uploaded as its own public blob before
+/// the event is signed, so the post never carries the bytes — only a CID,
+/// a size and a poster. Progress goes out on `media:progress` so the window
+/// stays usable while a large video uploads.
+#[tauri::command]
+pub async fn feed_post_media(
+    state: S<'_>,
+    app: tauri::AppHandle,
+    text: String,
+    hashtags: Vec<String>,
+    files: Vec<MediaUpload>,
+    sensitive: bool,
+    channel: Option<String>,
+    op: Option<String>,
+) -> CmdResult<String> {
+    let op = op.unwrap_or_default();
+    let channel = channel.map(|c| c.trim().to_ascii_lowercase()).unwrap_or_default();
+    if !channel.is_empty() && (channel.len() != 64 || !channel.chars().all(|c| c.is_ascii_hexdigit())) {
+        return Err(UiError::invalid("topic id"));
+    }
+    if text.trim().is_empty() && files.is_empty() {
+        return Err(UiError::invalid("write something or add a picture"));
+    }
+    if files.len() > MAX_MEDIA {
+        return Err(UiError::invalid("20 files at most"));
+    }
+    let total = files.len();
+
+    // Read and measure first: a file that cannot be decoded should fail
+    // before anything has been signed or pushed to a provider.
+    let mut prepared = Vec::with_capacity(total);
+    for (i, f) in files.iter().enumerate() {
+        let name = std::path::Path::new(&f.path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        media_progress(&app, &op, "preparing", i, total, &name);
+        let (bytes, mime, _kind) = match read_media(&f.path).await {
+            Ok(x) => x,
+            Err(e) => {
+                media_progress(&app, &op, "failed", i, total, &name);
+                return Err(e);
+            }
+        };
+        prepared.push((name, crate::media::prepare(bytes, mime, &f.client)));
+    }
+
+    let tags: Vec<String> = hashtags
+        .into_iter()
+        .map(|t| t.trim().trim_start_matches('#').to_lowercase())
+        .filter(|t| !t.is_empty() && t.len() <= 64)
+        .collect();
+
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    let mut media = Vec::with_capacity(total);
+    for (i, (name, p)) in prepared.iter().enumerate() {
+        media_progress(&app, &op, "uploading", i, total, name);
+        match one
+            .feed()
+            .upload_media_with(&p.bytes, &p.mime, &p.kind, &p.meta)
+            .await
+        {
+            Ok(m) => media.push(m),
+            Err(e) => {
+                media_progress(&app, &op, "failed", i, total, name);
+                return Err(e.into());
+            }
+        }
+    }
+    media_progress(&app, &op, "publishing", total, total, "");
+    let id = match one
+        .feed()
+        .post_on(text.trim(), tags, media, sensitive, &channel)
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            media_progress(&app, &op, "failed", total, total, "");
+            return Err(e.into());
+        }
+    };
+    one.save()?;
+    media_progress(&app, &op, "published", total, total, "");
+    Ok(id)
+}
+
 /// Comments on a post.
 #[tauri::command]
 pub async fn feed_comment(state: S<'_>, post: String, text: String) -> CmdResult<String> {

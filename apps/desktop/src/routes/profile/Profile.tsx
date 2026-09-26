@@ -17,6 +17,7 @@ import { copyText } from "~/lib/clipboard";
 import { formatTime } from "~/lib/format";
 import { rememberTab, recallTab, trackScroll } from "~/lib/uistate";
 import { PostCard } from "~/routes/feed/Feed";
+import { MediaTile } from "~/components/social/Media";
 import { ProfileEditor } from "./ProfileEdit";
 import { FollowList } from "./FollowList";
 
@@ -250,39 +251,20 @@ function emptyFor(tab: ProfileTab, mine: boolean): string {
   return "No public reactions";
 }
 
-/** A profile's media is a view over its posts, never a separate library. */
+/**
+ * A profile's media is a view over its posts, never a separate library:
+ * every tile belongs to a post and opening it opens that post.
+ */
 function MediaGrid(props: { items: FeedItem[]; onOpen: (id: string) => void }) {
   return (
     <div class="grid grid-cols-3 gap-2">
       <For each={props.items}>
         {(it) => (
           <For each={it.media}>
-            {([cid, mime]) => <MediaTile cid={cid} mime={mime} onOpen={() => props.onOpen(it.id)} />}
+            {([cid, mime, size]) => <MediaTile media={{ cid, mime, size }} onOpen={() => props.onOpen(it.id)} />}
           </For>
         )}
       </For>
     </div>
-  );
-}
-
-function MediaTile(props: { cid: string; mime: string; onOpen: () => void }) {
-  const [src] = createResource(
-    () => props.cid,
-    async (cid) => {
-      try {
-        return convertFileSrc(await ipc.feedMediaFetch(cid, props.mime));
-      } catch {
-        return null;
-      }
-    },
-  );
-  return (
-    <button type="button" class="aspect-square overflow-hidden rounded-md border border-border bg-surface-2" onClick={props.onOpen} title="Open the post">
-      <Show when={src()} fallback={<span class="block h-full w-full" />}>
-        <Show when={props.mime.startsWith("video/")} fallback={<img src={src() ?? ""} alt="" class="h-full w-full object-cover" loading="lazy" />}>
-          <video src={src() ?? ""} class="h-full w-full object-cover" muted preload="metadata" />
-        </Show>
-      </Show>
-    </button>
   );
 }

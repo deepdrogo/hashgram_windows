@@ -42,6 +42,7 @@ pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod help;
+pub mod media;
 pub mod node_manager;
 pub mod notify;
 pub mod paths;
@@ -365,6 +366,7 @@ pub fn run() {
             cmd_feed::feed_explore,
             cmd_feed::feed_thread,
             cmd_feed::feed_post,
+            cmd_feed::feed_post_media,
             cmd_feed::feed_comment,
             cmd_feed::feed_react,
             cmd_feed::feed_repost,

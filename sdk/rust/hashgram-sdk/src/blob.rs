@@ -69,6 +69,14 @@ pub struct Uploaded {
     pub plaintext_hash: String,
 }
 
+/// How many providers public media is pushed to.
+///
+/// Matches the network's own `TARGET_REPLICAS`, so a node's repair pass
+/// treats a fresh avatar or post image as complete rather than as
+/// under-replicated and in need of copying. Uploading to fewer than the
+/// target is how media quietly ends up with one copy.
+pub const PUBLIC_REPLICAS: usize = 3;
+
 /// Uploads `data` to up to `replicas` store peers. Every chunk is pushed
 /// only where the manifest was accepted.
 pub async fn upload(

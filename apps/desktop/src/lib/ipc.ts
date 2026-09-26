@@ -340,6 +340,19 @@ export interface FolderEntryView {
   size: number;
   modified_at_ms: number;
 }
+/** One file the composer is publishing. */
+export interface MediaUpload {
+  path: string;
+  client: { width: number; height: number; duration_ms: number; poster_base64: string };
+}
+/** How far a post with attachments has got. */
+export interface MediaProgress {
+  op: string;
+  stage: "preparing" | "uploading" | "publishing" | "published" | "failed";
+  index: number;
+  total: number;
+  name: string;
+}
 export interface DriveProgress {
   op: string;
   stage: "reading" | "encrypting" | "uploading" | "done" | "failed";
@@ -955,6 +968,8 @@ export const ipc = {
   feedThread: (post: string) => call<PostThread | null>("feed_thread", { post }),
   feedPost: (text: string, hashtags: string[], mediaPaths: string[], sensitive: boolean, channel?: string) =>
     call<string>("feed_post", { text, hashtags, mediaPaths, sensitive, channel }),
+  feedPostMedia: (text: string, hashtags: string[], files: MediaUpload[], sensitive: boolean, channel?: string, op?: string) =>
+    call<string>("feed_post_media", { text, hashtags, files, sensitive, channel, op }),
   feedComment: (post: string, text: string) => call<string>("feed_comment", { post, text }),
   feedReact: (target: string, reaction: string) => call<string>("feed_react", { target, reaction }),
   feedRepost: (post: string, comment: string) => call<string>("feed_repost", { post, comment }),
@@ -1118,6 +1133,7 @@ export interface EventMap {
   "net:changed": null;
   "tx:update": { hash: string; state: string; height?: number; raw_log?: string };
   "drive:progress": DriveProgress;
+  "media:progress": MediaProgress;
   "deep-link": { url: string };
 }
 

@@ -4,20 +4,22 @@
 // one page at a time. Composer for public posts (text, media, hashtags,
 // sensitive, optional wall) and Circle posts (circle picker, poll builder).
 // Post view with comments and reactions pulled from the network.
-import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
 import { Image as ImageIcon, Send, MessageSquare, Heart, Repeat2, Trash2, Plus, Users, RefreshCw, Vote, Eye, EyeOff, UserPlus, X, Pin, PinOff, Link as LinkIcon, Megaphone, Hash } from "lucide-solid";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Button, Checkbox, Dialog, Field, Input, Notice, Tabs, Textarea, Badge, Empty, Select } from "~/components/ui";
 import { OfflineBanner, ErrorState } from "~/components/States";
 import { Who, PersonAvatar } from "~/components/identity";
-import { ipc, errText, type FeedItem, type CircleInfo, type CircleItemView, type MergedItem, type PollInput, type WallInfo, type ExplorePage } from "~/lib/ipc";
+import { ipc, on, errText, type MediaProgress, type FeedItem, type CircleInfo, type CircleItemView, type MergedItem, type PollInput, type WallInfo, type ExplorePage } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { go } from "~/lib/nav";
 import { t } from "~/lib/i18n";
 import { formatMs, shortWhen, splitRecipients } from "~/lib/format";
 import { pickFile, confirm } from "~/lib/dialogs";
 import { copyText } from "~/lib/clipboard";
+import { MediaStrip } from "~/components/social/Media";
+import { measureVideo } from "~/lib/mediameta";
 
 type Tab = "friends" | "following" | "walls" | "circles" | "post";
 
@@ -109,23 +111,6 @@ export function SourceLine(props: { page: ExplorePage | null }) {
   );
 }
 
-function Media(props: { cid: string; mime: string; sensitive?: boolean }) {
-  const [shown, setShown] = createSignal(!props.sensitive);
-  const [src] = createResource(
-    () => (shown() && props.mime.startsWith("image/") ? props.cid : null),
-    (cid) => ipc.feedMediaFetch(cid, props.mime).then(convertFileSrc).catch(() => null),
-  );
-  return (
-    <Show when={props.mime.startsWith("image/")} fallback={<Badge>{props.mime}</Badge>}>
-      <Show when={shown()} fallback={<Button variant="secondary" size="sm" onClick={() => setShown(true)}><EyeOff size={12} /> sensitive — show</Button>}>
-        <Show when={src()} fallback={<div class="skeleton h-40 w-full" />}>
-          <img src={src()!} alt="" class="max-h-96 rounded-md border border-border object-contain" />
-        </Show>
-      </Show>
-    </Show>
-  );
-}
-
 /**
  * Circles: posts inside a private MLS group, decrypted on this device and
  * merged into one list. They are not part of Pulse because nothing here is
@@ -186,6 +171,7 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
     (id) => ipc.feedThread(id).catch(() => null),
   );
   const sensitive = () => !!(props.it.payload as { sensitive?: boolean }).sensitive;
+  const [revealed, setRevealed] = createSignal(false);
   const isMe = () => store.status()?.address === props.it.author;
   const react = async (r: string) => {
     try {
@@ -239,10 +225,10 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
           </For>
         </p>
       </Show>
-      <Show when={props.it.media.length}>
-        <div class="mt-2 flex flex-wrap gap-2">
-          <For each={props.it.media}>{([cid, mime]) => <Media cid={cid} mime={mime} sensitive={sensitive()} />}</For>
-        </div>
+      <Show when={sensitive() && props.it.media.length && !revealed()} fallback={<MediaStrip item={props.it} />}>
+        <Button class="mt-2" variant="secondary" size="sm" onClick={() => setRevealed(true)}>
+          <EyeOff size={12} /> sensitive — show
+        </Button>
       </Show>
       <div class="mt-2 flex items-center gap-3 text-xs text-muted">
         <button type="button" class="inline-flex items-center gap-1 hover:text-fg" onClick={() => void react("❤")} title="React">
@@ -810,6 +796,15 @@ export function ComposeDialog(props: { open: boolean; onClose: () => void; defau
   const [multi, setMulti] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [stage, setStage] = createSignal<Omit<MediaProgress, "op"> | null>(null);
+  const opId = `post-${Math.random().toString(36).slice(2, 10)}`;
+  onMount(() => {
+    const p = on("media:progress", (ev) => {
+      if (ev.op !== opId) return;
+      setStage(ev.stage === "published" ? null : ev);
+    });
+    onCleanup(() => void p.then((un) => un()));
+  });
   const registered = () => store.identity()?.this_device_registered !== false;
   const [circles] = createResource(
     () => (props.open ? store.ticks().circles : null),
@@ -824,7 +819,17 @@ export function ComposeDialog(props: { open: boolean; onClose: () => void; defau
     setError(null);
     try {
       if (isPublic()) {
-        await ipc.feedPost(text(), tags().split(/[\s,#]+/).filter(Boolean), media(), sensitive(), wallOf());
+        const files = media();
+        if (files.length) {
+          // Videos are measured here, where a decoder already exists; the
+          // poster frame is re-encoded on the Rust side before upload.
+          setStage({ stage: "preparing", index: 0, total: files.length, name: "" });
+          const uploads = [];
+          for (const path of files) uploads.push({ path, client: await measureVideo(path) });
+          await ipc.feedPostMedia(text(), tags().split(/[\s,#]+/).filter(Boolean), uploads, sensitive(), wallOf(), opId);
+        } else {
+          await ipc.feedPost(text(), tags().split(/[\s,#]+/).filter(Boolean), [], sensitive(), wallOf());
+        }
         store.bump("feed");
       } else {
         const p: PollInput | undefined = poll() ? { question: question(), options: options().filter((o) => o.trim()), multiple_choice: multi(), closes_at_ms: 0 } : undefined;
@@ -838,6 +843,7 @@ export function ComposeDialog(props: { open: boolean; onClose: () => void; defau
       setError(errText(e));
     } finally {
       setBusy(false);
+      setStage(null);
     }
   };
   return (
@@ -895,6 +901,19 @@ export function ComposeDialog(props: { open: boolean; onClose: () => void; defau
           </Button>
           <span class="truncate text-xs text-muted">{media().map((m) => m.split(/[\\/]/).pop()).join(", ")}</span>
         </div>
+        <Show when={stage()}>
+          {(s) => (
+            <div class="flex items-center gap-2 text-xs text-muted" role="status">
+              <RefreshCw size={12} class="animate-spin" />
+              <span class="flex-1 truncate">
+                {s().stage === "preparing" && `Preparing ${s().name || "media"}…`}
+                {s().stage === "uploading" && `Uploading ${s().name || "media"} (${s().index + 1} of ${s().total})…`}
+                {s().stage === "publishing" && "Publishing…"}
+                {s().stage === "failed" && `Failed on ${s().name || "media"}`}
+              </span>
+            </div>
+          )}
+        </Show>
         <Show when={error()}>
           <Notice strong>{error()}</Notice>
         </Show>
