@@ -99,6 +99,8 @@ export interface Settings {
     bootstrap: string[];
     chain_api: string;
     indexer_url: string;
+    /** Further indexers to try when the first does not answer. */
+    indexer_urls: string[];
     gateway_address: string;
   };
   security: { auto_lock_minutes: number; hello_enabled: boolean; clipboard_clear_secs: number };

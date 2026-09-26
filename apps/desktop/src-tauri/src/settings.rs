@@ -34,9 +34,20 @@ pub struct NetworkSettings {
     /// Devnet convenience only.
     #[serde(default)]
     pub chain_api: String,
-    /// Public indexer base URL (leaderboards, Explore). Empty = none.
+    /// Public indexer base URL (leaderboards, discovery). Empty = none.
+    ///
+    /// Kept as the first entry of [`Self::indexer_urls`]; a settings file
+    /// written by an older build still has only this one.
     #[serde(default)]
     pub indexer_url: String,
+    /// Further indexers to fall back to when the first does not answer.
+    ///
+    /// An indexer is a cache, never an authority, so having several is
+    /// cheap and losing one should not take discovery with it. One
+    /// operator's indexer going away was a single point of failure in
+    /// everything but name.
+    #[serde(default)]
+    pub indexer_urls: Vec<String>,
     /// The mail gateway's identity (`@name` or `hash1…`) for external
     /// e-mail (`ext-to:`). Empty = external sending disabled.
     #[serde(default)]
@@ -246,6 +257,7 @@ impl Default for Settings {
                 bootstrap: Vec::new(),
                 chain_api: String::new(),
                 indexer_url: String::new(),
+                indexer_urls: Vec::new(),
                 gateway_address: String::new(),
             },
             security: SecuritySettings {
@@ -300,26 +312,38 @@ impl Settings {
         std::fs::rename(&tmp, path)
     }
 
-    /// The indexer URL, if one is configured and looks like a URL.
+    /// The first configured indexer, if one looks like a URL.
     #[must_use]
     pub fn indexer(&self) -> Option<&str> {
-        let u = self.network.indexer_url.trim();
-        if u.starts_with("https://") || u.starts_with("http://") {
-            Some(u)
-        } else {
-            None
-        }
+        self.indexers().into_iter().next()
+    }
+
+    /// Every configured indexer, in the order to try them.
+    #[must_use]
+    pub fn indexers(&self) -> Vec<&str> {
+        let looks_like_url = |u: &&str| u.starts_with("https://") || u.starts_with("http://");
+        std::iter::once(self.network.indexer_url.trim())
+            .chain(self.network.indexer_urls.iter().map(|u| u.trim()))
+            .filter(looks_like_url)
+            .fold(Vec::new(), |mut acc, u| {
+                if !acc.contains(&u) {
+                    acc.push(u);
+                }
+                acc
+            })
     }
 
     /// Validates the parts a user can mistype.
     pub fn validate(&self) -> Result<(), String> {
-        let u = self.network.indexer_url.trim();
-        if !u.is_empty()
-            && !(u.starts_with("https://")
-                || u.starts_with("http://127.0.0.1")
-                || u.starts_with("http://localhost"))
-        {
-            return Err("indexer URL must be https:// (plain http only on this PC)".into());
+        for u in std::iter::once(&self.network.indexer_url).chain(&self.network.indexer_urls) {
+            let u = u.trim();
+            if !u.is_empty()
+                && !(u.starts_with("https://")
+                    || u.starts_with("http://127.0.0.1")
+                    || u.starts_with("http://localhost"))
+            {
+                return Err("indexer URL must be https:// (plain http only on this PC)".into());
+            }
         }
         let c = self.network.chain_api.trim();
         if !c.is_empty()

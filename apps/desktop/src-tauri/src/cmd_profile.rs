@@ -42,6 +42,31 @@ async fn read_image(path: &str) -> CmdResult<(Vec<u8>, String)> {
     Ok((tokio::fs::read(&p).await?, mime))
 }
 
+/// Tries each configured indexer until one answers.
+///
+/// An indexer is a cache, not an authority, so a second one costs nothing
+/// and means the first going away does not take discovery with it.
+async fn ask_indexers(
+    state: &S<'_>,
+    one: &mut hashgram_sdk::HashgramOne,
+    path: &str,
+) -> Option<serde_json::Value> {
+    let bases: Vec<String> = state
+        .settings
+        .read()
+        .await
+        .indexers()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    for base in bases {
+        if let Ok(Some(v)) = one.network_api().indexer(Some(&base), path).await {
+            return Some(v);
+        }
+    }
+    None
+}
+
 /// Counts from the indexer when one is configured, otherwise from this
 /// device's copy of the author's log.
 async fn stats_of(
@@ -60,10 +85,8 @@ async fn stats_of(
         first_event: local.first_event,
         source: if local.complete { "device" } else { "partial" }.to_owned(),
     };
-    let indexer = state.settings.read().await.indexer().map(str::to_owned);
-    let Some(base) = indexer else { return view };
     let path = format!("/v1/profiles/{address}");
-    let Ok(Some(v)) = one.network_api().indexer(Some(&base), &path).await else {
+    let Some(v) = ask_indexers(state, one, &path).await else {
         return view;
     };
     let n = |k: &str| v.get(k).and_then(serde_json::Value::as_u64);
@@ -225,7 +248,6 @@ pub async fn profile_follow_list(
         "followers" | "following" => which,
         _ => return Err(UiError::invalid("which")),
     };
-    let indexer = state.settings.read().await.indexer().map(str::to_owned);
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     if which == "following" {
@@ -233,12 +255,11 @@ pub async fn profile_follow_list(
         // needs no index and is right even offline.
         return Ok(one.feed().following_of(&address)?.into_iter().collect());
     }
-    let Some(base) = indexer else {
-        return Ok(Vec::new());
-    };
     let path = format!("/v1/profiles/{address}/followers?limit=200");
-    let v = one.network_api().indexer(Some(&base), &path).await?;
-    Ok(v.map(address_list).unwrap_or_default())
+    Ok(ask_indexers(&state, one, &path)
+        .await
+        .map(address_list)
+        .unwrap_or_default())
 }
 
 /// The indexer answers address lists either bare or under `addresses`.
