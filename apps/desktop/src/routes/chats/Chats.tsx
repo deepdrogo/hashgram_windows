@@ -8,7 +8,7 @@ import { For, Show, createEffect, createResource, createSignal, onCleanup, onMou
 import { Portal } from "solid-js/web";
 import { useNavigate, useParams } from "@solidjs/router";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Send, Search, RefreshCw, Clock, UserPlus, Users, LogOut, MessageSquare, Paperclip, Play, X, File as FileIcon } from "lucide-solid";
+import { Send, Search, RefreshCw, Clock, UserPlus, Users, LogOut, MessageSquare, Paperclip, Play, X, File as FileIcon, Volume2, VolumeX } from "lucide-solid";
 import { Button, Dialog, Empty, Field, Input, Notice, Skeleton } from "~/components/ui";
 import { OfflineBanner } from "~/components/States";
 import { PersonAvatar, Who } from "~/components/identity";
@@ -482,14 +482,31 @@ function AttachmentTile(props: { file: ChatAttachment; onOpen: () => void }) {
     >
       <button type="button" class="relative overflow-hidden rounded-md border border-border bg-surface-2" onClick={props.onOpen} title={props.file.name}>
         <Show when={src()} fallback={<span class="block h-28 w-full" />}>
-          <img src={src() ?? ""} alt="" loading="lazy" class="max-h-56 w-full object-cover" />
+          {/* A video's first frame comes from a <video> element. An <img>
+              pointed at video bytes decodes nothing, and the tile used to
+              collapse to an empty strip with a play button on it. Chat
+              attachments carry no poster — they are sealed, and a poster
+              would be a second sealed blob per video — so the element that
+              can decode the file is the one that draws the frame. */}
+          <Show
+            when={props.file.kind === "video"}
+            fallback={<img src={src() ?? ""} alt="" loading="lazy" class="max-h-56 w-full object-cover" />}
+          >
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video src={src() ?? ""} class="max-h-56 w-full object-cover" preload="metadata" muted playsinline controls={false} />
+          </Show>
         </Show>
         <Show when={props.file.kind === "video"}>
           <span class="absolute inset-0 flex items-center justify-center">
-            <span class="flex h-9 w-9 items-center justify-center rounded-full bg-bg/70">
+            <span class="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-bg/70">
               <Play size={16} />
             </span>
           </span>
+          <Show when={props.file.duration_ms > 0}>
+            <span class="absolute bottom-1.5 right-1.5 rounded bg-bg/80 px-1.5 py-0.5 text-[10.5px] tnum">
+              {`${Math.floor(props.file.duration_ms / 60000)}:${String(Math.round(props.file.duration_ms / 1000) % 60).padStart(2, "0")}`}
+            </span>
+          </Show>
         </Show>
       </button>
     </Show>
@@ -498,6 +515,7 @@ function AttachmentTile(props: { file: ChatAttachment; onOpen: () => void }) {
 
 function AttachmentViewer(props: { file: ChatAttachment; onClose: () => void }) {
   const [src] = useAttachment(() => props.file);
+  const [muted, setMuted] = createSignal(true);
   onMount(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
     window.addEventListener("keydown", esc);
@@ -509,7 +527,7 @@ function AttachmentViewer(props: { file: ChatAttachment; onClose: () => void }) 
         <button type="button" class="absolute right-3 top-3 btn-ghost btn-icon-sm" aria-label="Close" onClick={props.onClose}>
           <X size={16} />
         </button>
-        <div class="max-h-[88vh] max-w-[88vw]" onClick={(e) => e.stopPropagation()}>
+        <div class="relative max-h-[88vh] max-w-[88vw]" onClick={(e) => e.stopPropagation()}>
           <Show when={src()} fallback={<p class="text-sm text-muted">Fetching and decrypting…</p>}>
             <Show
               when={props.file.kind === "video"}
@@ -519,8 +537,27 @@ function AttachmentViewer(props: { file: ChatAttachment; onClose: () => void }) 
                 </Show>
               }
             >
+              {/* Plays by itself, silent. Sound is the viewer's decision —
+                  a chat that starts talking out loud the moment a thumbnail
+                  is tapped is one people stop tapping. */}
               {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-              <video src={src() ?? ""} class="max-h-[88vh] max-w-[88vw]" controls autoplay />
+              <video
+                src={src() ?? ""}
+                class="max-h-[88vh] max-w-[88vw] bg-surface-2"
+                controls
+                autoplay
+                muted={muted()}
+                playsinline
+              />
+              <button
+                type="button"
+                class="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full border border-border bg-bg/80 px-2 py-1 text-[11px]"
+                onClick={() => setMuted((m) => !m)}
+              >
+                <Show when={muted()} fallback={<><Volume2 size={12} /> Sound on</>}>
+                  <VolumeX size={12} /> Sound off — click for sound
+                </Show>
+              </button>
             </Show>
           </Show>
         </div>

@@ -194,10 +194,7 @@ export function LocalRoute() {
               <div class="grid grid-cols-4 gap-2">
                 <For each={withMedia()}>
                   {(p) => (
-                    <MediaTile
-                      media={{ cid: p.media[0]![0], mime: p.media[0]![1], size: p.media[0]![2] }}
-                      onOpen={() => navigate(`/pulse/post/${p.id}`)}
-                    />
+                    <MediaTile media={p.media[0]!} onOpen={() => navigate(`/pulse/post/${p.id}`)} />
                   )}
                 </For>
               </div>

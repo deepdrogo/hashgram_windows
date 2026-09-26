@@ -392,6 +392,7 @@ pub fn run() {
             cmd_feed::feed_follows,
             cmd_feed::feed_profile_update,
             cmd_feed::feed_media_fetch,
+            cmd_feed::feed_media_open,
             cmd_feed::circles_list,
             cmd_feed::circles_create,
             cmd_feed::circles_add_member,

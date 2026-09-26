@@ -289,9 +289,7 @@ function MediaGrid(props: { items: FeedItem[]; onOpen: (id: string) => void }) {
     <div class="grid grid-cols-3 gap-2">
       <For each={props.items}>
         {(it) => (
-          <For each={it.media}>
-            {([cid, mime, size]) => <MediaTile media={{ cid, mime, size }} onOpen={() => props.onOpen(it.id)} />}
-          </For>
+          <For each={it.media}>{(m) => <MediaTile media={m} onOpen={() => props.onOpen(it.id)} />}</For>
         )}
       </For>
     </div>

@@ -429,13 +429,26 @@ export interface CardView {
 }
 
 // Feed / circles
+/** One picture, video or file attached to an event. */
+export interface PostMedia {
+  cid: string;
+  mime: string;
+  size: number;
+  kind: string;
+  /** 0 when the author's client did not measure it. */
+  width: number;
+  height: number;
+  duration_ms: number;
+  /** Poster frame CID, "" when there is none. */
+  poster_cid: string;
+}
 export interface FeedItem {
   id: string;
   kind: string;
   author: string;
   timestamp: number;
   payload: Record<string, unknown>;
-  media: [string, string, number][];
+  media: PostMedia[];
   visibility: string;
   /** Wall (channel) hex id, "" for none. */
   channel: string;
@@ -528,7 +541,7 @@ export interface Story {
   id: string;
   author: string;
   caption: string;
-  media: [string, string, number][];
+  media: PostMedia[];
   created_at: number;
   expires_at: number;
   sensitive: boolean;
@@ -1116,6 +1129,7 @@ export const ipc = {
   feedFollows: () => call<string[]>("feed_follows"),
   feedProfileUpdate: (name: string, bio: string, avatarPath?: string) => call<string>("feed_profile_update", { name, bio, avatarPath }),
   feedMediaFetch: (cid: string, mime: string) => call<string>("feed_media_fetch", { cid, mime }),
+  feedMediaOpen: (cid: string, mime: string) => call<string>("feed_media_open", { cid, mime }),
   circlesList: () => call<CircleInfo[]>("circles_list"),
   circlesCreate: (name: string, description: string, members: string[]) => call<string>("circles_create", { name, description, members }),
   circlesAddMember: (circle: string, member: string) => call<void>("circles_add_member", { circle, member }),

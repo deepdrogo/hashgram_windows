@@ -39,7 +39,11 @@ export function StoriesRow() {
   createEffect(() => {
     for (const s of stories() ?? []) {
       const first = s.media[0];
-      if (first) prefetchMedia(first[0], first[1]);
+      if (!first) continue;
+      // The poster is what the viewer paints first for a video, so warm
+      // that rather than pulling megabytes nobody has asked to watch.
+      if (first.poster_cid) prefetchMedia(first.poster_cid, "image/jpeg");
+      else prefetchMedia(first.cid, first.mime);
     }
   });
 
@@ -113,14 +117,21 @@ function StoryViewer(props: { address: string; onClose: () => void }) {
     (a) => ipc.storiesOf(a).catch(() => [] as Story[]),
   );
   const current = () => items()?.[index()];
-  const [src] = createResource(
-    () => {
-      const c = current();
-      return c ? { cid: c.media[0]![0], mime: c.media[0]![1] } : null;
-    },
-    async (m) => {
+  const first = () => current()?.media[0] ?? null;
+  const [src] = createResource(first, async (m) => {
+    try {
+      return convertFileSrc(await ipc.feedMediaFetch(m.cid, m.mime));
+    } catch {
+      return null;
+    }
+  });
+  // A story's video can be several megabytes; its poster is a few kilobytes
+  // and holds the frame while the rest arrives.
+  const [poster] = createResource(
+    () => first()?.poster_cid || null,
+    async (cid) => {
       try {
-        return convertFileSrc(await ipc.feedMediaFetch(m.cid, m.mime));
+        return convertFileSrc(await ipc.feedMediaFetch(cid, "image/jpeg"));
       } catch {
         return null;
       }
@@ -192,10 +203,17 @@ function StoryViewer(props: { address: string; onClose: () => void }) {
           <Show when={current()} fallback={<p class="text-sm text-muted">No story to show.</p>}>
             {(c) => (
               <div class="flex max-h-full flex-col items-center gap-2">
-                <Show when={src()} fallback={<p class="text-sm text-muted">Fetching from the network…</p>}>
-                  <Show when={c().media[0]![1].startsWith("video/")} fallback={<img src={src() ?? ""} alt="" class="max-h-[72vh] rounded-md object-contain" />}>
+                <Show
+                  when={src()}
+                  fallback={
+                    <Show when={poster()} fallback={<p class="text-sm text-muted">Fetching from the network…</p>}>
+                      <img src={poster() ?? ""} alt="" class="max-h-[72vh] rounded-md object-contain opacity-60" />
+                    </Show>
+                  }
+                >
+                  <Show when={c().media[0]!.mime.startsWith("video/")} fallback={<img src={src() ?? ""} alt="" class="max-h-[72vh] rounded-md object-contain" />}>
                     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                    <video src={src() ?? ""} class="max-h-[72vh] rounded-md" autoplay controls={false} muted onEnded={() => step(1)} />
+                    <video src={src() ?? ""} poster={poster() ?? undefined} class="max-h-[72vh] rounded-md" autoplay controls={false} muted playsinline onEnded={() => step(1)} />
                   </Show>
                 </Show>
                 <Show when={c().caption}>

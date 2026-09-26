@@ -78,6 +78,50 @@ fn legacy_node_error(e: &SdkError) -> bool {
     }
 }
 
+/// One picture, video or file attached to an event.
+///
+/// This used to be `(cid, mime, size)`. The three things the tuple left out
+/// are the three a client needs before it fetches anything: the poster, so a
+/// video can show its first frame without pulling the whole file; the
+/// dimensions, so the space it will occupy can be reserved instead of the
+/// layout jumping; and the duration, so a viewer can say how long it is.
+/// They were all on the wire already — `MediaReference` has carried them
+/// since the protocol was written — and only this struct dropped them.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PostMedia {
+    /// Hex CID of the media blob.
+    pub cid: String,
+    /// MIME type as the author declared it. Clients sniff and do not trust.
+    pub mime: String,
+    /// Size in bytes.
+    pub size: u64,
+    /// "image", "video", "audio" or "file".
+    pub kind: String,
+    /// Pixel width, 0 when unknown.
+    pub width: u32,
+    /// Pixel height, 0 when unknown.
+    pub height: u32,
+    /// Duration in milliseconds, 0 when unknown or not timed media.
+    pub duration_ms: u32,
+    /// Hex CID of the poster frame, empty when the author attached none.
+    pub poster_cid: String,
+}
+
+impl From<&pb::MediaReference> for PostMedia {
+    fn from(m: &pb::MediaReference) -> Self {
+        Self {
+            cid: hex::encode(&m.cid),
+            mime: m.mime.clone(),
+            size: m.size,
+            kind: m.kind.clone(),
+            width: m.width,
+            height: m.height,
+            duration_ms: m.duration_ms,
+            poster_cid: hex::encode(&m.thumbnail_cid),
+        }
+    }
+}
+
 /// A feed item for display.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FeedItem {
@@ -91,8 +135,8 @@ pub struct FeedItem {
     pub timestamp: u64,
     /// Decoded payload.
     pub payload: serde_json::Value,
-    /// Media references (cid hex, mime, size).
-    pub media: Vec<(String, String, u64)>,
+    /// Media attached to the event.
+    pub media: Vec<PostMedia>,
     /// "public" or "circle:<hex gid>".
     pub visibility: String,
     /// Wall (channel) the post is on, hex id; empty for none.
@@ -116,11 +160,7 @@ fn item(ev: &pb::SocialEvent) -> FeedItem {
         author: ev.author.clone(),
         timestamp: ev.timestamp,
         payload: payload_json(ev),
-        media: ev
-            .media
-            .iter()
-            .map(|m| (hex::encode(&m.cid), m.mime.clone(), m.size))
-            .collect(),
+        media: ev.media.iter().map(PostMedia::from).collect(),
         visibility: "public".into(),
         channel,
         reply_to,
@@ -327,8 +367,8 @@ pub struct Story {
     pub author: String,
     /// Caption, possibly empty.
     pub caption: String,
-    /// Media (cid hex, mime, size). A story always has at least one.
-    pub media: Vec<(String, String, u64)>,
+    /// Media. A story always has at least one.
+    pub media: Vec<PostMedia>,
     /// When it was signed (s).
     pub created_at: u64,
     /// When active surfaces stop showing it (s).
@@ -352,11 +392,7 @@ impl Story {
             id: hex::encode(&ev.id),
             author: ev.author.clone(),
             caption: s.caption,
-            media: ev
-                .media
-                .iter()
-                .map(|m| (hex::encode(&m.cid), m.mime.clone(), m.size))
-                .collect(),
+            media: ev.media.iter().map(PostMedia::from).collect(),
             created_at: ev.timestamp,
             expires_at: s.expires_at,
             sensitive: s.sensitive,

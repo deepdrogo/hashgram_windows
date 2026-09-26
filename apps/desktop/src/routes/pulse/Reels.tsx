@@ -16,7 +16,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { ChevronUp, ChevronDown, Heart, MessageSquare, Repeat2, Volume2, VolumeX, Film } from "lucide-solid";
 import { Button, Empty, Skeleton } from "~/components/ui";
 import { PersonAvatar, Who } from "~/components/identity";
-import { ipc, errText, type FeedItem } from "~/lib/ipc";
+import { ipc, errText, type FeedItem, type PostMedia } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { cachedResource } from "~/lib/cache";
 import { prefetchMedia } from "~/lib/prefetch";
@@ -24,9 +24,8 @@ import { shortWhen } from "~/lib/format";
 import { postText } from "~/routes/feed/Feed";
 
 /** A post counts as a reel when it carries a video. */
-function videoOf(it: FeedItem): [string, string] | null {
-  const v = it.media.find(([, mime]) => mime.startsWith("video/"));
-  return v ? [v[0], v[1]] : null;
+function videoOf(it: FeedItem): PostMedia | null {
+  return it.media.find((m) => m.mime.startsWith("video/") || m.kind === "video") ?? null;
 }
 
 /** Reels as a section of its own: its own rail entry, the full pane. */
@@ -63,10 +62,14 @@ export function Reels() {
   const current = () => reels()[index()];
 
   // Warm the next two, so moving down the list does not wait on a fetch.
+  // Posters first — they are small and they are what fills the frame while
+  // a video arrives.
   createEffect(() => {
     for (const it of reels().slice(index(), index() + 3)) {
       const v = videoOf(it);
-      if (v) prefetchMedia(v[0], v[1]);
+      if (!v) continue;
+      if (v.poster_cid) prefetchMedia(v.poster_cid, "image/jpeg");
+      prefetchMedia(v.cid, v.mime);
     }
   });
 
@@ -165,27 +168,63 @@ export function Reels() {
   );
 }
 
-/** The video itself, fetched from the network and played once ready. */
+/** The video itself: the poster fills the frame until the bytes arrive. */
 function ReelStage(props: { item: FeedItem; muted: boolean; onEnded: () => void }) {
+  const [poster] = cachedResource(
+    () => videoOf(props.item),
+    (v) => (v?.poster_cid ? `poster:${v.poster_cid}` : null),
+    async (v) => {
+      if (!v?.poster_cid) return null;
+      try {
+        return convertFileSrc(await ipc.feedMediaFetch(v.poster_cid, "image/jpeg"));
+      } catch {
+        return null;
+      }
+    },
+  );
   const [src] = cachedResource(
     () => videoOf(props.item),
-    (v) => (v ? `reel:${v[0]}` : null),
+    (v) => (v ? `reel:${v.cid}` : null),
     async (v) => {
       if (!v) return null;
       try {
-        return convertFileSrc(await ipc.feedMediaFetch(v[0], v[1]));
+        return convertFileSrc(await ipc.feedMediaFetch(v.cid, v.mime));
       } catch {
         return null;
       }
     },
   );
   return (
-    <div class="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-md border border-border bg-surface-2">
-      <Show when={src()} fallback={<p class="text-xs text-muted">{src.loading ? "Fetching from the network…" : "This video is not on a reachable node."}</p>}>
+    <div class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-md border border-border bg-surface-2">
+      <Show when={src()} fallback={<ReelWaiting poster={poster()} loading={src.loading} />}>
         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video src={src() ?? ""} class="max-h-full w-full object-contain" autoplay loop={false} muted={props.muted} controls={false} onEnded={props.onEnded} />
+        <video
+          src={src() ?? ""}
+          poster={poster() ?? undefined}
+          class="max-h-full w-full object-contain"
+          autoplay
+          loop={false}
+          muted={props.muted}
+          playsinline
+          controls={false}
+          onEnded={props.onEnded}
+        />
       </Show>
     </div>
+  );
+}
+
+/** The poster, dimmed, while the video is fetched — not an empty box. */
+function ReelWaiting(props: { poster: string | null | undefined; loading: boolean }) {
+  return (
+    <>
+      <Show when={props.poster}>
+        <img src={props.poster ?? ""} alt="" class="absolute inset-0 h-full w-full object-contain opacity-50" />
+      </Show>
+      <p class="relative rounded-md bg-bg/80 px-3 py-2 text-xs text-muted">
+        {props.loading ? "Fetching from the network…" : "This video is not on a reachable node."}
+      </p>
+    </>
   );
 }
 

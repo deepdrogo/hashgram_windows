@@ -533,6 +533,29 @@ pub async fn feed_media_fetch(state: S<'_>, cid: String, mime: String) -> CmdRes
     Ok(p.display().to_string())
 }
 
+/// Opens public media in the machine's own player or viewer.
+///
+/// The webview can decode H.264/AAC in MP4 and WebM, and nothing else.
+/// A perfectly good file in another format — H.265, MKV, AV1 in a container
+/// Windows hands to a different decoder — plays fine in a real player and
+/// shows a black rectangle here. Rather than blame the file, the viewer
+/// offers this: the bytes are already downloaded and verified against their
+/// CID, so opening them costs nothing extra.
+///
+/// It takes a CID, not a path. A command that opened any path the webview
+/// named would be a much larger thing to hand to a renderer than this is.
+#[tauri::command]
+pub async fn feed_media_open(
+    state: S<'_>,
+    app: tauri::AppHandle,
+    cid: String,
+    mime: String,
+) -> CmdResult<String> {
+    let path = feed_media_fetch(state, cid, mime).await?;
+    crate::util::open_path(&app, std::path::Path::new(&path))?;
+    Ok(path)
+}
+
 // ---------------------------------------------------------------------------
 // Circles
 // ---------------------------------------------------------------------------
