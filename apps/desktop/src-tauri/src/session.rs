@@ -435,7 +435,7 @@ async fn spawn_sync_loop(app: AppHandle, state: Arc<AppState>) {
     let task = tauri::async_runtime::spawn(async move {
         let state = loop_state;
         loop {
-            let (delay, done) = {
+            let (delay, done, chat) = {
                 let mut g = state.one.lock().await;
                 let Some(one) = g.as_mut() else { break };
                 let r = one.sync().round().await;
@@ -461,18 +461,35 @@ async fn spawn_sync_loop(app: AppHandle, state: Arc<AppState>) {
                         st.last_error = Some(e.to_string());
                     }
                 }
-                let done = r.ok().map(|rep| UiSyncEvent::RoundDone {
-                    mail: rep.mail,
-                    drive: rep.drive,
-                    people: rep.people,
-                    circles: rep.circles,
-                    spaces: rep.spaces,
-                    feed: rep.feed,
-                    drive_committed: rep.drive_committed,
-                    elapsed_ms: rep.elapsed_ms,
+                // Chat lines the dispatcher could not route to an app
+                // module are conversations; they are stored below, outside
+                // this lock, because the store needs the session read lock.
+                let mut chat = Vec::new();
+                let done = r.ok().map(|rep| {
+                    chat = rep.chat;
+                    UiSyncEvent::RoundDone {
+                        mail: rep.mail,
+                        drive: rep.drive,
+                        people: rep.people,
+                        circles: rep.circles,
+                        spaces: rep.spaces,
+                        feed: rep.feed,
+                        drive_committed: rep.drive_committed,
+                        elapsed_ms: rep.elapsed_ms,
+                    }
                 });
-                (delay, done)
+                (delay, done, chat)
             };
+            let mut arrived = 0;
+            for r in &chat {
+                if crate::cmd_chat::accept_incoming(&state, r).await {
+                    arrived += 1;
+                }
+            }
+            crate::cmd_chat::flush_queue(&state).await;
+            if arrived > 0 {
+                let _ = app.emit("chat:changed", arrived);
+            }
             if let Some(d) = done {
                 let _ = app.emit("sync:event", d);
             }

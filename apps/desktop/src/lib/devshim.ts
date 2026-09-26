@@ -205,6 +205,21 @@ const handlers: Record<string, (a: Args) => unknown> = {
   ],
   stories_of: (a) => (handlers.stories_active!({}) as { author: string }[]).filter((s) => s.author === a?.address),
   story_create: () => "ef".repeat(32),
+  chat_list: () => [
+    { id: "aa".repeat(32), peer: ALICE, members: [ME, ALICE], name: "", direct: true, last_at_ms: now - 400_000, last_text: "See you Saturday then.", unread: 2 },
+    { id: "bb".repeat(32), peer: BOB, members: [ME, BOB], name: "", direct: true, last_at_ms: now - 3 * 86_400_000, last_text: "Sent the survey.", unread: 0 },
+  ],
+  chat_open: () => "aa".repeat(32),
+  chat_history: (a) => [
+    { id: "c1", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 500_000, outgoing: false, state: "sent", text: "Are we still on for the ridge?" },
+    { id: "c2", group_id: String(a?.conversation), sender: ME, at_ms: now - 450_000, outgoing: true, state: "sent", text: "Yes — 7am at the car park." },
+    { id: "c3", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 400_000, outgoing: false, state: "sent", text: "See you Saturday then." },
+  ],
+  chat_send: (a) => ({ id: `c${Date.now()}`, group_id: String(a?.conversation), sender: ME, at_ms: Date.now(), outgoing: true, state: "queued", text: String(a?.text) }),
+  chat_flush: () => 0,
+  chat_mark_read: () => undefined,
+  chat_search: () => [],
+  chat_unread: () => 2,
 };
 
 export function installDevShim() {

@@ -24,6 +24,7 @@
 #![allow(clippy::integer_division, clippy::too_many_arguments)]
 
 pub mod chain_proxy;
+pub mod cmd_chat;
 pub mod cmd_drive;
 pub mod cmd_earn;
 pub mod cmd_feed;
@@ -417,6 +418,15 @@ pub fn run() {
             cmd_hashwall::profile_my_events,
             cmd_hashwall::network_holders,
             cmd_hashwall::network_providers,
+            // chats
+            cmd_chat::chat_list,
+            cmd_chat::chat_open,
+            cmd_chat::chat_history,
+            cmd_chat::chat_send,
+            cmd_chat::chat_flush,
+            cmd_chat::chat_mark_read,
+            cmd_chat::chat_search,
+            cmd_chat::chat_unread,
             // social profiles
             cmd_profile::profile_of,
             cmd_profile::profile_mine,

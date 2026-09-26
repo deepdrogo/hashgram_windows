@@ -429,6 +429,29 @@ export interface FeedItem {
   /** Post replied to, hex id, "" for none. */
   reply_to: string;
 }
+// Chats
+/** One conversation in the list. */
+export interface ConversationView {
+  id: string;
+  peer: string;
+  members: string[];
+  name: string;
+  direct: boolean;
+  last_at_ms: number;
+  last_text: string;
+  unread: number;
+}
+/** One message. `state` is what this device knows, not a read receipt. */
+export interface ChatMessage {
+  id: string;
+  group_id: string;
+  sender: string;
+  at_ms: number;
+  outgoing: boolean;
+  state: "sent" | "queued" | "failed";
+  text: string;
+}
+
 /** A story. `expires_at` is when active surfaces stop showing it. */
 export interface Story {
   id: string;
@@ -980,6 +1003,16 @@ export const ipc = {
     call<string>("feed_post", { text, hashtags, mediaPaths, sensitive, channel }),
   feedPostMedia: (text: string, hashtags: string[], files: MediaUpload[], sensitive: boolean, channel?: string, op?: string) =>
     call<string>("feed_post_media", { text, hashtags, files, sensitive, channel, op }),
+  // chats
+  chatList: () => call<ConversationView[]>("chat_list"),
+  chatOpen: (address: string) => call<string>("chat_open", { address }),
+  chatHistory: (conversation: string, beforeMs?: number, limit?: number) => call<ChatMessage[]>("chat_history", { conversation, beforeMs, limit }),
+  chatSend: (conversation: string, text: string) => call<ChatMessage>("chat_send", { conversation, text }),
+  chatFlush: () => call<number>("chat_flush"),
+  chatMarkRead: (conversation: string, atMs: number) => call<void>("chat_mark_read", { conversation, atMs }),
+  chatSearch: (query: string, limit?: number) => call<ChatMessage[]>("chat_search", { query, limit }),
+  chatUnread: () => call<number>("chat_unread"),
+
   storyCreate: (caption: string, file: MediaUpload, ttlHours: number, sensitive: boolean, op?: string) =>
     call<string>("story_create", { caption, file, ttlHours, sensitive, op }),
   storiesActive: () => call<Story[]>("stories_active"),
@@ -1148,6 +1181,7 @@ export interface EventMap {
   "tx:update": { hash: string; state: string; height?: number; raw_log?: string };
   "drive:progress": DriveProgress;
   "media:progress": MediaProgress;
+  "chat:changed": number;
   "deep-link": { url: string };
 }
 

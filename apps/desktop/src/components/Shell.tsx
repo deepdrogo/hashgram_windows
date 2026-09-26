@@ -33,7 +33,7 @@ export interface NavItem {
 
 export const NAV: NavItem[] = [
   { to: "/pulse", key: "nav_pulse", icon: Activity, accel: "1", group: "social" },
-  { to: "/chats", key: "nav_chats", icon: MessageSquare, accel: "2", group: "social", enabled: false },
+  { to: "/chats", key: "nav_chats", icon: MessageSquare, accel: "2", group: "social" },
   { to: "/mail", key: "nav_mail", icon: Mail, accel: "3", group: "social" },
   { to: "/drive", key: "nav_drive", icon: HardDrive, accel: "4", group: "social" },
   { to: "/spaces", key: "nav_spaces", icon: LayoutGrid, accel: "5", group: "social" },
@@ -121,6 +121,7 @@ export function Shell(props: ParentProps) {
   const badge = (to: string): number => {
     if (to === "/mail") return (store.counts()["inbox"]?.unread ?? 0) + (store.counts()["requests"]?.total ?? 0);
     if (to === "/contacts") return store.requestsIn();
+    if (to === "/chats") return store.chatsUnread();
     if (to === "/wallet") return store.pendingTx();
     return 0;
   };

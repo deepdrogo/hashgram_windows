@@ -134,8 +134,18 @@ export function ProfileRoute() {
                         </Show>
                         {p().following ? "Following" : "Follow"}
                       </Button>
-                      <Button size="sm" variant="secondary" onClick={() => navigate(`/contacts/${p().address}`)} title="Open the contact card">
-                        <MessageSquare size={13} /> Contact
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={async () => {
+                          try {
+                            navigate(`/chats/${await ipc.chatOpen(p().address)}`);
+                          } catch (e) {
+                            store.toast(errText(e), "error");
+                          }
+                        }}
+                      >
+                        <MessageSquare size={13} /> Chat
                       </Button>
                       <Button size="sm" variant="secondary" onClick={() => navigate(`/mail?compose=1&to=${encodeURIComponent(p().username ? `@${p().username}` : p().address)}`)}>
                         <MailIcon size={13} /> Mail

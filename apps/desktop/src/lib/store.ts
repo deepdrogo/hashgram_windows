@@ -27,6 +27,7 @@ function createStore() {
   const [balance, setBalance] = createSignal<string | null>(null);
   const [identity, setIdentity] = createSignal<IdentityStatus | null>(null);
   const [resolvedTheme, setResolvedTheme] = createSignal<"dark" | "light">("dark");
+  const [chatsUnread, setChatsUnread] = createSignal(0);
   // A monotonically increasing tick per area; screens re-fetch when it changes.
   const [ticks, setTicks] = createSignal<Record<Refresh, number>>({ mail: 0, drive: 0, people: 0, feed: 0, circles: 0, spaces: 0, wallet: 0, network: 0 });
   let toastId = 0;
@@ -115,6 +116,11 @@ function createStore() {
     try {
       const r = await ipc.peopleList("incoming");
       setRequestsIn(r.length);
+    } catch {
+      /* locked */
+    }
+    try {
+      setChatsUnread(await ipc.chatUnread());
     } catch {
       /* locked */
     }
@@ -220,6 +226,9 @@ function createStore() {
       void refreshSync();
       void refreshIdentity();
     });
+    await on("chat:changed", () => {
+      void ipc.chatUnread().then(setChatsUnread).catch(() => undefined);
+    });
     await on("settings:changed", () => void refreshSettings());
     await on("net:changed", () => {
       void refreshStatus();
@@ -255,6 +264,7 @@ function createStore() {
     balance,
     identity,
     resolvedTheme,
+    chatsUnread,
     ticks,
     setLocked,
     setTheme,

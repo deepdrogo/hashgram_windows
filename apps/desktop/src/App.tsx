@@ -12,6 +12,7 @@ const Drive = lazy(() => import("./routes/drive/Drive").then((m) => ({ default: 
 const Pulse = lazy(() => import("./routes/pulse/Pulse").then((m) => ({ default: m.PulseRoute })));
 const Topics = lazy(() => import("./routes/topics/Topics").then((m) => ({ default: m.TopicRoute })));
 const Circles = lazy(() => import("./routes/feed/Feed").then((m) => ({ default: m.CirclesRoute })));
+const Chats = lazy(() => import("./routes/chats/Chats").then((m) => ({ default: m.ChatsRoute })));
 const Me = lazy(() => import("./routes/Me").then((m) => ({ default: m.MeRoute })));
 const Profile = lazy(() => import("./routes/profile/Profile").then((m) => ({ default: m.ProfileRoute })));
 const People = lazy(() => import("./routes/People").then((m) => ({ default: m.PeopleRoute })));
@@ -133,6 +134,7 @@ export function App() {
           <Route path="/" component={() => <Navigate href="/pulse" />} />
           <Route path="/pulse/:tab?/:id?" component={Pulse} />
           <Route path="/topics/:id?" component={Topics} />
+          <Route path="/chats/:id?" component={Chats} />
           <Route path="/circles" component={Circles} />
           <Route path="/mail/:folder?/:id?" component={MailRoute} />
           <Route path="/drive/:parent?" component={Drive} />

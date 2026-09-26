@@ -15,7 +15,7 @@ import { formatBytes, formatMs } from "~/lib/format";
 import { pickSavePath, confirm } from "~/lib/dialogs";
 import { enable as autostartEnable, disable as autostartDisable } from "@tauri-apps/plugin-autostart";
 
-type Tab = "network" | "security" | "devices" | "notifications" | "mail" | "appearance" | "updates" | "advanced" | "about";
+type Tab = "network" | "security" | "devices" | "notifications" | "social" | "mail" | "appearance" | "updates" | "advanced" | "about";
 
 export function SettingsRoute() {
   const params = useParams<{ tab?: string }>();
@@ -64,6 +64,7 @@ export function SettingsRoute() {
             { id: "security", label: t("settings_security") },
             { id: "devices", label: t("settings_devices") },
             { id: "notifications", label: t("settings_notifications") },
+            { id: "social", label: "Social" },
             { id: "mail", label: t("settings_mail") },
             { id: "appearance", label: t("settings_appearance") },
             { id: "updates", label: t("settings_updates") },
@@ -143,6 +144,31 @@ export function SettingsRoute() {
                       <Switch label="Spaces" checked={s().notifications.spaces} onChange={(v) => patch((x) => (x.notifications.spaces = v))} />
                       <Switch label="Circles" checked={s().notifications.circles} onChange={(v) => patch((x) => (x.notifications.circles = v))} />
                       <p class="mt-2 text-xs text-muted">Notifications are local Windows toasts driven by sync events. Nothing leaves this PC; there is no push service.</p>
+                    </div>
+                  </Card>
+                </Show>
+                <Show when={tab() === "social"}>
+                  <Card title="Chats">
+                    <div class="flex flex-col gap-3 p-4">
+                      <Field label="Who can Chat with me?" hint="Enforced when a message arrives here, not by the sender's app. Someone you refuse can still write to you with HashMail.">
+                        <Select
+                          class="w-64"
+                          value={s().social.who_can_chat}
+                          onChange={(v) => patch((x) => (x.social.who_can_chat = v as "everyone" | "nobody"))}
+                          options={[
+                            { value: "everyone", label: "Everyone" },
+                            { value: "nobody", label: "Nobody" },
+                          ]}
+                        />
+                      </Field>
+                      <p class="text-xs text-muted">People you blocked are refused whatever this says.</p>
+                    </div>
+                  </Card>
+                  <Card title="Local feed">
+                    <div class="flex flex-col gap-3 p-4">
+                      <Field label="Country for the Local tab" hint="Two letters, or empty. Hashgram never works your location out from your connection — this is the only place it learns one.">
+                        <Input class="w-24" mono maxLength={2} value={s().social.local_country} onInput={(e) => patch((x) => (x.social.local_country = e.currentTarget.value.toUpperCase()))} />
+                      </Field>
                     </div>
                   </Card>
                 </Show>
