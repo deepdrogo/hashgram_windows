@@ -45,7 +45,7 @@ describe("the price and the destination", () => {
     expect(rs).toMatch(/module_address\(SINK_MODULE\)/);
     // …and then checked against what the chain says lives there.
     expect(rs).toMatch(/cosmos\/auth\/v1beta1\/accounts\//);
-    expect(rs).toMatch(/is_module && is_gov && says_address/);
+    expect(rs).toMatch(/is_module && is_gov && text\.contains\(&derived\)/);
   });
 
   it("an unconfirmed destination means no payment, and says why", () => {
@@ -58,9 +58,12 @@ describe("the price and the destination", () => {
     expect(flat(rs)).toMatch(/not paid to the founder/i);
   });
 
-  it("a failed or missing transaction is not a pass", () => {
-    expect(rs).toMatch(/that transaction is not on the chain/);
+  it("a failed transaction is not a pass, and a missing one is not a badge either", () => {
     expect(rs).toMatch(/that transaction failed on chain/);
+    // Missing means pending, and pending draws nothing.
+    expect(rs).toMatch(/out\.pending = true/);
+    const badge = read("src", "components", "social", "Verified.tsx");
+    expect(badge).toMatch(/verified === true/);
   });
 
   it("paying and claiming are separate, so a payment is never lost", () => {
@@ -71,6 +74,33 @@ describe("the price and the destination", () => {
   it("a profile edit carries the claim forward rather than re-earning it", () => {
     const profile = read("src-tauri", "src", "cmd_profile.rs");
     expect(flat(profile)).toMatch(/carry the verification claim forward/i);
+  });
+});
+
+describe("a payment that is not in a block yet", () => {
+  const rs = read("src-tauri", "src", "cmd_verify.rs");
+  const panel = read("src", "routes", "profile", "Verification.tsx");
+
+  it("is pending, not refused", () => {
+    expect(rs).toMatch(/pub pending: bool/);
+    expect(rs).toMatch(/waiting for the payment to be included in a block/);
+    expect(flat(rs)).toMatch(/Not a failure and not a badge/);
+  });
+
+  it("keeps checking instead of leaving a paid account looking rejected", () => {
+    expect(panel).toMatch(/const watchForBlock/);
+    expect(flat(panel)).toMatch(/the worst moment to look broken/);
+  });
+
+  it("the fee is counted before the money moves", () => {
+    expect(rs).toMatch(/preview_send\(&dest, PRICE_UHASH\)/);
+    expect(flat(rs)).toMatch(/The fee is paid on top of the price/);
+  });
+
+  it("the destination is confirmed two independent ways", () => {
+    expect(rs).toMatch(/Route one: ask what lives at the derived address/);
+    expect(rs).toMatch(/Route two: ask the chain for the module account by name/);
+    expect(flat(rs)).toMatch(/a disagreement means something is wrong and nothing is sent/i);
   });
 });
 

@@ -59,8 +59,13 @@ export function StoriesRow() {
   return (
     <div class="mb-3 flex gap-3 overflow-x-auto pb-1">
       <Bubble label={mine() ? "Your story" : "Add story"} onClick={() => setCompose(true)}>
-        <span class="flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-border text-muted">
-          <Plus size={18} />
+        {/* The 4px inset stands in for the other bubbles' padding and ring,
+            so every bubble in the row is the same 64px across and the line
+            of them is straight. */}
+        <span class="block p-1">
+          <span class="flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-border text-muted">
+            <Plus size={18} />
+          </span>
         </span>
       </Bubble>
       <Show when={mine()}>
@@ -93,15 +98,39 @@ function Bubble(props: { label: unknown; onClick: () => void; children: unknown 
   );
 }
 
-function StoryAvatar(props: { address: string }) {
+/**
+ * Ring, then the picture *inside* it rather than filling it.
+ *
+ * A circle that crops is the usual way to do this and it is wrong here.
+ * Avatars on Hashgram are square — every other screen shows them as a
+ * rounded square — and a square that fills a circle loses its corners,
+ * which for a picture whose subject reaches the top edge means the top of
+ * the subject is sliced off.
+ *
+ * So the picture is fitted inside the ring instead: a 40px square in a 56px
+ * circle sits within the inscribed square (56 / √2 ≈ 39.6), which is the
+ * size at which nothing can be cut. The ring stays a ring, the avatar stays
+ * whole, and the two read as one mark.
+ */
+function StoryAvatar(props: { address: string; small?: boolean }) {
   const [src] = createResource(() => props.address, avatarSrc);
   return (
-    // The ring is a circle, so what it frames has to be one too. The picture
-    // is clipped to the same shape and cropped to fill it, rather than laid
-    // inside the ring with its corners showing.
-    <span class="block rounded-full p-[3px] ring-2 ring-brand">
-      <span class="block h-[52px] w-[52px] overflow-hidden rounded-full">
-        <Avatar address={props.address} size={52} src={src() ?? null} round />
+    <Show when={!props.small} fallback={<SmallStoryAvatar src={src() ?? null} address={props.address} />}>
+      <span class="block rounded-full p-[2px] ring-2 ring-brand">
+        <span class="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-surface-2">
+          <Avatar address={props.address} size={40} src={src() ?? null} />
+        </span>
+      </span>
+    </Show>
+  );
+}
+
+/** The same mark at header size, on the same proportions. */
+function SmallStoryAvatar(props: { address: string; src: string | null }) {
+  return (
+    <span class="block rounded-full p-[1px] ring-1 ring-brand">
+      <span class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-surface-2">
+        <Avatar address={props.address} size={22} src={props.src} />
       </span>
     </span>
   );
@@ -182,7 +211,7 @@ function StoryViewer(props: { address: string; onClose: () => void }) {
         </div>
         <div class="flex items-center gap-3 px-4 py-2">
           <button type="button" class="flex items-center gap-2" onClick={() => { props.onClose(); navigate(`/profile/${props.address}`); }}>
-            <StoryAvatar address={props.address} />
+            <StoryAvatar address={props.address} small />
             <Who address={props.address} size="sm" />
           </button>
           <span class="text-xs text-muted" title="Set by the author when they posted it">

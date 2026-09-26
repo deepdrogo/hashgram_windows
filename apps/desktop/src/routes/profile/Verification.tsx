@@ -8,7 +8,7 @@
 // The badge is not granted by us and cannot be taken away by us: it is a
 // public payment plus a claim in the profile, and every reader re-checks
 // both against the chain. See apps/desktop/src-tauri/src/cmd_verify.rs.
-import { Show, createSignal } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { BadgeCheck, TriangleAlert } from "lucide-solid";
 import { Button, Input, Notice } from "~/components/ui";
 import { Mono } from "~/components/identity";
@@ -37,6 +37,43 @@ export function VerificationPanel() {
     store.bump("feed");
   };
 
+  /**
+   * Re-checks until the payment is in a block.
+   *
+   * A chain read a second after broadcasting finds nothing, so without
+   * this the screen would go straight from "paid" to "no badge" and stay
+   * there until something else happened to refresh it — which, having just
+   * taken 100,000 HASH, is the worst moment to look broken.
+   */
+  let watching = false;
+  const watchForBlock = () => {
+    if (watching) return;
+    watching = true;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      refresh();
+      if (tries >= 20 || status()?.verified) {
+        clearInterval(timer);
+        watching = false;
+      }
+    }, 6000);
+    onCleanup(() => clearInterval(timer));
+  };
+
+  // A payment from a previous session can still be waiting for a block, so
+  // the watcher starts from the state as well as from the purchase.
+  onMount(() => {
+    const check = setInterval(() => {
+      if (status()?.pending) {
+        watchForBlock();
+        clearInterval(check);
+      }
+    }, 1000);
+    setTimeout(() => clearInterval(check), 10_000);
+    onCleanup(() => clearInterval(check));
+  });
+
   const buy = async () => {
     setBusy(true);
     try {
@@ -44,7 +81,12 @@ export function VerificationPanel() {
       refresh();
       setOpen(false);
       setConfirm("");
-      store.toast(r.verified ? "Verified. The payment is on the chain." : "Paid. The badge appears once the payment is in a block.");
+      if (r.verified) {
+        store.toast("Verified. The payment is on the chain.");
+      } else {
+        store.toast("Paid. The badge appears as soon as the payment is in a block.");
+        watchForBlock();
+      }
     } catch (e) {
       store.toast(errText(e), "error");
     } finally {
@@ -96,9 +138,20 @@ export function VerificationPanel() {
             </p>
 
             <Show when={status()?.claimed_tx && !status()?.verified}>
-              <Notice class="mt-2">
-                This profile claims a payment that did not check out{status()?.reason ? `: ${status()?.reason}` : ""}. No badge is shown.
-              </Notice>
+              <Show
+                when={status()?.pending}
+                fallback={
+                  <Notice class="mt-2">
+                    This profile claims a payment that did not check out{status()?.reason ? `: ${status()?.reason}` : ""}. No badge is shown.
+                  </Notice>
+                }
+              >
+                <p class="mt-2 flex items-center gap-1.5 text-xs text-muted">
+                  <span class="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" aria-hidden="true" />
+                  Payment sent — <Mono text={status()?.claimed_tx ?? ""} head={10} tail={6} copy /> — waiting for it to be included in a block. The
+                  badge appears by itself; you can close this.
+                </p>
+              </Show>
             </Show>
 
             <Show

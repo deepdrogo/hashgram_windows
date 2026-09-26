@@ -81,6 +81,12 @@ pub struct VerifyStatus {
     /// Whether the chain could be read at all. When false, `verified` is
     /// false because nothing could be checked — not because it failed.
     pub checked: bool,
+    /// The payment was made but is not in a block yet.
+    ///
+    /// Not a failure and not a badge. Without this the moment after paying
+    /// looks exactly like a rejected claim, which is the worst thing to
+    /// show somebody who has just parted with 100,000 HASH.
+    pub pending: bool,
 }
 
 /// The address payments go to: the governance module account.
@@ -99,19 +105,40 @@ pub struct VerifyStatus {
 /// is a much smaller failure than taking the money to a wrong address.
 async fn sink(one: &mut hashgram_sdk::HashgramOne) -> Option<String> {
     let derived = hashgram_sdk::chain::wallet::module_address(SINK_MODULE)?;
-    let account = one
+
+    // Route one: ask what lives at the derived address.
+    if let Ok(v) = one
         .chain
         .query(&format!("cosmos/auth/v1beta1/accounts/{derived}"))
         .await
+    {
+        let text = v.to_string();
+        let is_module = text.contains("ModuleAccount");
+        let is_gov = v
+            .pointer("/account/name")
+            .and_then(serde_json::Value::as_str)
+            == Some(SINK_MODULE);
+        if is_module && is_gov && text.contains(&derived) {
+            return Some(derived);
+        }
+    }
+
+    // Route two: ask the chain for the module account by name, and take it
+    // only if it names the address we derived. Two independent answers that
+    // agree; a disagreement means something is wrong and nothing is sent.
+    let v = one
+        .chain
+        .query(&format!(
+            "cosmos/auth/v1beta1/module_accounts/{SINK_MODULE}"
+        ))
+        .await
         .ok()?;
-    let text = account.to_string();
-    let is_module = text.contains("ModuleAccount");
-    let is_gov = account
-        .pointer("/account/name")
-        .and_then(serde_json::Value::as_str)
-        == Some(SINK_MODULE);
-    let says_address = text.contains(&derived);
-    (is_module && is_gov && says_address).then_some(derived)
+    let named = v
+        .pointer("/account/base_account/address")
+        .or_else(|| v.pointer("/account/value/address"))
+        .or_else(|| v.pointer("/account/address"))
+        .and_then(serde_json::Value::as_str)?;
+    (named == derived).then_some(derived)
 }
 
 /// The price, the destination and the memo.
@@ -168,7 +195,14 @@ pub async fn verify_status(state: S<'_>, address: String) -> CmdResult<VerifySta
             out.reason = why;
         }
         Ok(Some(_)) => out.reason = "that transaction failed on chain".to_owned(),
-        Ok(None) => out.reason = "that transaction is not on the chain".to_owned(),
+        Ok(None) => {
+            // A hash the chain has never heard of is either a payment
+            // still waiting for a block, or an invention. Which one it is
+            // becomes clear within a block or two, so the claim is called
+            // pending rather than false.
+            out.pending = true;
+            out.reason = "waiting for the payment to be included in a block".to_owned();
+        }
         Err(_) => {
             out.checked = false;
             out.reason = "the chain could not be read".to_owned();
@@ -232,9 +266,25 @@ pub async fn verify_purchase(state: S<'_>, confirm: String) -> CmdResult<VerifyS
         let balance = one.wallet().balance(None).await?;
         let available: u128 = balance.uhash.parse().unwrap_or(0);
         if available < PRICE_UHASH {
-            return Err(UiError::invalid(
-                "a badge costs 100,000 HASH and this account does not hold that much",
-            ));
+            return Err(UiError::invalid(format!(
+                "a badge costs 100,000 HASH and this account holds {}",
+                hashgram_sdk::wallet::format_hash(available)
+            )));
+        }
+        // The fee is paid on top of the price, so an account holding
+        // exactly 100,000 HASH cannot buy a badge. Better to say that than
+        // to broadcast a transaction that fails for a few uhash.
+        let fee: u128 = one
+            .wallet()
+            .preview_send(&dest, PRICE_UHASH)
+            .await
+            .map_or(0, |p| p.fee_uhash);
+        if available < PRICE_UHASH.saturating_add(fee) {
+            return Err(UiError::invalid(format!(
+                "the price is 100,000 HASH and the network fee is {} on top; this account holds {}",
+                hashgram_sdk::wallet::format_hash(fee),
+                hashgram_sdk::wallet::format_hash(available)
+            )));
         }
         let hash = one
             .wallet()

@@ -21,6 +21,8 @@ export interface VerifyStatus {
   verified: boolean;
   reason: string;
   checked: boolean;
+  /** Paid, not yet in a block. Neither a badge nor a failure. */
+  pending: boolean;
 }
 
 /** Reads and caches one account's badge state. */
