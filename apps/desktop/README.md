@@ -1,16 +1,16 @@
-# Hashgram One for Windows
+﻿# Hashgram One for Windows
 
 One identity. One inbox. One vault. One network.
 
-Encrypted mail, an encrypted drive, a signed public feed, private circles,
-role-based Spaces, provider earnings and the wallet — one application, one
-24-word identity, talking to the Hashgram peer-to-peer network and never to
-one server. Built to `docs/HASHGRAM_ONE_ARCHITECTURE.md`; implementation
-notes in `docs/HASHGRAM_ONE_AI_HANDOFF.md`, progress against
-`docs/DESKTOP_APP_IMPLEMENTATION_CHECKLIST.md`.
+**Demo / public preview.** Encrypted mail, chats, drive, Pulse (social home),
+Reels, Local, Stories, role-based Spaces, contacts, a buyable verified badge,
+provider earnings and the wallet ÔÇö one application, one 24-word identity,
+talking to the Hashgram peer-to-peer network and never to one server. Built
+to `docs/HASHGRAM_ONE_ARCHITECTURE.md`; implementation notes in
+`docs/HASHGRAM_ONE_AI_HANDOFF.md`.
 
-Navigation order is fixed: Mail · Drive · Feed · People · Spaces · Earn ·
-Wallet · Network · Settings. Mail is home.
+Navigation (social-first): Pulse ┬À Reels ┬À Local ┬À Chats ┬À Mail ┬À Drive ┬À
+Spaces ┬À Contacts ┬À Wallet ┬À Earn ┬À Network ┬À My profile ┬À Settings. Pulse is home.
 
 ## Stack
 
@@ -71,8 +71,8 @@ makes throwaway profiles unlock fast. `pnpm dev` alone serves the UI in a
 browser against an in-memory shim (`src/lib/devshim.ts`, DEV builds only) for
 layout work; nothing in it ships.
 
-Shortcuts: Ctrl+K search · c compose · j/k move · Enter open · r reply ·
-e archive · Ctrl+L lock · Ctrl+Shift+P performance panel · F1 help.
+Shortcuts: Ctrl+K search ┬À c compose ┬À j/k move ┬À Enter open ┬À r reply ┬À
+e archive ┬À Ctrl+L lock ┬À Ctrl+Shift+P performance panel ┬À F1 help.
 
 ## Release
 
@@ -101,7 +101,7 @@ Signing (owner's machine or CI secrets only):
 
 The app fetches
 `https://github.com/deepdrogo/hashgram_windows/releases/latest/download/latest.json`
-(on start when enabled, and from Settings → Updates → Check now), verifies the
+(on start when enabled, and from Settings ÔåÆ Updates ÔåÆ Check now), verifies the
 minisign signature against the compiled-in public key, downloads the NSIS
 installer from that release and runs it passively for the current user.
 Unsigned or foreign manifests are refused.
