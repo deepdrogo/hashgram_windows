@@ -2,15 +2,15 @@
 
 One identity. One inbox. One vault. One network.
 
-Encrypted mail, an encrypted drive, a signed public feed, private circles,
-role-based Spaces, provider earnings and the wallet — one application, one
-24-word identity, talking to the Hashgram peer-to-peer network and never to
-one server. Built to `docs/HASHGRAM_ONE_ARCHITECTURE.md`; implementation
-notes in `docs/HASHGRAM_ONE_AI_HANDOFF.md`, progress against
-`docs/DESKTOP_APP_IMPLEMENTATION_CHECKLIST.md`.
+**Demo / public preview.** Encrypted mail, chats, drive, Pulse (social home),
+Reels, Local, Stories, role-based Spaces, contacts, a buyable verified badge,
+provider earnings and the wallet — one application, one 24-word identity,
+talking to the Hashgram peer-to-peer network and never to one server. Built
+to `docs/HASHGRAM_ONE_ARCHITECTURE.md`; implementation notes in
+`docs/HASHGRAM_ONE_AI_HANDOFF.md`.
 
-Navigation order is fixed: Mail · Drive · Feed · People · Spaces · Earn ·
-Wallet · Network · Settings. Mail is home.
+Navigation (social-first): Pulse · Reels · Local · Chats · Mail · Drive ·
+Spaces · Contacts · Wallet · Earn · Network · My profile · Settings. Pulse is home.
 
 ## Stack
 
