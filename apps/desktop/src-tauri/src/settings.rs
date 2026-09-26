@@ -118,7 +118,7 @@ impl Default for AppearanceSettings {
 /// `local_country` is what Pulse's Local tab filters on. It is a choice the
 /// user makes, never a guess from an address, a connection or a clock: the
 /// app has no geolocation of any kind.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SocialSettings {
     /// Two-letter country code, or empty for no Local tab.
     #[serde(default)]
@@ -130,6 +130,21 @@ pub struct SocialSettings {
 
 fn default_who_can_chat() -> String {
     "everyone".to_owned()
+}
+
+// Written by hand rather than derived. A settings file from a build before
+// this section existed has no `social` object at all, and `#[serde(default)]`
+// on the *field* fills it with `SocialSettings::default()` — the derived
+// version of which would leave `who_can_chat` empty, which `validate`
+// refuses. Every save then failed with "who may chat must be everyone or
+// nobody", including the one the theme switch makes.
+impl Default for SocialSettings {
+    fn default() -> Self {
+        Self {
+            local_country: String::new(),
+            who_can_chat: default_who_can_chat(),
+        }
+    }
 }
 
 /// Notifications. Nothing leaves the device: these are OS toasts driven
@@ -371,7 +386,10 @@ impl Settings {
         {
             return Err("the local country is a two-letter code, or empty".into());
         }
-        if !["everyone", "nobody"].contains(&self.social.who_can_chat.as_str()) {
+        // Empty is "not set", which reads as the default rather than as an
+        // error: a stricter check here only ever punished a user upgrading
+        // from a build that had no such setting.
+        if !["", "everyone", "nobody"].contains(&self.social.who_can_chat.as_str()) {
             return Err("who may chat must be everyone or nobody".into());
         }
         Ok(())
@@ -381,6 +399,28 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_file_from_before_the_social_section_still_saves() {
+        // The theme switch saves the whole settings object. A file written
+        // by an older build has no `social` key, and if the default for it
+        // were the derived one this would fail validation with "who may
+        // chat must be everyone or nobody" — which is exactly what it did.
+        let old = r#"{
+            "network": {"kind":"mainnet","devnet_genesis_hash":"","bootstrap":[],"chain_api":"","indexer_url":"","gateway_address":""},
+            "security": {"auto_lock_minutes":15,"hello_enabled":false,"clipboard_clear_secs":30},
+            "appearance": {"theme":"dark","reduced_motion":false,"density":"comfortable","language":"en"},
+            "updates": {"auto_check":true,"channel":"stable"},
+            "advanced": {"log_level":"info"}
+        }"#;
+        let mut s: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(s.social.who_can_chat, "everyone");
+        assert!(s.validate().is_ok(), "{:?}", s.validate());
+
+        // And switching the theme on it still validates.
+        s.appearance.theme = "light".into();
+        assert!(s.validate().is_ok());
+    }
 
     #[test]
     fn defaults_are_mainnet_with_no_endpoints() {

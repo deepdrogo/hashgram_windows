@@ -15,7 +15,7 @@ describe("nothing cryptographic reaches the webview", () => {
 
   it("the UI talks to typed commands and does no crypto", () => {
     // Naming MLS in a comment is fine; calling a cipher is not.
-    const code = chatUi.replace(/^\s*\/\/.*$/gm, "");
+    const code = chatUi.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(code).not.toMatch(/crypto\.|SubtleCrypto|\.encrypt\(|\.decrypt\(|\bMLS\b/);
     expect(chatUi).toMatch(/ipc\.chat(Send|History|List|Open)\(/);
   });
@@ -57,14 +57,81 @@ describe("who may chat is decided by the recipient", () => {
   it("the setting has room to grow without changing its callers", () => {
     const settings = read("src-tauri", "src", "settings.rs");
     expect(settings).toMatch(/who_can_chat/);
-    expect(settings).toContain('["everyone", "nobody"]');
+    // Empty is accepted and means the default; anything else must be one
+    // of the named policies.
+    expect(settings).toContain('["", "everyone", "nobody"]');
     expect(read("src", "routes", "Settings.tsx")).toContain("Who can Chat with me?");
+  });
+
+  it("an upgrade from a build without the setting defaults to everyone", () => {
+    const settings = read("src-tauri", "src", "settings.rs");
+    // Written by hand: the derived Default would leave it empty, which
+    // made every settings save fail — including the theme switch.
+    expect(settings).toMatch(/impl Default for SocialSettings/);
+    expect(settings).toMatch(/who_can_chat: default_who_can_chat\(\)/);
   });
 
   it("a refused sender is pointed at Mail", () => {
     const ui = read("src", "routes", "chats", "Chats.tsx");
     expect(ui).toContain("This user is not accepting Chats");
     expect(ui).toContain("You can contact them using HashMail");
+  });
+});
+
+describe("a conversation exists when somebody uses it", () => {
+  it("only registered groups are listed, not every MLS group the account has", () => {
+    const rs = read("src-tauri", "src", "cmd_chat.rs");
+    expect(rs).toContain("state.db.chat_registered()");
+    // rustfmt reflows prose, so match it on one line.
+    const flat = rs.split("\n").map((l) => l.replace(/^\s*\/\/\/?\s?/, "")).join(" ");
+    expect(flat).toMatch(/contact requests, Circles, Spaces/);
+    // A Space's group belongs to the Space, not to Chats.
+    expect(rs).toMatch(/if kind == "space"/);
+  });
+
+  it("an incoming message is what registers the other side's conversation", () => {
+    expect(read("src-tauri", "src", "cmd_chat.rs")).toMatch(
+      /Somebody writing to you is what makes a conversation exist/,
+    );
+  });
+});
+
+describe("group chats", () => {
+  const rs = read("src-tauri", "src", "cmd_chat.rs");
+
+  it("a group is the same MLS group as a one-to-one chat, with a name", () => {
+    expect(rs).toMatch(/pub async fn chat_create_group/);
+    expect(rs).toMatch(/create_conversation\(&link, &chain, &network, &name, &people\)/);
+  });
+
+  it("there is a ceiling, and it points at Spaces for bigger rooms", () => {
+    expect(rs).toMatch(/MAX_GROUP_MEMBERS: usize = \d+/);
+    expect(rs).toMatch(/a community of hundreds belongs in a Space/i);
+  });
+
+  it("members can be added and the group can be left", () => {
+    expect(rs).toMatch(/pub async fn chat_add_member/);
+    expect(rs).toMatch(/pub async fn chat_leave/);
+  });
+});
+
+describe("the retention warning is on the screen, not only in a doc", () => {
+  it("the composer says a delete does not reach the other device", () => {
+    const ui = read("src", "routes", "chats", "Chats.tsx");
+    expect(ui).toMatch(/removes it from this device/);
+    expect(ui).toMatch(/undelivered ciphertext sits on store nodes/);
+  });
+});
+
+describe("emoji", () => {
+  it("the picker is bundled, not fetched", () => {
+    const picker = read("src", "components", "social", "EmojiPicker.tsx");
+    expect(picker).not.toMatch(/fetch\(|http|cdn/i);
+    expect(picker).toMatch(/const GROUPS/);
+  });
+
+  it("it inserts at the caret rather than appending", () => {
+    expect(read("src", "routes", "chats", "Chats.tsx")).toContain("input?.selectionStart");
   });
 });
 

@@ -29,6 +29,13 @@ type S<'a> = State<'a, Arc<AppState>>;
 /// Longest message the composer accepts.
 const MAX_TEXT: usize = 16 * 1024;
 
+/// People a group conversation may hold besides the creator.
+///
+/// Every member's every device joins the MLS group, so the real cost is
+/// devices, not people. This is a deliberate ceiling on a one-to-many
+/// chat; a community of hundreds belongs in a Space.
+const MAX_GROUP_MEMBERS: usize = 64;
+
 /// A conversation in the list.
 #[derive(Debug, Clone, Serialize)]
 pub struct ConversationView {
@@ -51,29 +58,55 @@ pub struct ConversationView {
 }
 
 /// Conversations, most recent first.
+///
+/// Only groups this account registered as chats. The messaging layer holds
+/// a group for every private thing the account does — contact requests,
+/// Circles, Spaces — and listing all of them filled Chats with rows for
+/// people who never wrote and for groups that are not conversations.
 #[tauri::command]
 pub async fn chat_list(state: S<'_>) -> CmdResult<Vec<ConversationView>> {
     let key = state.db_key().await?;
     let index = state.db.chat_overview()?;
+    let registered = state.db.chat_registered()?;
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let me = one.address().to_owned();
+    let groups = one.messaging.conversations();
     let mut out = Vec::new();
-    for (id, meta, members) in one.messaging.conversations() {
+    for (id, kind, title) in registered {
+        // A Space's conversation belongs to the Space, not to this list.
+        if kind == "space" {
+            continue;
+        }
+        // A group the messaging layer no longer has — left, or a vault
+        // restored without it — is not listed. The row stays, so history
+        // is still there if the group comes back.
+        let Some((_, meta, members)) = groups.iter().find(|(gid, _, _)| *gid == id) else {
+            continue;
+        };
         let summary = index.iter().find(|s| s.group_id == id);
         let last = match summary {
             Some(_) => state.db.chat_page(&key, &id, 0, 1)?.pop(),
             None => None,
         };
+        let direct = kind == "direct" && (meta.direct || members.len() <= 2);
         out.push(ConversationView {
-            peer: members
-                .iter()
-                .find(|m| **m != me)
-                .cloned()
-                .unwrap_or_default(),
-            direct: meta.direct || members.len() <= 2,
-            name: meta.name.clone(),
-            members,
+            peer: if direct {
+                members
+                    .iter()
+                    .find(|m| **m != me)
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            },
+            direct,
+            name: if meta.name.is_empty() {
+                title
+            } else {
+                meta.name.clone()
+            },
+            members: members.clone(),
             last_at_ms: summary.map(|s| s.last_at_ms).unwrap_or(0),
             last_text: last.map(|m| m.text).unwrap_or_default(),
             unread: summary.map(|s| s.unread).unwrap_or(0),
@@ -91,29 +124,127 @@ pub async fn chat_open(state: S<'_>, address: String) -> CmdResult<String> {
     if !address.starts_with("hash1") {
         return Err(UiError::invalid("address"));
     }
-    let mut g = state.one.lock().await;
-    let one = AppState::unlocked(&mut g)?;
-    let me = one.address().to_owned();
-    if address == me {
-        return Err(UiError::invalid("that is your own address"));
-    }
-    if let Some((id, _, _)) =
-        one.messaging
+    let id = {
+        let mut g = state.one.lock().await;
+        let one = AppState::unlocked(&mut g)?;
+        if address == one.address() {
+            return Err(UiError::invalid("that is your own address"));
+        }
+        let existing = one
+            .messaging
             .conversations()
             .into_iter()
             .find(|(_, meta, members)| {
                 (meta.direct || members.len() <= 2) && members.contains(&address)
             })
-    {
-        return Ok(id);
+            .map(|(id, _, _)| id);
+        match existing {
+            Some(id) => id,
+            None => {
+                let (link, chain, network) =
+                    (one.link.clone(), one.chain.clone(), one.network.clone());
+                let gid = one
+                    .messaging
+                    .create_conversation(&link, &chain, &network, "", &[address])
+                    .await?;
+                one.save()?;
+                hex::encode(gid)
+            }
+        }
+    };
+    state.db.chat_register(&id, "direct", "")?;
+    Ok(id)
+}
+
+/// Starts a group conversation.
+///
+/// Every active device of every member joins, which is what lets a group
+/// be read on someone's phone as well as their PC. A group is an MLS group
+/// like a one-to-one chat; the differences are a name and more people.
+#[tauri::command]
+pub async fn chat_create_group(
+    state: S<'_>,
+    name: String,
+    members: Vec<String>,
+) -> CmdResult<String> {
+    let name = name.trim().to_owned();
+    if name.chars().count() < 2 || name.chars().count() > 64 {
+        return Err(UiError::invalid("a group name is 2 to 64 characters"));
     }
+    let mut people: Vec<String> = Vec::new();
+    for m in members {
+        let m = m.trim().to_owned();
+        if !m.starts_with("hash1") {
+            return Err(UiError::invalid("every member needs a hash1 address"));
+        }
+        if !people.contains(&m) {
+            people.push(m);
+        }
+    }
+    if people.is_empty() {
+        return Err(UiError::invalid("add at least one other person"));
+    }
+    if people.len() > MAX_GROUP_MEMBERS {
+        return Err(UiError::invalid(format!(
+            "a group holds up to {MAX_GROUP_MEMBERS} people"
+        )));
+    }
+    let id = {
+        let mut g = state.one.lock().await;
+        let one = AppState::unlocked(&mut g)?;
+        if people.iter().any(|p| p == one.address()) {
+            return Err(UiError::invalid("you are already in your own group"));
+        }
+        let (link, chain, network) = (one.link.clone(), one.chain.clone(), one.network.clone());
+        let gid = one
+            .messaging
+            .create_conversation(&link, &chain, &network, &name, &people)
+            .await?;
+        one.save()?;
+        hex::encode(gid)
+    };
+    state.db.chat_register(&id, "group", &name)?;
+    Ok(id)
+}
+
+/// Adds somebody to a group conversation.
+#[tauri::command]
+pub async fn chat_add_member(state: S<'_>, conversation: String, address: String) -> CmdResult<()> {
+    let address = address.trim().to_owned();
+    if !address.starts_with("hash1") {
+        return Err(UiError::invalid("address"));
+    }
+    let gid = hex::decode(conversation.trim()).map_err(|_| UiError::invalid("conversation"))?;
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
     let (link, chain, network) = (one.link.clone(), one.chain.clone(), one.network.clone());
-    let gid = one
-        .messaging
-        .create_conversation(&link, &chain, &network, "", &[address])
+    one.messaging
+        .add_participant(&link, &chain, &network, &gid, &address)
         .await?;
     one.save()?;
-    Ok(hex::encode(gid))
+    Ok(())
+}
+
+/// Leaves a conversation and stops listing it.
+#[tauri::command]
+pub async fn chat_leave(state: S<'_>, conversation: String) -> CmdResult<()> {
+    let id = conversation.trim().to_ascii_lowercase();
+    let gid = hex::decode(&id).map_err(|_| UiError::invalid("conversation"))?;
+    {
+        let mut g = state.one.lock().await;
+        let one = AppState::unlocked(&mut g)?;
+        let me = one.address().to_owned();
+        let (link, network) = (one.link.clone(), one.network.clone());
+        // Removing ourselves is how MLS says "I am gone": the others take
+        // the commit and stop encrypting to this device.
+        let _ = one
+            .messaging
+            .remove_participant(&link, &network, &gid, &me)
+            .await;
+        one.save()?;
+    }
+    state.db.chat_unregister(&id)?;
+    Ok(())
 }
 
 /// One page of a conversation, oldest first.
@@ -264,6 +395,8 @@ pub async fn chat_search(
 pub async fn may_chat_with(state: &Arc<AppState>, address: &str) -> bool {
     let policy = state.settings.read().await.social.who_can_chat.clone();
     match policy.as_str() {
+        // Empty means the setting predates this build; that is "everyone",
+        // not "refuse everything".
         "nobody" => false,
         _ => {
             // Blocking is separate from the policy and always wins.
@@ -307,7 +440,41 @@ pub async fn accept_incoming(state: &Arc<AppState>, r: &Received) -> bool {
         state: "sent".to_owned(),
         text: r.message.text.clone(),
     };
+    // Somebody writing to you is what makes a conversation exist, which is
+    // why registration happens here and not when a group is created.
+    let kind = conversation_kind(state, &r.group_id).await;
+    let _ = state
+        .db
+        .chat_register(&r.group_id, kind, &r.message.group_name);
     state.db.chat_put(&key, &row).is_ok()
+}
+
+/// Whether a group is a one-to-one chat, a group chat or a Space's.
+async fn conversation_kind(state: &Arc<AppState>, group_id: &str) -> &'static str {
+    let mut g = state.one.lock().await;
+    let Ok(one) = AppState::unlocked(&mut g) else {
+        return "direct";
+    };
+    // A Space's group carries its posts and files as well as its chat; it
+    // is the Space's, and must not turn up in Chats as a stray group.
+    if one
+        .spaces()
+        .list()
+        .map(|v| v.iter().any(|s| s.group_id == group_id))
+        .unwrap_or(false)
+    {
+        return "space";
+    }
+    match one
+        .messaging
+        .conversations()
+        .into_iter()
+        .find(|(gid, _, _)| gid == group_id)
+    {
+        Some((_, meta, members)) if meta.direct || members.len() <= 2 => "direct",
+        Some(_) => "group",
+        None => "direct",
+    }
 }
 
 /// How many conversations have unread messages (for the rail badge).

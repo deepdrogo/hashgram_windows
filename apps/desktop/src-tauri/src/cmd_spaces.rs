@@ -258,6 +258,32 @@ pub async fn spaces_unshare_drive(state: S<'_>, space: String, share: String) ->
     Ok(id)
 }
 
+/// The Space's group conversation.
+///
+/// A Space already is an MLS group — the one its posts and shared files
+/// travel in — so its chat is that group, read and written with the same
+/// commands as any other conversation. Nothing new is created and nobody
+/// is invited twice: being in the Space *is* being in the chat.
+#[tauri::command]
+pub async fn spaces_chat_open(state: S<'_>, space: String) -> CmdResult<String> {
+    let group_id = {
+        let mut g = state.one.lock().await;
+        let one = AppState::unlocked(&mut g)?;
+        let summary = one
+            .spaces()
+            .list()?
+            .into_iter()
+            .find(|s| s.id == space.trim())
+            .ok_or_else(|| UiError::not_found("space"))?;
+        summary.group_id
+    };
+    // Registered as `space` so it is reachable as a conversation without
+    // appearing in Chats, where it would be a second, confusing copy of
+    // something the Space already shows.
+    state.db.chat_register(&group_id, "space", "")?;
+    Ok(group_id)
+}
+
 /// Mail to every member.
 #[tauri::command]
 pub async fn spaces_mail(

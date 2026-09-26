@@ -4,17 +4,18 @@
 // so controls are disabled before the SDK would refuse them.
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
-import { LayoutGrid, Plus, Megaphone, MessageSquare, Folder, File, Users, Mail, UserPlus, Send, Download, ExternalLink, Copy as CopyIcon, Crown, X, Share2 } from "lucide-solid";
+import { LayoutGrid, Plus, Megaphone, MessageSquare, Folder, File, Users, Mail, UserPlus, Send, Download, ExternalLink, Copy as CopyIcon, Crown, X, Share2, Search } from "lucide-solid";
 import { Button, Dialog, Field, Input, Notice, Tabs, Textarea, Badge, Empty, Select, Checkbox } from "~/components/ui";
 import { OfflineBanner, ErrorState } from "~/components/States";
 import { Who, Avatar } from "~/components/identity";
+import { ChatThread } from "~/routes/chats/Chats";
 import { ipc, errText, ROLE, type SpaceSummary, type SpaceStateView, type SpaceContentView, type SpaceMember, type SpaceSharedEntryView, type EntryView } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { t } from "~/lib/i18n";
 import { roleName, shortWhen, formatBytes, formatMs } from "~/lib/format";
 import { pickSavePath, confirm } from "~/lib/dialogs";
 
-type Tab = "overview" | "posts" | "drive" | "members" | "mail";
+type Tab = "overview" | "chat" | "posts" | "drive" | "members" | "mail";
 
 /** Rule table from docs/SPACES.md, as predicates on my role. */
 export const can = {
@@ -162,6 +163,11 @@ function SpaceView(props: { id: string; tab: Tab; onTab: (t: Tab) => void }) {
   const announcements = createMemo(() => (content() ?? []).filter((c) => c.kind === "announcement"));
   const posts = createMemo(() => (content() ?? []).filter((c) => c.kind === "post"));
   const commentsOf = (id: string) => (content() ?? []).filter((c) => c.kind === "comment" && c.post_id === id).reverse();
+  // A Space of three hundred people talking about one thing is a mailing
+  // list. Subjects come from the #tags members already write, so nobody
+  // has to create a channel before saying something.
+  const [topic, setTopic] = createSignal("");
+  const shownPosts = createMemo(() => (topic() ? posts().filter((p) => tagsOf(p.text).includes(topic())) : posts()));
 
   return (
     <Show when={!state.error} fallback={<ErrorState error={state.error} onRetry={() => void refetch()} />}>
@@ -188,6 +194,7 @@ function SpaceView(props: { id: string; tab: Tab; onTab: (t: Tab) => void }) {
                   onChange={(v) => props.onTab(v as Tab)}
                   tabs={[
                     { id: "overview", label: t("spaces_overview"), badge: announcements().length },
+                    { id: "chat", label: "Chat" },
                     { id: "posts", label: t("spaces_posts"), badge: posts().length },
                     { id: "drive", label: t("spaces_drive"), badge: s().drive.length },
                     { id: "members", label: t("spaces_members"), badge: s().members.length },
@@ -206,7 +213,10 @@ function SpaceView(props: { id: string; tab: Tab; onTab: (t: Tab) => void }) {
                 </Show>
               </div>
             </header>
-            <div class="min-h-0 flex-1 overflow-auto">
+            <Show when={props.tab === "chat"}>
+              <SpaceChat space={props.id} name={s().name} members={s().members.length} />
+            </Show>
+            <div class={`min-h-0 flex-1 overflow-auto ${props.tab === "chat" ? "hidden" : ""}`}>
               <Show when={props.tab === "overview"}>
                 <div class="mx-auto max-w-2xl px-4 py-3">
                   <Show when={can.announce(role())} fallback={<p class="mb-3 text-[11px] text-muted">Announcements are written by Admins and the Owner.</p>}>
@@ -230,9 +240,10 @@ function SpaceView(props: { id: string; tab: Tab; onTab: (t: Tab) => void }) {
               <Show when={props.tab === "posts"}>
                 <div class="mx-auto max-w-2xl px-4 py-3">
                   <Show when={can.post(role())} fallback={<Notice class="mb-3">Guests read only. Ask an Admin for the Member role to post.</Notice>}>
-                    <PostForm placeholder="Post to the Space…" onSubmit={(text) => act(() => ipc.spacesPost(props.id, text))} />
+                    <PostForm placeholder="Post to the Space… use #tags to start a subject" onSubmit={(text) => act(() => ipc.spacesPost(props.id, text))} />
                   </Show>
-                  <For each={posts()} fallback={<Empty title="No posts yet" icon={<MessageSquare size={18} />} />}>
+                  <TopicBar posts={posts()} value={topic()} onPick={setTopic} />
+                  <For each={shownPosts()} fallback={<Empty title={topic() ? `Nothing tagged #${topic()}` : "No posts yet"} icon={<MessageSquare size={18} />} />}>
                     {(p) => (
                       <article class="card mb-2 p-3 text-[13px]" data-space-post={p.id}>
                         <div class="flex items-center gap-2">
@@ -282,6 +293,84 @@ function SpaceView(props: { id: string; tab: Tab; onTab: (t: Tab) => void }) {
         )}
       </Show>
     </Show>
+  );
+}
+
+/** The #tags in a post, lower-cased, without duplicates. */
+function tagsOf(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/#([\p{L}\p{N}_]{2,32})/gu)) {
+    const tag = m[1]!.toLowerCase();
+    if (!out.includes(tag)) out.push(tag);
+  }
+  return out;
+}
+
+/**
+ * The subjects a Space is actually talking about.
+ *
+ * Built from the posts themselves rather than from a list somebody has to
+ * maintain: in a Space with hundreds of members, the topics that matter
+ * are the ones people are using today.
+ */
+function TopicBar(props: { posts: SpaceContentView[]; value: string; onPick: (t: string) => void }) {
+  const counted = createMemo(() => {
+    const n = new Map<string, number>();
+    for (const p of props.posts) for (const tag of tagsOf(p.text)) n.set(tag, (n.get(tag) ?? 0) + 1);
+    return [...n.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  });
+  return (
+    <Show when={counted().length}>
+      <div class="mb-3 flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          class={`rounded-md px-2 py-0.5 text-[11px] ${props.value === "" ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"}`}
+          onClick={() => props.onPick("")}
+        >
+          All
+        </button>
+        <For each={counted()}>
+          {([tag, n]) => (
+            <button
+              type="button"
+              class={`rounded-md px-2 py-0.5 text-[11px] ${props.value === tag ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"}`}
+              onClick={() => props.onPick(props.value === tag ? "" : tag)}
+            >
+              #{tag} <span class="tnum opacity-60">{n}</span>
+            </button>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+}
+
+/**
+ * The Space's group conversation.
+ *
+ * A Space is already an MLS group — the one its posts and files travel in
+ * — so its chat is that group. Being in the Space is being in the chat;
+ * there is nothing to join and no second messenger.
+ */
+function SpaceChat(props: { space: string; name: string; members: number }) {
+  const [id] = createResource(
+    () => props.space,
+    (s) => ipc.spacesChatOpen(s).catch(() => null),
+  );
+  return (
+    <div class="flex min-h-0 flex-1 flex-col">
+      <Show when={id()} fallback={<div class="p-6 text-xs text-muted">{id.loading ? t("loading") : "This Space has no conversation on this device yet."}</div>}>
+        {(gid) => (
+          <>
+            <p class="border-b border-border px-4 py-1.5 text-[11px] text-muted">
+              Everyone in {props.name} — {props.members} {props.members === 1 ? "person" : "people"} — reads this. It is
+              the same encrypted group the Space's posts and files travel in.
+            </p>
+            <ChatThread id={gid()} onSent={() => store.bump("spaces")} onLeft={() => store.bump("spaces")} />
+          </>
+        )}
+      </Show>
+    </div>
   );
 }
 
@@ -410,10 +499,51 @@ function Members(props: { space: string; state: SpaceStateView; me: string; onCh
     }
   };
   const roleKey = (r: number) => ["", "guest", "member", "admin", "owner"][r] ?? "member";
+  // A company Space can hold hundreds of people; a flat list of hundreds
+  // is unusable without a way to find one of them and to see the shape of
+  // the room at a glance.
+  const [q, setQ] = createSignal("");
+  const [onlyRole, setOnlyRole] = createSignal("");
+  const counts = createMemo(() => {
+    const n: Record<string, number> = { owner: 0, admin: 0, member: 0, guest: 0 };
+    for (const m of props.state.members) n[roleKey(m.role)] = (n[roleKey(m.role)] ?? 0) + 1;
+    return n;
+  });
+  const shown = createMemo(() => {
+    const needle = q().trim().toLowerCase();
+    return props.state.members.filter(
+      (m) =>
+        (!onlyRole() || roleKey(m.role) === onlyRole()) &&
+        (!needle || m.address.toLowerCase().includes(needle)),
+    );
+  });
+
   return (
     <div class="mx-auto max-w-3xl px-4 py-3">
-      <ul class="card divide-y divide-border" data-testid="members">
-        <For each={props.state.members}>
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="relative min-w-48 flex-1">
+          <Search size={13} class="pointer-events-none absolute left-2 top-2 text-muted" />
+          <Input class="h-7 pl-7" placeholder="Find a member by address…" value={q()} onInput={(e) => setQ(e.currentTarget.value)} />
+        </div>
+        <For each={["owner", "admin", "member", "guest"]}>
+          {(r) => (
+            <Show when={counts()[r]}>
+              <button
+                type="button"
+                class={`rounded-md px-2 py-0.5 text-[11px] ${onlyRole() === r ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"}`}
+                onClick={() => setOnlyRole(onlyRole() === r ? "" : r)}
+              >
+                {r} <span class="tnum opacity-60">{counts()[r]}</span>
+              </button>
+            </Show>
+          )}
+        </For>
+      </div>
+      <p class="mb-2 text-[11px] text-muted">
+        Showing {shown().length} of {props.state.members.length}.
+      </p>
+      <ul class="card max-h-[60vh] divide-y divide-border overflow-auto" data-testid="members">
+        <For each={shown()} fallback={<li class="p-4 text-center text-xs text-muted">Nobody matches that.</li>}>
           {(m: SpaceMember) => {
             const isSelf = () => m.address === props.me;
             const options = () => can.setRoles(my(), m.role, isSelf());

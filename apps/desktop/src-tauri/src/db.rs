@@ -58,6 +58,19 @@ CREATE TABLE IF NOT EXISTS chat_read (
     group_id   TEXT PRIMARY KEY,
     read_at_ms INTEGER NOT NULL
 );
+-- Which MLS groups are conversations the user has in Chats.
+--
+-- The messaging layer holds a group for every private thing the account
+-- does: contact requests, Circles, Spaces. Listing all of them put rows
+-- in Chats for people who never wrote and for groups that are not chats
+-- at all. A conversation is registered when the user opens one or starts
+-- a group, and when a message actually arrives — nothing else.
+CREATE TABLE IF NOT EXISTS chat_conversation (
+    group_id   TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL DEFAULT 'direct',
+    title      TEXT NOT NULL DEFAULT '',
+    created_ms INTEGER NOT NULL
+);
 "#;
 
 impl Db {
@@ -342,6 +355,44 @@ impl Db {
             messages.push(row);
         }
         Ok(messages)
+    }
+
+    /// Registers a group as a conversation Chats should list.
+    ///
+    /// Idempotent, and a later call may set a title the first one did not
+    /// know (a group named after it was created, say).
+    pub fn chat_register(&self, group_id: &str, kind: &str, title: &str) -> Result<(), String> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO chat_conversation(group_id, kind, title, created_ms)
+                 VALUES(?1, ?2, ?3, ?4)
+                 ON CONFLICT(group_id) DO UPDATE SET
+                    kind  = excluded.kind,
+                    title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE chat_conversation.title END",
+                params![group_id, kind, title, now() * 1000],
+            )
+            .map(|_| ())
+        })
+    }
+
+    /// Forgets a conversation (its messages stay until they are deleted).
+    pub fn chat_unregister(&self, group_id: &str) -> Result<(), String> {
+        self.with(|c| {
+            c.execute(
+                "DELETE FROM chat_conversation WHERE group_id = ?1",
+                params![group_id],
+            )
+            .map(|_| ())
+        })
+    }
+
+    /// The conversations Chats lists: group id, kind and title.
+    pub fn chat_registered(&self) -> Result<Vec<(String, String, String)>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT group_id, kind, title FROM chat_conversation")?;
+            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect()
+        })
     }
 
     /// Text search inside one device's own chat history. Because the text

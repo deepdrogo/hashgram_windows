@@ -424,6 +424,9 @@ pub fn run() {
             // chats
             cmd_chat::chat_list,
             cmd_chat::chat_open,
+            cmd_chat::chat_create_group,
+            cmd_chat::chat_add_member,
+            cmd_chat::chat_leave,
             cmd_chat::chat_history,
             cmd_chat::chat_send,
             cmd_chat::chat_flush,
@@ -453,6 +456,7 @@ pub fn run() {
             cmd_spaces::spaces_comment,
             cmd_spaces::spaces_share_drive,
             cmd_spaces::spaces_unshare_drive,
+            cmd_spaces::spaces_chat_open,
             cmd_spaces::spaces_mail,
             cmd_spaces::spaces_drive_download,
             cmd_spaces::spaces_drive_open,

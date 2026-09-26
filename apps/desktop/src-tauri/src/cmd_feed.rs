@@ -22,6 +22,9 @@ type S<'a> = State<'a, Arc<AppState>>;
 const MAX_MEDIA: usize = 20;
 const MAX_MEDIA_BYTES: u64 = 64 * 1024 * 1024;
 
+/// A story's caption is a line, not an essay.
+const STORY_CAPTION_CHARS: usize = 200;
+
 fn limit_of(l: Option<usize>) -> usize {
     l.unwrap_or(50).clamp(1, 200)
 }
@@ -328,10 +331,12 @@ pub async fn story_create(
     op: Option<String>,
 ) -> CmdResult<String> {
     let op = op.unwrap_or_default();
-    if caption.chars().count() > 500 {
-        return Err(UiError::invalid(
-            "a story caption is at most 500 characters",
-        ));
+    // A story is a picture or a video with a line under it. Anything
+    // longer is a post, which is a different thing and does not expire.
+    if caption.chars().count() > STORY_CAPTION_CHARS {
+        return Err(UiError::invalid(format!(
+            "a story caption is at most {STORY_CAPTION_CHARS} characters — write a post instead"
+        )));
     }
     let name = std::path::Path::new(&file.path)
         .file_name()

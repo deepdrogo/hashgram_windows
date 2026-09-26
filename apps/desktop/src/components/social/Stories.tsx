@@ -20,6 +20,9 @@ import { pickFile } from "~/lib/dialogs";
 /** How long one story is shown before the viewer moves on. */
 const STEP_MS = 5000;
 
+/** A caption is a line under a picture. Longer belongs in a post. */
+const CAPTION_MAX = 200;
+
 export function StoriesRow() {
   const [compose, setCompose] = createSignal(false);
   const [viewing, setViewing] = createSignal<string | null>(null);
@@ -238,8 +241,9 @@ function StoryComposer(props: { open: boolean; onClose: () => void; onPosted: ()
           </Button>
           <span class="truncate text-xs text-muted">{path().split(/[\\/]/).pop()}</span>
         </div>
-        <Field label="Caption">
-          <Input value={caption()} maxLength={500} onInput={(e) => setCaption(e.currentTarget.value)} />
+        <p class="text-[11px] text-muted">A story is a picture or a video. Text on its own is a post.</p>
+        <Field label="Caption" hint={`A line under it — ${CAPTION_MAX - caption().length} characters left.`}>
+          <Input value={caption()} maxLength={CAPTION_MAX} onInput={(e) => setCaption(e.currentTarget.value)} />
         </Field>
         <Field label="Show it for" hint="The protocol refuses anything over 48 hours.">
           <Select

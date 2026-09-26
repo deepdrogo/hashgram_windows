@@ -207,8 +207,13 @@ const handlers: Record<string, (a: Args) => unknown> = {
   story_create: () => "ef".repeat(32),
   chat_list: () => [
     { id: "aa".repeat(32), peer: ALICE, members: [ME, ALICE], name: "", direct: true, last_at_ms: now - 400_000, last_text: "See you Saturday then.", unread: 2 },
+    { id: "cc".repeat(32), peer: "", members: [ME, ALICE, BOB, CAROL], name: "Saturday climbers", direct: false, last_at_ms: now - 900_000, last_text: "Bring the long rope 🧗", unread: 1 },
     { id: "bb".repeat(32), peer: BOB, members: [ME, BOB], name: "", direct: true, last_at_ms: now - 3 * 86_400_000, last_text: "Sent the survey.", unread: 0 },
   ],
+  chat_create_group: () => "cc".repeat(32),
+  chat_add_member: () => undefined,
+  chat_leave: () => undefined,
+  spaces_chat_open: () => "dd".repeat(32),
   chat_open: () => "aa".repeat(32),
   chat_history: (a) => [
     { id: "c1", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 500_000, outgoing: false, state: "sent", text: "Are we still on for the ridge?" },

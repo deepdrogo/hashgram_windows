@@ -1059,6 +1059,9 @@ export const ipc = {
   // chats
   chatList: () => call<ConversationView[]>("chat_list"),
   chatOpen: (address: string) => call<string>("chat_open", { address }),
+  chatCreateGroup: (name: string, members: string[]) => call<string>("chat_create_group", { name, members }),
+  chatAddMember: (conversation: string, address: string) => call<void>("chat_add_member", { conversation, address }),
+  chatLeave: (conversation: string) => call<void>("chat_leave", { conversation }),
   chatHistory: (conversation: string, beforeMs?: number, limit?: number) => call<ChatMessage[]>("chat_history", { conversation, beforeMs, limit }),
   chatSend: (conversation: string, text: string) => call<ChatMessage>("chat_send", { conversation, text }),
   chatFlush: () => call<number>("chat_flush"),
@@ -1135,6 +1138,7 @@ export const ipc = {
   spacesComment: (space: string, post: string, text: string) => call<string>("spaces_comment", { space, post, text }),
   spacesShareDrive: (space: string, entry: string, path: string, live: boolean) => call<string>("spaces_share_drive", { space, entry, path, live }),
   spacesUnshareDrive: (space: string, share: string) => call<string>("spaces_unshare_drive", { space, share }),
+  spacesChatOpen: (space: string) => call<string>("spaces_chat_open", { space }),
   spacesMail: (space: string, subject: string, body: string) => call<string>("spaces_mail", { space, subject, body }),
   spacesDriveDownload: (space: string, share: string, outPath: string) => call<number>("spaces_drive_download", { space, share, outPath }),
   spacesDriveOpen: (space: string, share: string) => call<string>("spaces_drive_open", { space, share }),
