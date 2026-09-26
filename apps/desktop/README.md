@@ -1,16 +1,17 @@
-﻿# Hashgram One for Windows
+# Hashgram One for Windows
 
 One identity. One inbox. One vault. One network.
 
 **Demo / public preview.** Encrypted mail, chats, drive, Pulse (social home),
 Reels, Local, Stories, role-based Spaces, contacts, a buyable verified badge,
-provider earnings and the wallet ÔÇö one application, one 24-word identity,
+provider earnings and the wallet — one application, one 24-word identity,
 talking to the Hashgram peer-to-peer network and never to one server. Built
 to `docs/HASHGRAM_ONE_ARCHITECTURE.md`; implementation notes in
-`docs/HASHGRAM_ONE_AI_HANDOFF.md`.
+`docs/HASHGRAM_ONE_AI_HANDOFF.md` and `docs/HASHGRAM_ONE_SOCIAL_REPORT.md`.
 
-Navigation (social-first): Pulse ┬À Reels ┬À Local ┬À Chats ┬À Mail ┬À Drive ┬À
-Spaces ┬À Contacts ┬À Wallet ┬À Earn ┬À Network ┬À My profile ┬À Settings. Pulse is home.
+Navigation order is fixed: Pulse · Reels · Local · Chats · Mail · Drive ·
+Spaces · Contacts, then Wallet · Earn · Network, then My profile · Settings.
+Pulse is home.
 
 ## Stack
 
@@ -25,9 +26,9 @@ Spaces ┬À Contacts ┬À Wallet ┬À Earn ┬À Network ┬À My profile ┬
 - **rusqlite** (WAL) only for UI caches, with XChaCha20-Poly1305 column
   sealing under a key kept inside the vault; **DPAPI + Windows Hello**
   (`winsec.rs`) for day-to-day unlock; Argon2id for the passphrase.
-- Dark-first design: black, near-blacks, greys, white and one desaturated
-  blue-grey accent (`src/styles/tokens.css`); Inter bundled (OFL); English
-  first, Georgian second (`src/lib/i18n.ts`).
+- Monochrome design: black, greys and white only, no accent hue
+  (`src/styles/tokens.css`, enforced by `tests/palette.test.ts`); dark and
+  light themes; Inter bundled (OFL); English only for now (`src/lib/i18n.ts`).
 
 ## What the webview never sees
 
@@ -43,8 +44,8 @@ checks that nothing the app writes to disk is readable.
 
 ```
 apps/desktop/
-  src/                 SolidJS app: routes/ (mail, drive, feed, People, spaces, Earn, wallet, Network, Settings, Help,
-                       Onboarding, Lock), components/, lib/ (ipc, store, i18n, format, updates, devshim)
+  src/                 SolidJS app: routes/ (Pulse, Reels, Local, Chats, mail, drive, Contacts, spaces, profile, Earn,
+                       wallet, Network, Settings, Help, Onboarding, Lock), components/, lib/
   src-tauri/src/       Rust: session (vault, link, sync loop), cmd_* per area, views, settings, db, winsec, notify,
                        node_manager (Earn), chain_proxy (loopback gateway for a node on this PC)
   src-tauri/tests/     no_plaintext (disk audit), devnet (two backends over a real swarm and mock gateway)
@@ -71,8 +72,8 @@ makes throwaway profiles unlock fast. `pnpm dev` alone serves the UI in a
 browser against an in-memory shim (`src/lib/devshim.ts`, DEV builds only) for
 layout work; nothing in it ships.
 
-Shortcuts: Ctrl+K search ┬À c compose ┬À j/k move ┬À Enter open ┬À r reply ┬À
-e archive ┬À Ctrl+L lock ┬À Ctrl+Shift+P performance panel ┬À F1 help.
+Shortcuts: Ctrl+K search · c compose · j/k move · Enter open · r reply ·
+e archive · Ctrl+L lock · Ctrl+Shift+P performance panel · F1 help.
 
 ## Release
 
@@ -101,7 +102,7 @@ Signing (owner's machine or CI secrets only):
 
 The app fetches
 `https://github.com/deepdrogo/hashgram_windows/releases/latest/download/latest.json`
-(on start when enabled, and from Settings ÔåÆ Updates ÔåÆ Check now), verifies the
+(on start when enabled, and from Settings → Updates → Check now), verifies the
 minisign signature against the compiled-in public key, downloads the NSIS
 installer from that release and runs it passively for the current user.
 Unsigned or foreign manifests are refused.

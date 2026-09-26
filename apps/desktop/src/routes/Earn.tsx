@@ -141,6 +141,7 @@ function Overview() {
 }
 
 function RunNode() {
+  const navigate = useNavigate();
   const [ov, { refetch }] = createResource(() => ipc.nodeOverview());
   const [busy, setBusy] = createSignal<string | null>(null);
   const [setup, setSetup] = createSignal<NodeSetup | null>(null);
@@ -232,11 +233,8 @@ function RunNode() {
                       <Button onClick={() => act("install", () => ipc.nodeInstall(), "Installed")} loading={busy() === "install"} disabled={!n().configured || !n().bundled}>
                         <Download size={14} /> Install {n().elevated ? "as a service" : "as a background task"}
                       </Button>
-                      <Button variant="secondary" onClick={() => act("start", () => ipc.nodeStart(), "Started")} loading={busy() === "start"} disabled={n().registration === "none"}>
-                        <Play size={14} /> Start
-                      </Button>
-                      <Button variant="secondary" onClick={() => act("stop", () => ipc.nodeStop(), "Stopped")} loading={busy() === "stop"} disabled={n().registration === "none"}>
-                        <Square size={14} /> Stop
+                      <Button variant="secondary" onClick={() => navigate("/network")}>
+                        <Play size={14} /> Start and watch it in Network
                       </Button>
                       <Button variant="ghost" onClick={async () => { if (await confirm("Remove the node registration? Data and keys are kept.")) await act("uninstall", () => ipc.nodeUninstall(), "Removed"); }} loading={busy() === "uninstall"} disabled={n().registration === "none"}>
                         <Trash2 size={14} /> Uninstall
@@ -253,9 +251,14 @@ function RunNode() {
                         Node key: <Mono text={n().node_id!} head={12} tail={8} copy />
                       </p>
                     </Show>
+                    <p class="text-xs text-muted">
+                      Installing registers the node to start when you sign in to Windows. Starting, stopping and the
+                      node's own output live in Network → Your node, where the app runs it as a child process and can
+                      say what it is really doing.
+                    </p>
                     <div class="flex gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => void ipc.nodeLogTail(300).then(setLog).catch((e) => store.toast(errText(e), "error"))}>
-                        <ScrollText size={12} /> Log
+                      <Button variant="secondary" size="sm" onClick={() => navigate("/network")}>
+                        <ScrollText size={12} /> Status and logs
                       </Button>
                       <Button variant="secondary" size="sm" onClick={() => setReg(true)} disabled={!n().operator || !n().node_id}>
                         <Server size={12} /> Register on chain…

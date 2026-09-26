@@ -57,6 +57,13 @@ pub enum MlsError {
     /// The group is not known to this device.
     #[error("unknown group {0}")]
     UnknownGroup(String),
+    /// Their key package was built by a version this one cannot accept.
+    #[error(
+        "that person's app published its encryption key with an older build; \
+         both of you need Hashgram One 1.6 or newer, and theirs republishes \
+         within a minute of starting"
+    )]
+    StaleKeyPackage,
     /// The message was not for this group, or was of a type we do not handle.
     #[error("unexpected message: {0}")]
     Unexpected(String),
@@ -318,9 +325,25 @@ impl MlsClient {
     /// again when the one-time supply runs dry. Weaker forward secrecy for
     /// the Welcome than a one-time package, which is why it is the fallback
     /// and not the norm.
+    ///
+    /// The capabilities have to name the last-resort extension. RFC 9420
+    /// requires every extension in a KeyPackage to appear in the leaf's
+    /// `capabilities.extensions`, and the receiver enforces it — while
+    /// `mark_as_last_resort()` adds the extension and leaves the
+    /// capabilities alone. Built without this, the package is accepted by
+    /// the device that made it and rejected by everyone else with "a key
+    /// package extension is not supported in the leaf's capabilities",
+    /// which is how a second client could never be added to a group.
     pub fn key_package_last_resort(&self) -> Result<Vec<u8>, MlsError> {
         let bundle = KeyPackage::builder()
             .mark_as_last_resort()
+            .leaf_node_capabilities(Capabilities::new(
+                None,
+                None,
+                Some(&[ExtensionType::LastResort]),
+                None,
+                None,
+            ))
             .build(
                 CIPHERSUITE,
                 &self.provider,
@@ -370,7 +393,13 @@ impl MlsClient {
                 .map_err(|e| MlsError::Decode(e.to_string()))?;
             let kp = kp_in
                 .validate(self.provider.crypto(), ProtocolVersion::Mls10)
-                .map_err(proto)?;
+                .map_err(|e| match e {
+                    // The protocol error is right and unreadable. Whoever
+                    // hits it can do exactly one thing about it, so say
+                    // that instead of quoting RFC 9420 at them.
+                    KeyPackageVerifyError::UnsupportedExtension => MlsError::StaleKeyPackage,
+                    other => proto(other),
+                })?;
             kps.push(kp);
         }
         let (commit, welcome, _) = group
@@ -538,6 +567,27 @@ mod tests {
 
     fn client(addr: &str, seed: u8) -> MlsClient {
         MlsClient::new(addr, &[seed; 32]).unwrap()
+    }
+
+    /// A key package is only useful to the device that *receives* it, so
+    /// both kinds have to survive another client's validation — not just
+    /// our own. The last-resort package failed exactly this for a while:
+    /// the extension was set without the matching capability, so every
+    /// other client refused it and nobody could be added to a group.
+    #[test]
+    fn both_kinds_of_key_package_are_accepted_by_another_client() {
+        let mut alice = client("hash1alice", 1);
+        let bob = client("hash1bob", 2);
+
+        for (what, kp) in [
+            ("one-time", bob.key_package().unwrap()),
+            ("last-resort", bob.key_package_last_resort().unwrap()),
+        ] {
+            let gid = alice.create_group(GroupMeta::default()).unwrap();
+            alice
+                .add_members(&gid, &[kp])
+                .unwrap_or_else(|e| panic!("{what} key package refused: {e}"));
+        }
     }
 
     #[test]

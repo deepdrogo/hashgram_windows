@@ -78,7 +78,7 @@ const handlers: Record<string, (a: Args) => unknown> = {
   lock: () => undefined,
   wipe_local_data: () => undefined,
   app_status: () => ({ vault_exists: mode !== "onboarding", unlocked: mode === "app", address: ME, network: "mainnet", chain_id: "hashgram-1", genesis_hash: "e322bc2319f6e0173286fa526dab5a8ff8ad0797c7b80dd03e7c9d98621d5e4d", onboarding_done: true, hello_available: true, hello_enabled: false, version: "0.3.0-dev", commit: "devshim", data_dir: "C:\\Users\\you\\AppData\\Local\\Hashgram\\data", updater_configured: false, updater_endpoint: "", code_signed: false, uptime_ms: 1200, link_up: true, link_error: null }),
-  settings_get: () => ({ network: { kind: "mainnet", devnet_genesis_hash: "", bootstrap: [], chain_api: "", indexer_url: "", gateway_address: "" }, security: { auto_lock_minutes: 15, hello_enabled: false, clipboard_clear_secs: 30 }, appearance: { theme, reduced_motion: false, density: "comfortable", language: new URLSearchParams(location.search).get("lang") ?? "en" }, notifications: { mail: true, requests: true, spaces: true, circles: true }, mail: { threaded: true, mark_read_after_secs: 0 }, updates: { auto_check: false, channel: "stable" }, advanced: { log_level: "info" }, start_with_windows: false, onboarding_done: true, device_label: "Home PC" }),
+  settings_get: () => ({ network: { kind: "mainnet", devnet_genesis_hash: "", bootstrap: [], chain_api: "", indexer_url: "", gateway_address: "" }, security: { auto_lock_minutes: 15, hello_enabled: false, clipboard_clear_secs: 30 }, appearance: { theme, reduced_motion: false, density: "comfortable", language: new URLSearchParams(location.search).get("lang") ?? "en" }, notifications: { mail: true, requests: true, spaces: true, circles: true }, social: { local_country: "GE", who_can_chat: "everyone" }, mail: { threaded: true, mark_read_after_secs: 0 }, updates: { auto_check: false, channel: "stable" }, advanced: { log_level: "info" }, start_with_windows: false, onboarding_done: true, device_label: "Home PC" }),
   sync_status: () => ({ phase: "Idle", last_ok_ms: now - 12_000, rounds: 42, last_error: null, peers: 1, balance_uhash: "12500000" }),
   mail_counts: () => ({ inbox: { total: 3, unread: 1 }, requests: { total: 1, unread: 1 }, sent: { total: 1, unread: 0 }, drafts: { total: 0, unread: 0 }, archive: { total: 0, unread: 0 }, spam: { total: 0, unread: 0 }, trash: { total: 0, unread: 0 } }),
   mail_list: (a) => mails.filter((m) => (a?.folder === "starred" ? m.starred : m.folder === a?.folder)),
@@ -172,6 +172,67 @@ const handlers: Record<string, (a: Args) => unknown> = {
   sync_now: () => undefined,
   leases_list: () => [],
   tx_has_pending: () => false,
+  settings_set: () => undefined,
+  people_follow: () => undefined,
+  profile_of: (a) => {
+    const who = String(a?.address);
+    const c = contacts.find((x) => x.address === who);
+    const mine = who === ME;
+    return {
+      address: who,
+      username: mine ? "me" : (c?.username ?? ""),
+      display_name: mine ? "Me" : (c?.display_name ?? ""),
+      bio: mine ? "Testing Hashgram One." : "Building things on the Hashgram network.",
+      avatar_cid: "",
+      banner_cid: "",
+      website: mine ? "https://hashgram.io" : "",
+      country: mine ? "GE" : "",
+      updated_at: Math.floor(now / 1000) - 8000,
+      states: c?.states ?? [],
+      is_me: mine,
+      following: !!c?.states.includes("following"),
+      stats: { posts: 3, replies: 5, media: 1, likes: 12, following: 2, followers: null, first_event: Math.floor(now / 1000) - 30 * 86400, source: "device" },
+    };
+  },
+  profile_mine: () => handlers.profile_of!({ address: ME }),
+  profile_save: () => "ab".repeat(32),
+  profile_upload_image: () => "cd".repeat(32),
+  profile_timeline: (a) => (a?.tab === "likes" ? [] : (handlers.feed_friends!({}) as unknown[]).slice(0, a?.tab === "media" ? 0 : 2)),
+  profile_follow_list: (a) => (a?.which === "followers" ? [] : [ALICE, BOB]),
+  stories_active: () => [
+    { id: "s1", author: ALICE, caption: "Morning on the ridge", media: [["ab".repeat(32), "image/jpeg", 220_000]], created_at: Math.floor(now / 1000) - 3600, expires_at: Math.floor(now / 1000) + 20 * 3600, sensitive: false },
+    { id: "s2", author: BOB, caption: "", media: [["cd".repeat(32), "image/jpeg", 180_000]], created_at: Math.floor(now / 1000) - 7200, expires_at: Math.floor(now / 1000) + 16 * 3600, sensitive: false },
+  ],
+  stories_of: (a) => (handlers.stories_active!({}) as { author: string }[]).filter((s) => s.author === a?.address),
+  story_create: () => "ef".repeat(32),
+  chat_list: () => [
+    { id: "aa".repeat(32), peer: ALICE, members: [ME, ALICE], name: "", direct: true, last_at_ms: now - 400_000, last_text: "See you Saturday then.", unread: 2 },
+    { id: "cc".repeat(32), peer: "", members: [ME, ALICE, BOB, CAROL], name: "Saturday climbers", direct: false, last_at_ms: now - 900_000, last_text: "Bring the long rope 🧗", unread: 1 },
+    { id: "bb".repeat(32), peer: BOB, members: [ME, BOB], name: "", direct: true, last_at_ms: now - 3 * 86_400_000, last_text: "Sent the survey.", unread: 0 },
+  ],
+  chat_create_group: () => "cc".repeat(32),
+  chat_add_member: () => undefined,
+  chat_leave: () => undefined,
+  spaces_chat_open: () => "dd".repeat(32),
+  chat_open: () => "aa".repeat(32),
+  chat_history: (a) => ({
+    messages: [
+      { id: "c1", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 500_000, outgoing: false, state: "sent", text: "Are we still on for the ridge?" },
+      { id: "c2", group_id: String(a?.conversation), sender: ME, at_ms: now - 450_000, outgoing: true, state: "sent", text: "Yes — 7am at the car park." },
+      { id: "c3", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 400_000, outgoing: false, state: "sent", text: "See you Saturday then." },
+      { id: "c4", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 300_000, outgoing: false, state: "sent", text: "Here is the route 📷" },
+    ],
+    attachments: [
+      { message_id: "c4", index: 0, name: "ridge.jpg", mime: "image/jpeg", size: 412_000, kind: "image", width: 1600, height: 1200, duration_ms: 0 },
+    ],
+  }),
+  chat_send_media: (a) => ({ id: `c${Date.now()}`, group_id: String(a?.conversation), sender: ME, at_ms: Date.now(), outgoing: true, state: "sent", text: String(a?.text ?? "") }),
+  chat_attachment_open: () => "C:\\tmp\\ridge.jpg",
+  chat_send: (a) => ({ id: `c${Date.now()}`, group_id: String(a?.conversation), sender: ME, at_ms: Date.now(), outgoing: true, state: "queued", text: String(a?.text) }),
+  chat_flush: () => 0,
+  chat_mark_read: () => undefined,
+  chat_search: () => [],
+  chat_unread: () => 2,
 };
 
 export function installDevShim() {

@@ -132,6 +132,21 @@ person is still one host. Entries from independent operators are accepted
 by pull request, and the DNS layer exists so that a name published by
 someone else can add peers without a release.
 
+`dns_seeds.txt` now ships `bootstrap.hashgram.io`. The TXT records at
+`_dnsaddr.bootstrap.hashgram.io` are not published yet, so the lookup
+currently finds nothing; the name is there because it is the only
+bootstrap layer that can be repointed after an installer has shipped.
+
+### What actually breaks if the genesis host is lost
+
+Traced subsystem by subsystem to the code in
+[`docs/FOUNDER_NODE_A_FAILURE.md`](FOUNDER_NODE_A_FAILURE.md). The summary:
+the chain stops (one bonded validator), new installs cannot find the
+network (one bootstrap host), and follower counts and public search stop
+(one indexer, now mitigated by accepting several URLs). Everything between
+people who are already connected — feeds, profiles, chats, mail, drive,
+spaces — keeps working, because none of it goes through that machine.
+
 ## 4. What would make it genuinely decentralised
 
 Concrete, not aspirational. In rough order of how much each would change the

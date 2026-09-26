@@ -2040,12 +2040,21 @@ mod tests {
         assert_eq!(transport_of(&quic), "quic");
         assert_eq!(transport_of(&tcp), "tcp");
         // Even attempts: TCP only.
-        assert_eq!(addresses_for_attempt(both.clone(), true, 0), vec![tcp.clone()]);
-        assert_eq!(addresses_for_attempt(both.clone(), true, 2), vec![tcp.clone()]);
+        assert_eq!(
+            addresses_for_attempt(both.clone(), true, 0),
+            vec![tcp.clone()]
+        );
+        assert_eq!(
+            addresses_for_attempt(both.clone(), true, 2),
+            vec![tcp.clone()]
+        );
         // Odd attempts: everything, so a TCP-filtered network still connects.
         assert_eq!(addresses_for_attempt(both.clone(), true, 1), both);
         // No TCP address: nothing to prefer.
-        assert_eq!(addresses_for_attempt(vec![quic.clone()], true, 0), vec![quic.clone()]);
+        assert_eq!(
+            addresses_for_attempt(vec![quic.clone()], true, 0),
+            vec![quic.clone()]
+        );
         // Preference off: untouched.
         assert_eq!(addresses_for_attempt(both.clone(), false, 0), both);
     }

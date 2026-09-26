@@ -16,8 +16,7 @@
         clippy::unwrap_used,
         clippy::expect_used,
         clippy::indexing_slicing,
-        clippy::panic,
-        clippy::integer_division
+        clippy::panic
     )
 )]
 // Unit conversions for display (bytes → MiB, ms → s) truncate on purpose;
@@ -25,6 +24,7 @@
 #![allow(clippy::integer_division, clippy::too_many_arguments)]
 
 pub mod chain_proxy;
+pub mod cmd_chat;
 pub mod cmd_drive;
 pub mod cmd_earn;
 pub mod cmd_feed;
@@ -33,15 +33,19 @@ pub mod cmd_identity;
 pub mod cmd_mail;
 pub mod cmd_network;
 pub mod cmd_people;
+pub mod cmd_profile;
 pub mod cmd_settings;
 pub mod cmd_spaces;
 pub mod cmd_sync;
+pub mod cmd_verify;
 pub mod cmd_wallet;
 pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod help;
+pub mod media;
 pub mod node_manager;
+pub mod node_supervisor;
 pub mod notify;
 pub mod paths;
 pub mod perf;
@@ -70,7 +74,10 @@ pub struct DeepLink {
     pub url: String,
 }
 
-fn init_logging(perf: Arc<perf::PerfStore>, level: &str) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+fn init_logging(
+    perf: Arc<perf::PerfStore>,
+    level: &str,
+) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::new(format!(
             "{level},libp2p_gossipsub=warn,libp2p_kad=warn,libp2p_swarm=warn,quinn=warn,quinn_udp=error,hyper=warn,hickory_proto=warn,hickory_resolver=warn"
@@ -116,7 +123,13 @@ fn init_logging(perf: Arc<perf::PerfStore>, level: &str) -> Option<tracing_appen
     guard
 }
 
-fn build_state() -> Result<(Arc<AppState>, Option<tracing_appender::non_blocking::WorkerGuard>), String> {
+fn build_state() -> Result<
+    (
+        Arc<AppState>,
+        Option<tracing_appender::non_blocking::WorkerGuard>,
+    ),
+    String,
+> {
     let data = paths::ensure_dirs().map_err(|e| e.to_string())?;
     let settings = settings::Settings::load(&paths::settings_path());
     let perf = Arc::new(perf::PerfStore::default());
@@ -139,6 +152,7 @@ fn build_state() -> Result<(Arc<AppState>, Option<tracing_appender::non_blocking
             sync_task: tokio::sync::Mutex::new(None),
             pending_tx: tokio::sync::Mutex::new(Vec::new()),
             sync_wake: tokio::sync::Notify::new(),
+            node: Arc::new(node_supervisor::Supervisor::new()),
         }),
         guard,
     ))
@@ -337,6 +351,7 @@ pub fn run() {
             cmd_drive::drive_shared_download,
             cmd_drive::drive_shared_open,
             cmd_drive::drive_shared_save,
+            cmd_drive::drive_availability,
             cmd_drive::drive_shared_folder_list,
             cmd_drive::drive_shared_folder_download,
             // people
@@ -364,6 +379,10 @@ pub fn run() {
             cmd_feed::feed_explore,
             cmd_feed::feed_thread,
             cmd_feed::feed_post,
+            cmd_feed::feed_post_media,
+            cmd_feed::story_create,
+            cmd_feed::stories_active,
+            cmd_feed::stories_of,
             cmd_feed::feed_comment,
             cmd_feed::feed_react,
             cmd_feed::feed_repost,
@@ -373,6 +392,7 @@ pub fn run() {
             cmd_feed::feed_follows,
             cmd_feed::feed_profile_update,
             cmd_feed::feed_media_fetch,
+            cmd_feed::feed_media_open,
             cmd_feed::circles_list,
             cmd_feed::circles_create,
             cmd_feed::circles_add_member,
@@ -403,9 +423,38 @@ pub fn run() {
             cmd_hashwall::profile_my_events,
             cmd_hashwall::network_holders,
             cmd_hashwall::network_providers,
+            // chats
+            cmd_chat::chat_list,
+            cmd_chat::chat_open,
+            cmd_chat::chat_create_group,
+            cmd_chat::chat_add_member,
+            cmd_chat::chat_leave,
+            cmd_chat::chat_history,
+            cmd_chat::chat_send,
+            cmd_chat::chat_send_media,
+            cmd_chat::chat_attachment_open,
+            cmd_chat::chat_flush,
+            cmd_chat::chat_mark_read,
+            cmd_chat::chat_search,
+            cmd_chat::chat_unread,
+            // social profiles
+            cmd_profile::profile_of,
+            cmd_profile::profile_mine,
+            cmd_profile::profile_save,
+            cmd_profile::profile_upload_image,
+            cmd_profile::profile_timeline,
+            cmd_profile::profile_follow_list,
             // spaces
             cmd_spaces::spaces_list,
             cmd_spaces::spaces_create,
+            cmd_verify::verify_terms,
+            cmd_verify::verify_status,
+            cmd_verify::verify_purchase,
+            cmd_verify::verify_record,
+            cmd_spaces::spaces_publish,
+            cmd_spaces::spaces_is_listed,
+            cmd_spaces::spaces_directory,
+            cmd_spaces::spaces_categories,
             cmd_spaces::spaces_state,
             cmd_spaces::spaces_members,
             cmd_spaces::spaces_content,
@@ -419,6 +468,7 @@ pub fn run() {
             cmd_spaces::spaces_comment,
             cmd_spaces::spaces_share_drive,
             cmd_spaces::spaces_unshare_drive,
+            cmd_spaces::spaces_chat_open,
             cmd_spaces::spaces_mail,
             cmd_spaces::spaces_drive_download,
             cmd_spaces::spaces_drive_open,
@@ -428,6 +478,7 @@ pub fn run() {
             cmd_earn::earn_status,
             cmd_earn::earn_earnings,
             cmd_earn::earn_providers,
+            cmd_earn::earn_operator,
             cmd_earn::earn_register,
             cmd_earn::earn_update,
             cmd_earn::earn_unbond,
@@ -437,6 +488,10 @@ pub fn run() {
             cmd_earn::node_install,
             cmd_earn::node_start,
             cmd_earn::node_stop,
+            cmd_earn::node_status,
+            cmd_earn::node_preflight,
+            cmd_earn::node_logs,
+            cmd_earn::node_open_folder,
             cmd_earn::node_uninstall,
             cmd_earn::node_generate_cold_address,
             cmd_earn::node_log_tail,
@@ -470,6 +525,8 @@ pub fn run() {
             cmd_network::network_supply,
             cmd_network::network_top,
             cmd_network::network_stats,
+            cmd_network::network_transactions,
+            cmd_network::network_transaction,
             cmd_network::net_reconnect,
             cmd_network::net_forget_peers,
             cmd_network::diagnostics_export,
@@ -516,9 +573,13 @@ pub fn run() {
             let handle = app.handle().clone();
             session::spawn_link(handle.clone(), state.clone());
             session::spawn_housekeeping(handle, state.clone());
+            node_supervisor::spawn_watch(state.node.clone());
             tauri::async_runtime::spawn(chain_proxy::serve(state.clone()));
             #[cfg(debug_assertions)]
-            if std::env::var("HASHGRAM_DEVTOOLS").map(|v| v == "1").unwrap_or(false) {
+            if std::env::var("HASHGRAM_DEVTOOLS")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+            {
                 if let Some(w) = app.get_webview_window("main") {
                     w.open_devtools();
                 }

@@ -58,6 +58,10 @@ pub const VAULT_LAST_RESORT_KEY: &str = "mls_last_resort";
 /// comfortably inside [`KEY_PACKAGE_TTL_SECS`] so a store never holds an
 /// expired one for us.
 pub const LAST_RESORT_ROTATE_SECS: u64 = 25 * 24 * 3600;
+/// How the current last-resort key package is built. Raised whenever a
+/// build produced packages other clients reject, so the cached one is
+/// replaced on the next sync instead of after the rotation.
+pub const LAST_RESORT_VERSION: u32 = 2;
 /// How often the one-time key packages at a store node are topped up when
 /// nothing consumed them (a Welcome consumes one; that triggers a refresh
 /// on its own).
@@ -86,6 +90,36 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// The attachment type callers build and read, re-exported so a client
+/// does not have to depend on `hashgram_proto` directly.
+pub use hashgram_proto::chat::Attachment;
+
+/// How many store nodes a chat attachment is pushed to.
+///
+/// Lower than public media's three: a conversation's file only has to
+/// reach the people in it, and every extra copy is another node holding
+/// ciphertext for longer than it needs to.
+const ATTACHMENT_REPLICAS: usize = 2;
+
+/// A file on its way into a conversation.
+#[derive(Debug, Clone)]
+pub struct OutgoingAttachment {
+    /// Plaintext bytes.
+    pub bytes: Vec<u8>,
+    /// MIME type.
+    pub mime: String,
+    /// File name as the sender sees it.
+    pub name: String,
+    /// `image`, `video`, `audio` or `file`.
+    pub kind: String,
+    /// Pixel width, 0 when unknown.
+    pub width: u32,
+    /// Pixel height, 0 when unknown.
+    pub height: u32,
+    /// Duration for audio and video, 0 otherwise.
+    pub duration_ms: u32,
 }
 
 /// A decrypted inbound chat message.
@@ -199,6 +233,19 @@ pub struct Messaging {
 struct LastResort {
     key_package: Vec<u8>,
     created_at: u64,
+    /// How the package was built.
+    ///
+    /// The cached package is kept for [`LAST_RESORT_ROTATE_SECS`] — 25
+    /// days — which is exactly how long a *wrong* one would keep being
+    /// handed out after the code that built it was fixed. Version 1
+    /// packages set the last-resort extension without declaring it in the
+    /// leaf capabilities, so every other client refused them with "a key
+    /// package extension is not supported in the leaf's capabilities" and
+    /// nobody could be added to a group. Anything below
+    /// [`LAST_RESORT_VERSION`] is rebuilt at once instead of waiting out
+    /// the rotation.
+    #[serde(default)]
+    version: u32,
 }
 
 impl Messaging {
@@ -355,6 +402,7 @@ impl Messaging {
         if let Some(lr) = &self.last_resort {
             if t.saturating_sub(lr.created_at) < LAST_RESORT_ROTATE_SECS
                 && !lr.key_package.is_empty()
+                && lr.version >= LAST_RESORT_VERSION
             {
                 return Ok(lr.clone());
             }
@@ -362,6 +410,7 @@ impl Messaging {
         let lr = LastResort {
             key_package: self.mls.key_package_last_resort()?,
             created_at: t,
+            version: LAST_RESORT_VERSION,
         };
         self.last_resort = Some(lr.clone());
         Ok(lr)
@@ -671,6 +720,97 @@ impl Messaging {
         )
         .await?;
         Ok(id)
+    }
+
+    /// Sends a message with attached files.
+    ///
+    /// Each file is encrypted with its own key, uploaded as a private
+    /// blob, and the key travels inside the MLS-encrypted message — so a
+    /// store node holds ciphertext it cannot open and cannot tell one
+    /// picture from another. Unlike a public post's media, nothing here is
+    /// readable by anyone outside the conversation.
+    /// Returns the message id and the attachments as they were sent, so a
+    /// sender can store the same references its recipients will use and
+    /// open its own copy without keeping the original file around.
+    pub async fn send_attachments(
+        &mut self,
+        link: &Link,
+        network: &NetworkIdentity,
+        device: &Ed25519Signer,
+        group_id: &[u8],
+        text: &str,
+        files: &[OutgoingAttachment],
+    ) -> Result<(Vec<u8>, Vec<chat::Attachment>), SdkError> {
+        if files.is_empty() {
+            return Err(SdkError::Invalid("nothing to send".into()));
+        }
+        let mut attachments = Vec::with_capacity(files.len());
+        for f in files {
+            let up = crate::blob::upload(
+                link,
+                network,
+                device,
+                &f.bytes,
+                &f.mime,
+                true,
+                ATTACHMENT_REPLICAS,
+            )
+            .await?;
+            attachments.push(chat::Attachment {
+                cid: hex::decode(&up.cid).unwrap_or_default(),
+                key: up
+                    .key
+                    .as_deref()
+                    .and_then(|k| hex::decode(k).ok())
+                    .unwrap_or_default(),
+                nonce: up
+                    .nonce
+                    .as_deref()
+                    .and_then(|n| hex::decode(n).ok())
+                    .unwrap_or_default(),
+                mime: f.mime.clone(),
+                size: f.bytes.len() as u64,
+                name: f.name.clone(),
+                kind: f.kind.clone(),
+                width: f.width,
+                height: f.height,
+                duration_ms: f.duration_ms,
+                plaintext_hash: hex::decode(&up.plaintext_hash).unwrap_or_default(),
+            });
+        }
+        let id = random_id();
+        self.send(
+            link,
+            network,
+            group_id,
+            chat::ChatMessage {
+                version: WIRE_VERSION,
+                kind: chat::ChatKind::Text as i32,
+                id: id.clone(),
+                timestamp_ms: now_ms(),
+                text: text.to_owned(),
+                attachments: attachments.clone(),
+                ..Default::default()
+            },
+        )
+        .await?;
+        Ok((id, attachments))
+    }
+
+    /// Fetches and decrypts one attachment of a received message.
+    pub async fn open_attachment(link: &Link, a: &chat::Attachment) -> Result<Vec<u8>, SdkError> {
+        let (ct, _m, _peer) = crate::blob::download(link, &a.cid, None).await?;
+        let key: [u8; 32] = a
+            .key
+            .as_slice()
+            .try_into()
+            .map_err(|_| SdkError::Invalid("attachment key".into()))?;
+        let nonce: [u8; 24] = a
+            .nonce
+            .as_slice()
+            .try_into()
+            .map_err(|_| SdkError::Invalid("attachment nonce".into()))?;
+        crate::blob::decrypt_private(&ct, &crate::blob::FileKey { key, nonce })
     }
 
     /// Sends any chat message.

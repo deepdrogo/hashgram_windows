@@ -1,9 +1,12 @@
-// People: search (username / mail address / hash1… / local contacts),
-// lists (Friends, Requests, Following, Blocked), the contact card and the
-// user's own profile editors (public via Feed, private display name).
+// Contacts: the people you already have a relationship with — friends,
+// requests, who you follow, who you blocked — plus a lookup for finding
+// somebody by @username, mail address or hash1 address.
+//
+// Discovering strangers happens in Pulse and Topics; this screen is the
+// address book, and every card leads to the person's profile.
 import { For, Show, createEffect, createResource, createSignal } from "solid-js";
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
-import { Search, UserPlus, Mail, Check, X, Ban, ShieldCheck, VolumeX, Heart, IdCard, Users, Copy as CopyIcon } from "lucide-solid";
+import { Search, UserPlus, Mail, Check, X, Ban, ShieldCheck, VolumeX, Heart, IdCard, Users, MessageSquare, Copy as CopyIcon } from "lucide-solid";
 import { Button, Checkbox, Dialog, Field, Input, Notice, Tabs, Textarea, Badge, Empty } from "~/components/ui";
 import { OfflineBanner, ErrorState } from "~/components/States";
 import { Avatar, Mono, forgetAvatar } from "~/components/identity";
@@ -83,7 +86,7 @@ export function PeopleRoute() {
           </Show>
           <Show when={resolved()}>
             {(r) => (
-              <button type="button" class="row flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left" onClick={() => navigate(`/people/${r().address}`)}>
+              <button type="button" class="row flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left" onClick={() => navigate(`/contacts/${r().address}`)}>
                 <Avatar address={r().address} />
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-[13px] font-medium">{handle(r().address, r().username, r().display_name)}</span>
@@ -97,7 +100,7 @@ export function PeopleRoute() {
             )}
           </Show>
           <Show when={(local() ?? []).length}>
-            <For each={local() ?? []}>{(c) => <ContactRow c={c} onOpen={() => navigate(`/people/${c.address}`)} />}</For>
+            <For each={local() ?? []}>{(c) => <ContactRow c={c} onOpen={() => navigate(`/contacts/${c.address}`)} />}</For>
           </Show>
           <Tabs
             class="px-2"
@@ -120,7 +123,7 @@ export function PeopleRoute() {
                   {(c) => (
                     <ContactRow
                       c={c}
-                      onOpen={() => navigate(`/people/${c.address}`)}
+                      onOpen={() => navigate(`/contacts/${c.address}`)}
                       actions={
                         tab() === "incoming" ? (
                           <>
@@ -138,7 +141,7 @@ export function PeopleRoute() {
                 </For>
                 <Show when={tab() === "incoming" && (outgoing() ?? []).length}>
                   <p class="px-3 pt-3 text-[11px] uppercase tracking-wide text-muted">Sent, awaiting answer</p>
-                  <For each={outgoing() ?? []}>{(c) => <ContactRow c={c} onOpen={() => navigate(`/people/${c.address}`)} />}</For>
+                  <For each={outgoing() ?? []}>{(c) => <ContactRow c={c} onOpen={() => navigate(`/contacts/${c.address}`)} />}</For>
                 </Show>
               </Show>
             </Show>
@@ -263,7 +266,23 @@ function ContactCard(props: { address: string }) {
 
         <Show when={!isMe()}>
           <div class="mt-4 flex flex-wrap items-center gap-2">
-            <Button variant="brand" onClick={() => navigate(`/mail/inbox?compose=1&q=${encodeURIComponent(profile()?.username ? `@${profile()!.username}` : props.address)}`)} disabled={has("blocked")}>
+            <Button variant="brand" onClick={() => navigate(`/profile/${props.address}`)}>
+              <IdCard size={14} /> Profile
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={has("blocked")}
+              onClick={async () => {
+                try {
+                  navigate(`/chats/${await ipc.chatOpen(props.address)}`);
+                } catch (e) {
+                  store.toast(errText(e), "error");
+                }
+              }}
+            >
+              <MessageSquare size={14} /> Chat
+            </Button>
+            <Button variant="secondary" onClick={() => navigate(`/mail/inbox?compose=1&q=${encodeURIComponent(profile()?.username ? `@${profile()!.username}` : props.address)}`)} disabled={has("blocked")}>
               <Mail size={14} /> {t("people_mail")}
             </Button>
             <Show when={has("pending_in")}>

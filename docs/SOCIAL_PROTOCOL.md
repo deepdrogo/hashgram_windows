@@ -113,8 +113,11 @@ A reel is a first-class event family, not a post with a video: it carries
 `video_index`, `min_age`, `allow_comments` and `allow_remix`, and the video
 is a public blob replicated to three providers (`docs/STORAGE.md`). Clients
 should upload the video first, then publish the event with the CID. A story
-carries its own expiry (≤ 48 hours); the indexer stops serving it after that
-and nodes drop the media reference with the event on retention.
+carries its own expiry (≤ 48 hours); after it, the indexer stops serving the
+story and clients stop showing it. That is a display rule and not a
+deletion: the event stays in node logs until the ordinary retention sweep,
+and the media blob has no expiry of its own. `docs/STORIES.md` sets out
+exactly what a user may be told.
 
 ## What the protocol does not do
 

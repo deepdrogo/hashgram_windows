@@ -25,6 +25,19 @@ const NS_EVENTS: &str = "feed/events";
 const NS_FOLLOWS: &str = "feed/follows";
 const NS_WALLS: &str = "feed/walls";
 
+/// `ProfileUpdate.attributes` key for the country the user chose to show.
+pub const ATTR_COUNTRY: &str = "country";
+
+/// `ProfileUpdate.attributes` key holding the hash of the on-chain payment
+/// that backs a verified badge.
+///
+/// The attribute is a *claim*, not the badge. Anyone can write any hash
+/// here, so a reader has to look the transaction up on the chain and check
+/// the sender, the recipient and the amount before showing anything. That
+/// check lives in the app (`cmd_verify`), and it is the reason a badge here
+/// cannot be granted, sold or revoked by us.
+pub const ATTR_VERIFY_TX: &str = "verify_tx";
+
 /// Most nodes tried for one Explore page before giving up.
 const EXPLORE_ATTEMPTS: usize = 3;
 
@@ -65,6 +78,50 @@ fn legacy_node_error(e: &SdkError) -> bool {
     }
 }
 
+/// One picture, video or file attached to an event.
+///
+/// This used to be `(cid, mime, size)`. The three things the tuple left out
+/// are the three a client needs before it fetches anything: the poster, so a
+/// video can show its first frame without pulling the whole file; the
+/// dimensions, so the space it will occupy can be reserved instead of the
+/// layout jumping; and the duration, so a viewer can say how long it is.
+/// They were all on the wire already — `MediaReference` has carried them
+/// since the protocol was written — and only this struct dropped them.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PostMedia {
+    /// Hex CID of the media blob.
+    pub cid: String,
+    /// MIME type as the author declared it. Clients sniff and do not trust.
+    pub mime: String,
+    /// Size in bytes.
+    pub size: u64,
+    /// "image", "video", "audio" or "file".
+    pub kind: String,
+    /// Pixel width, 0 when unknown.
+    pub width: u32,
+    /// Pixel height, 0 when unknown.
+    pub height: u32,
+    /// Duration in milliseconds, 0 when unknown or not timed media.
+    pub duration_ms: u32,
+    /// Hex CID of the poster frame, empty when the author attached none.
+    pub poster_cid: String,
+}
+
+impl From<&pb::MediaReference> for PostMedia {
+    fn from(m: &pb::MediaReference) -> Self {
+        Self {
+            cid: hex::encode(&m.cid),
+            mime: m.mime.clone(),
+            size: m.size,
+            kind: m.kind.clone(),
+            width: m.width,
+            height: m.height,
+            duration_ms: m.duration_ms,
+            poster_cid: hex::encode(&m.thumbnail_cid),
+        }
+    }
+}
+
 /// A feed item for display.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FeedItem {
@@ -78,8 +135,8 @@ pub struct FeedItem {
     pub timestamp: u64,
     /// Decoded payload.
     pub payload: serde_json::Value,
-    /// Media references (cid hex, mime, size).
-    pub media: Vec<(String, String, u64)>,
+    /// Media attached to the event.
+    pub media: Vec<PostMedia>,
     /// "public" or "circle:<hex gid>".
     pub visibility: String,
     /// Wall (channel) the post is on, hex id; empty for none.
@@ -103,11 +160,7 @@ fn item(ev: &pb::SocialEvent) -> FeedItem {
         author: ev.author.clone(),
         timestamp: ev.timestamp,
         payload: payload_json(ev),
-        media: ev
-            .media
-            .iter()
-            .map(|m| (hex::encode(&m.cid), m.mime.clone(), m.size))
-            .collect(),
+        media: ev.media.iter().map(PostMedia::from).collect(),
         visibility: "public".into(),
         channel,
         reply_to,
@@ -171,6 +224,30 @@ pub struct WallInfo {
     pub last_post: u64,
     /// Whether this wall is pinned locally.
     pub pinned: bool,
+}
+
+/// Everything a `PROFILE_UPDATE` carries.
+///
+/// A profile event is a replacement, not a patch: whatever the draft leaves
+/// empty is erased from the profile. Passing the whole thing explicitly is
+/// what makes that impossible to forget.
+#[derive(Debug, Clone, Default)]
+pub struct ProfileDraft {
+    /// Display name. Self-declared, never identity.
+    pub display_name: String,
+    /// Bio.
+    pub bio: String,
+    /// Avatar CID (hex); empty clears it.
+    pub avatar_cid_hex: String,
+    /// Cover image CID (hex); empty clears it.
+    pub banner_cid_hex: String,
+    /// Website as the author typed it.
+    pub website: String,
+    /// Two-letter country the author chose to show, or empty.
+    pub country: String,
+    /// Hash of the payment backing a verified badge, or empty. A claim
+    /// only — readers check it against the chain.
+    pub verify_tx: String,
 }
 
 /// One author in a digest.
@@ -264,6 +341,136 @@ pub struct MyActivity {
     pub comments_received: u32,
     /// A transparent activity score: see [`activity_score`].
     pub score: u64,
+}
+
+/// How long a story stays on active surfaces unless the author says less.
+pub const STORY_DEFAULT_SECS: u64 = 24 * 3600;
+
+/// The longest a story may live, which the protocol itself enforces
+/// (`hashgram_proto::limits::MAX_STORY_SECS`). Anything larger is refused
+/// by every node, so the client clamps rather than signs a doomed event.
+pub const STORY_MAX_SECS: u64 = 48 * 3600;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// A story, as a viewer needs it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Story {
+    /// Hex event id.
+    pub id: String,
+    /// Author address.
+    pub author: String,
+    /// Caption, possibly empty.
+    pub caption: String,
+    /// Media. A story always has at least one.
+    pub media: Vec<PostMedia>,
+    /// When it was signed (s).
+    pub created_at: u64,
+    /// When active surfaces stop showing it (s).
+    pub expires_at: u64,
+    /// Author-marked sensitive.
+    pub sensitive: bool,
+}
+
+impl Story {
+    /// Reads a story from its event, or `None` if it is not one, carries no
+    /// media, or has already expired at `now`.
+    fn from_event(ev: &pb::SocialEvent, now: u64) -> Option<Self> {
+        if ev.r#type != "STORY_CREATE" || ev.media.is_empty() {
+            return None;
+        }
+        let s = pb::StoryCreate::decode(ev.payload.as_slice()).ok()?;
+        if s.expires_at <= now {
+            return None;
+        }
+        Some(Self {
+            id: hex::encode(&ev.id),
+            author: ev.author.clone(),
+            caption: s.caption,
+            media: ev.media.iter().map(PostMedia::from).collect(),
+            created_at: ev.timestamp,
+            expires_at: s.expires_at,
+            sensitive: s.sensitive,
+        })
+    }
+}
+
+/// What a client needs to lay media out before the bytes arrive.
+///
+/// Sizes and durations are the author's claim, like the MIME type: a client
+/// uses them for layout and still checks what it decodes.
+#[derive(Debug, Clone, Default)]
+pub struct MediaMeta {
+    /// Pixel width, 0 when unknown.
+    pub width: u32,
+    /// Pixel height, 0 when unknown.
+    pub height: u32,
+    /// Duration for audio and video, 0 otherwise.
+    pub duration_ms: u32,
+    /// Poster frame or downscaled still, with its MIME type.
+    pub thumbnail: Option<(Vec<u8>, String)>,
+}
+
+/// The tabs a public profile is read through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileTab {
+    /// Original posts and reposts.
+    Posts,
+    /// Public comments and replies to other posts.
+    Replies,
+    /// Posts and reels that carry media.
+    Media,
+    /// Reactions the author gave, which are public events.
+    Likes,
+}
+
+impl ProfileTab {
+    /// Parses the tab name used by the UI and the IPC layer.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "posts" => Some(Self::Posts),
+            "replies" => Some(Self::Replies),
+            "media" => Some(Self::Media),
+            "likes" => Some(Self::Likes),
+            _ => None,
+        }
+    }
+}
+
+/// What a profile can say about somebody's public activity.
+///
+/// Followers cannot be counted from the author's own chain — nothing in it
+/// records who followed them — so the field is `None` unless an indexer
+/// answered. Everything else is counted from the events this device holds,
+/// which is why `complete` matters: it is true only when the author's log
+/// was fetched from sequence zero without a gap.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct AuthorStats {
+    /// Address the numbers describe.
+    pub address: String,
+    /// Original posts and reels, deleted ones excluded.
+    pub posts: u32,
+    /// Public comments and replies.
+    pub replies: u32,
+    /// Posts carrying at least one media reference.
+    pub media: u32,
+    /// Reactions the author gave and has not withdrawn.
+    pub likes: u32,
+    /// Accounts the author follows, from their FOLLOW/UNFOLLOW events.
+    pub following: u32,
+    /// Accounts following them. Only an index over everybody's events can
+    /// answer this; `None` means nothing trustworthy is known.
+    pub followers: Option<u32>,
+    /// First event seen (s), which is the closest thing to a join date.
+    pub first_event: u64,
+    /// Whether the counted log starts at the author's first event.
+    pub complete: bool,
 }
 
 /// A plain, explainable activity score. Not a rank of worth: it counts
@@ -473,25 +680,119 @@ impl<'a> Feed<'a> {
             .await
     }
 
-    /// Updates our public profile.
+    /// Updates our public profile (name, bio and avatar only).
     pub async fn update_profile(
         &mut self,
         display_name: &str,
         bio: &str,
         avatar_cid_hex: &str,
     ) -> Result<String, SdkError> {
-        let avatar_cid = hex::decode(avatar_cid_hex).unwrap_or_default();
+        self.update_profile_full(&ProfileDraft {
+            display_name: display_name.to_owned(),
+            bio: bio.to_owned(),
+            avatar_cid_hex: avatar_cid_hex.to_owned(),
+            ..Default::default()
+        })
+        .await
+    }
+
+    /// Updates our public profile with everything a social profile shows.
+    ///
+    /// A profile event replaces the whole profile, so the draft must carry
+    /// every field the author wants to keep — including `verify_tx`, which
+    /// an edit would otherwise silently drop.
+    ///
+    /// The country is a self-declared attribute the user may leave empty; it
+    /// is never inferred from an address or a connection.
+    pub async fn update_profile_full(&mut self, d: &ProfileDraft) -> Result<String, SdkError> {
+        let avatar_cid = hex::decode(&d.avatar_cid_hex).unwrap_or_default();
+        let banner_cid = hex::decode(&d.banner_cid_hex).unwrap_or_default();
+        let mut attributes = std::collections::HashMap::new();
+        let country = d.country.trim();
+        if !country.is_empty() {
+            attributes.insert(ATTR_COUNTRY.to_owned(), country.to_uppercase());
+        }
+        let verify_tx = d.verify_tx.trim();
+        if !verify_tx.is_empty() {
+            attributes.insert(ATTR_VERIFY_TX.to_owned(), verify_tx.to_uppercase());
+        }
         self.publish(
             "PROFILE_UPDATE",
             &pb::ProfileUpdate {
-                display_name: display_name.to_owned(),
-                bio: bio.to_owned(),
+                display_name: d.display_name.clone(),
+                bio: d.bio.clone(),
                 avatar_cid,
-                ..Default::default()
+                banner_cid,
+                website: d.website.trim().to_owned(),
+                attributes,
             },
             vec![],
         )
         .await
+    }
+
+    /// Publishes a story: media that active surfaces stop showing after
+    /// `ttl_secs` (default [`STORY_DEFAULT_SECS`], protocol maximum
+    /// [`STORY_MAX_SECS`]).
+    ///
+    /// Read `docs/STORIES.md` before changing this. "Expires" means clients
+    /// and indexes stop serving it; it does not mean the bytes are gone
+    /// from every machine that saw them, and the app must never say it does.
+    pub async fn post_story(
+        &mut self,
+        caption: &str,
+        media: Vec<pb::MediaReference>,
+        ttl_secs: u64,
+        sensitive: bool,
+    ) -> Result<String, SdkError> {
+        if media.is_empty() {
+            return Err(SdkError::Invalid("a story needs a picture or video".into()));
+        }
+        let ttl = ttl_secs.clamp(60, STORY_MAX_SECS);
+        // The node checks `expires_at` against the event's own timestamp,
+        // which `Social::build` stamps a moment from now. A second of slack
+        // keeps a story from being refused for expiring in its own past.
+        let expires_at = now_secs().saturating_add(ttl);
+        self.publish(
+            "STORY_CREATE",
+            &pb::StoryCreate {
+                caption: caption.to_owned(),
+                expires_at,
+                sensitive,
+            },
+            media,
+        )
+        .await
+    }
+
+    /// Stories from `authors` that have not expired, newest author first.
+    ///
+    /// Expiry is applied on read from the event's own signed `expires_at`,
+    /// so a node that still serves an old story does not put it back on
+    /// screen.
+    pub fn active_stories(&self, authors: &BTreeSet<String>) -> Result<Vec<Story>, SdkError> {
+        let now = now_secs();
+        let (events, _) = self.cached_events()?;
+        let blocked = self.blocked_authors();
+        let mut out: Vec<Story> = events
+            .iter()
+            .filter(|e| e.r#type == "STORY_CREATE")
+            .filter(|e| authors.is_empty() || authors.contains(&e.author))
+            .filter(|e| !blocked.contains(&e.author))
+            .filter_map(|e| Story::from_event(e, now))
+            .collect();
+        out.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+        Ok(out)
+    }
+
+    /// One author's unexpired stories, oldest first — the order a viewer
+    /// steps through them.
+    pub fn stories_of(&self, author: &str) -> Result<Vec<Story>, SdkError> {
+        let mut set = BTreeSet::new();
+        set.insert(author.to_owned());
+        let mut out = self.active_stories(&set)?;
+        out.reverse();
+        Ok(out)
     }
 
     /// Follow / unfollow (public).
@@ -653,6 +954,190 @@ impl<'a> Feed<'a> {
         self.timeline(&a, &["POST_CREATE", "REPOST"], before, limit)
     }
 
+    /// Every cached event, with the set of posts their author deleted.
+    fn cached_events(&self) -> Result<(Vec<pb::SocialEvent>, BTreeSet<Vec<u8>>), SdkError> {
+        let events: Vec<pb::SocialEvent> = self
+            .one
+            .store
+            .scan::<pb::SocialEvent>(NS_EVENTS)?
+            .into_iter()
+            .filter(|(k, _)| !k.starts_with(b"cursor/"))
+            .map(|(_, e)| e)
+            .collect();
+        let mut deleted = BTreeSet::new();
+        for ev in &events {
+            if ev.r#type == "POST_DELETE" {
+                if let Ok(d) = pb::PostDelete::decode(ev.payload.as_slice()) {
+                    deleted.insert(d.post);
+                }
+            }
+        }
+        Ok((events, deleted))
+    }
+
+    /// One page of a profile tab, newest first, from the cached log.
+    ///
+    /// Call [`Self::refresh_author`] first when online; this reads only what
+    /// the device holds so a profile still opens with no network.
+    pub fn author_tab(
+        &self,
+        address: &str,
+        tab: ProfileTab,
+        before: u64,
+        limit: usize,
+    ) -> Result<Vec<FeedItem>, SdkError> {
+        let (events, deleted) = self.cached_events()?;
+        let mut items: Vec<FeedItem> = Vec::new();
+        for ev in events {
+            if ev.author != address || deleted.contains(&ev.id) {
+                continue;
+            }
+            if before != 0 && ev.timestamp >= before {
+                continue;
+            }
+            let it = item(&ev);
+            let keep = match tab {
+                ProfileTab::Posts => {
+                    (it.kind == "POST_CREATE" && it.reply_to.is_empty())
+                        || it.kind == "REEL_CREATE"
+                        || it.kind == "REPOST"
+                }
+                ProfileTab::Replies => {
+                    it.kind == "COMMENT_CREATE"
+                        || (it.kind == "POST_CREATE" && !it.reply_to.is_empty())
+                }
+                ProfileTab::Media => {
+                    !it.media.is_empty() && (it.kind == "POST_CREATE" || it.kind == "REEL_CREATE")
+                }
+                ProfileTab::Likes => it.kind == "REACTION",
+            };
+            if keep {
+                items.push(it);
+            }
+        }
+        if tab == ProfileTab::Likes {
+            // A later empty reaction withdraws an earlier one; show what
+            // still stands rather than the history of clicking.
+            let mut standing: BTreeMap<String, FeedItem> = BTreeMap::new();
+            items.sort_by_key(|i| i.timestamp);
+            for it in items.drain(..) {
+                let target = it
+                    .payload
+                    .get("target")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                let withdrawn = it
+                    .payload
+                    .get("reaction")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or_default()
+                    .is_empty();
+                if withdrawn {
+                    standing.remove(&target);
+                } else {
+                    standing.insert(target, it);
+                }
+            }
+            items = standing.into_values().collect();
+        }
+        items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+        items.truncate(limit);
+        Ok(items)
+    }
+
+    /// Who an address follows, from their own FOLLOW/UNFOLLOW events.
+    ///
+    /// For ourselves this is the local mirror [`Self::follows`]; for anyone
+    /// else it is replayed from the log this device holds for them.
+    pub fn following_of(&self, address: &str) -> Result<BTreeSet<String>, SdkError> {
+        if address == self.one.account.address() {
+            return Ok(self.follows());
+        }
+        let (events, _) = self.cached_events()?;
+        let mut theirs: Vec<&pb::SocialEvent> =
+            events.iter().filter(|e| e.author == address).collect();
+        theirs.sort_by_key(|e| (e.timestamp, e.sequence));
+        let mut set = BTreeSet::new();
+        for ev in theirs {
+            match ev.r#type.as_str() {
+                "FOLLOW" => {
+                    if let Ok(f) = pb::Follow::decode(ev.payload.as_slice()) {
+                        set.insert(f.target);
+                    }
+                }
+                "UNFOLLOW" => {
+                    if let Ok(f) = pb::Unfollow::decode(ev.payload.as_slice()) {
+                        set.remove(&f.target);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(set)
+    }
+
+    /// Counts an author's public activity from the cached log.
+    pub fn author_stats(&self, address: &str) -> Result<AuthorStats, SdkError> {
+        let (events, deleted) = self.cached_events()?;
+        let mut stats = AuthorStats {
+            address: address.to_owned(),
+            ..Default::default()
+        };
+        let mut following: BTreeSet<String> = BTreeSet::new();
+        let mut likes: BTreeMap<String, bool> = BTreeMap::new();
+        let mut lowest_sequence = u64::MAX;
+        let mut by_time: Vec<&pb::SocialEvent> = events
+            .iter()
+            .filter(|e| e.author == address && !deleted.contains(&e.id))
+            .collect();
+        by_time.sort_by_key(|e| (e.timestamp, e.sequence));
+        for ev in by_time {
+            lowest_sequence = lowest_sequence.min(ev.sequence);
+            if stats.first_event == 0 {
+                stats.first_event = ev.timestamp;
+            }
+            match ev.r#type.as_str() {
+                "POST_CREATE" | "REEL_CREATE" => {
+                    let reply = pb::PostCreate::decode(ev.payload.as_slice())
+                        .map(|p| !p.reply_to.is_empty())
+                        .unwrap_or(false);
+                    if reply {
+                        stats.replies += 1;
+                    } else {
+                        stats.posts += 1;
+                    }
+                    if !ev.media.is_empty() {
+                        stats.media += 1;
+                    }
+                }
+                "COMMENT_CREATE" => stats.replies += 1,
+                "REACTION" => {
+                    if let Ok(r) = pb::Reaction::decode(ev.payload.as_slice()) {
+                        likes.insert(hex::encode(&r.target), !r.reaction.is_empty());
+                    }
+                }
+                "FOLLOW" => {
+                    if let Ok(f) = pb::Follow::decode(ev.payload.as_slice()) {
+                        following.insert(f.target);
+                    }
+                }
+                "UNFOLLOW" => {
+                    if let Ok(f) = pb::Unfollow::decode(ev.payload.as_slice()) {
+                        following.remove(&f.target);
+                    }
+                }
+                _ => {}
+            }
+        }
+        stats.likes = likes.values().filter(|on| **on).count() as u32;
+        stats.following = following.len() as u32;
+        // Sequence 0 is an author's first event, so holding it means the
+        // count below started where their history did.
+        stats.complete = lowest_sequence == 0;
+        Ok(stats)
+    }
+
     /// A post with its comments and reaction counts.
     pub fn thread(&self, post_id_hex: &str) -> Result<Option<PostThread>, SdkError> {
         let pid = hex::decode(post_id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
@@ -724,25 +1209,61 @@ impl<'a> Feed<'a> {
         mime: &str,
         kind: &str,
     ) -> Result<pb::MediaReference, SdkError> {
+        self.upload_media_with(bytes, mime, kind, &MediaMeta::default())
+            .await
+    }
+
+    /// Uploads public media together with what a client needs to lay it out
+    /// before the bytes arrive: pixel size, duration and a poster frame.
+    ///
+    /// The poster is its own public blob, so a feed of fifty videos costs
+    /// fifty thumbnails rather than fifty videos.
+    pub async fn upload_media_with(
+        &mut self,
+        bytes: &[u8],
+        mime: &str,
+        kind: &str,
+        meta: &MediaMeta,
+    ) -> Result<pb::MediaReference, SdkError> {
+        let thumbnail_cid = match &meta.thumbnail {
+            Some((thumb, thumb_mime)) if !thumb.is_empty() => {
+                let up = self.put_public(thumb, thumb_mime).await?;
+                hex::decode(&up.cid).unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        let up = self.put_public(bytes, mime).await?;
+        Ok(pb::MediaReference {
+            cid: hex::decode(&up.cid).unwrap_or_default(),
+            mime: mime.to_owned(),
+            size: bytes.len() as u64,
+            kind: kind.to_owned(),
+            width: meta.width,
+            height: meta.height,
+            duration_ms: meta.duration_ms,
+            thumbnail_cid,
+            content_hash: hex::decode(&up.plaintext_hash).unwrap_or_default(),
+        })
+    }
+
+    /// One public blob, pushed to as many providers as the network aims to
+    /// keep ([`crate::blob::PUBLIC_REPLICAS`]).
+    async fn put_public(
+        &mut self,
+        bytes: &[u8],
+        mime: &str,
+    ) -> Result<crate::blob::Uploaded, SdkError> {
         let device = self.one.account.device()?;
-        let up = crate::blob::upload(
+        crate::blob::upload(
             &self.one.link,
             &self.one.network,
             &device,
             bytes,
             mime,
             false,
-            2,
+            crate::blob::PUBLIC_REPLICAS,
         )
-        .await?;
-        Ok(pb::MediaReference {
-            cid: hex::decode(&up.cid).unwrap_or_default(),
-            mime: mime.to_owned(),
-            size: bytes.len() as u64,
-            kind: kind.to_owned(),
-            content_hash: hex::decode(&up.plaintext_hash).unwrap_or_default(),
-            ..Default::default()
-        })
+        .await
     }
 
     // -- Explore: pages from the nearest nodes --------------------------------
@@ -783,7 +1304,12 @@ impl<'a> Feed<'a> {
         let mut last: Option<SdkError> = None;
         for rp in capable.iter().take(EXPLORE_ATTEMPTS) {
             match s
-                .fetch_from(&self.one.link, &self.one.network, rp.peer.peer, query.clone())
+                .fetch_from(
+                    &self.one.link,
+                    &self.one.network,
+                    rp.peer.peer,
+                    query.clone(),
+                )
                 .await
             {
                 Ok(r) => {
@@ -958,10 +1484,12 @@ impl<'a> Feed<'a> {
             }
             in_window += 1;
             active.insert(&ev.author);
-            let a = authors.entry(ev.author.clone()).or_insert_with(|| AuthorActivity {
-                author: ev.author.clone(),
-                ..Default::default()
-            });
+            let a = authors
+                .entry(ev.author.clone())
+                .or_insert_with(|| AuthorActivity {
+                    author: ev.author.clone(),
+                    ..Default::default()
+                });
             a.last_active = a.last_active.max(ev.timestamp);
             match ev.r#type.as_str() {
                 "POST_CREATE" | "REEL_CREATE" => {
@@ -978,9 +1506,11 @@ impl<'a> Feed<'a> {
                             e.2 = e.2.max(ev.timestamp);
                         }
                         if !p.channel.is_empty() {
-                            let e = wall_posts
-                                .entry(hex::encode(&p.channel))
-                                .or_insert((0, BTreeSet::new(), 0));
+                            let e = wall_posts.entry(hex::encode(&p.channel)).or_insert((
+                                0,
+                                BTreeSet::new(),
+                                0,
+                            ));
                             e.0 += 1;
                             e.1.insert(ev.author.clone());
                             e.2 = e.2.max(ev.timestamp);
@@ -994,7 +1524,10 @@ impl<'a> Feed<'a> {
                             if owner != ev.author {
                                 authors
                                     .entry(owner.clone())
-                                    .or_insert_with(|| AuthorActivity { author: owner, ..Default::default() })
+                                    .or_insert_with(|| AuthorActivity {
+                                        author: owner,
+                                        ..Default::default()
+                                    })
                                     .comments_received += 1;
                             }
                         }
@@ -1006,7 +1539,10 @@ impl<'a> Feed<'a> {
                             if owner != ev.author {
                                 authors
                                     .entry(owner.clone())
-                                    .or_insert_with(|| AuthorActivity { author: owner, ..Default::default() })
+                                    .or_insert_with(|| AuthorActivity {
+                                        author: owner,
+                                        ..Default::default()
+                                    })
                                     .reactions_received += 1;
                             }
                         }
@@ -1017,7 +1553,10 @@ impl<'a> Feed<'a> {
         }
         // Walls we know by description only (digest cache) count too.
         for (k, w) in self.one.store.scan::<WallInfo>(NS_WALLS)? {
-            if k.starts_with(b"info/") && !walls.contains_key(&w.id) && !blocked.contains(&w.creator) {
+            if k.starts_with(b"info/")
+                && !walls.contains_key(&w.id)
+                && !blocked.contains(&w.creator)
+            {
                 walls.insert(w.id.clone(), w);
             }
         }
@@ -1033,15 +1572,17 @@ impl<'a> Feed<'a> {
                 w
             })
             .collect();
-        walls.sort_by(|a, b| b.last_post.max(b.created_at).cmp(&a.last_post.max(a.created_at)));
+        walls.sort_by(|a, b| {
+            b.last_post
+                .max(b.created_at)
+                .cmp(&a.last_post.max(a.created_at))
+        });
         walls.truncate(limit);
         let mut top_authors: Vec<AuthorActivity> = authors
             .into_values()
             .filter(|a| a.posts + a.comments + a.reactions_received + a.comments_received > 0)
             .collect();
-        top_authors.sort_by(|a, b| {
-            (b.posts, b.comments, b.reactions_received).cmp(&(a.posts, a.comments, a.reactions_received))
-        });
+        top_authors.sort_by_key(|a| std::cmp::Reverse((a.posts, a.comments, a.reactions_received)));
         top_authors.truncate(limit);
         let mut top_hashtags: Vec<HashtagActivity> = tags
             .into_iter()
@@ -1052,7 +1593,7 @@ impl<'a> Feed<'a> {
                 last_used: last,
             })
             .collect();
-        top_hashtags.sort_by(|a, b| (b.posts, b.authors).cmp(&(a.posts, a.authors)));
+        top_hashtags.sort_by_key(|h| std::cmp::Reverse((h.posts, h.authors)));
         top_hashtags.truncate(limit);
         Ok(Digest {
             window_secs,
@@ -1121,10 +1662,10 @@ impl<'a> Feed<'a> {
                     // Remember what the network told us about walls so a
                     // wall page can open without another round-trip.
                     for w in &walls {
-                        let _ = self
-                            .one
-                            .store
-                            .put(NS_WALLS, format!("info/{}", w.id).as_bytes(), w);
+                        let _ =
+                            self.one
+                                .store
+                                .put(NS_WALLS, format!("info/{}", w.id).as_bytes(), w);
                     }
                     return Ok(Digest {
                         window_secs: d.window_secs,
@@ -1182,7 +1723,10 @@ impl<'a> Feed<'a> {
     /// reaction and repost a node holds for it, verified and cached, then
     /// assembled like [`Self::thread`]. Works for posts found in Explore
     /// that this device never cached.
-    pub async fn thread_fetch(&mut self, post_id_hex: &str) -> Result<Option<PostThread>, SdkError> {
+    pub async fn thread_fetch(
+        &mut self,
+        post_id_hex: &str,
+    ) -> Result<Option<PostThread>, SdkError> {
         let pid = hex32("post", post_id_hex)?;
         let s = self.social()?;
         let cached: Option<pb::SocialEvent> = self.one.store.get(NS_EVENTS, &pid)?;
@@ -1446,6 +1990,92 @@ impl<'a> Feed<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn story_event(author: &str, created: u64, expires: u64, media: bool) -> pb::SocialEvent {
+        pb::SocialEvent {
+            id: vec![created as u8; 32],
+            r#type: "STORY_CREATE".into(),
+            author: author.into(),
+            timestamp: created,
+            payload: pb::StoryCreate {
+                caption: "hello".into(),
+                expires_at: expires,
+                sensitive: false,
+            }
+            .encode_to_vec(),
+            media: if media {
+                vec![pb::MediaReference {
+                    cid: vec![7; 32],
+                    mime: "image/jpeg".into(),
+                    size: 1024,
+                    kind: "image".into(),
+                    ..Default::default()
+                }]
+            } else {
+                Vec::new()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_story_is_active_until_the_expiry_its_author_signed() {
+        let t0 = 1_800_000_000;
+        let day = 24 * 3600;
+        let ev = story_event("hash1alice", t0, t0 + day, true);
+
+        // T0: visible.
+        assert!(Story::from_event(&ev, t0).is_some());
+        // One second before the deadline: still visible.
+        assert!(Story::from_event(&ev, t0 + day - 1).is_some());
+        // At the deadline and after it: gone from active surfaces.
+        assert!(Story::from_event(&ev, t0 + day).is_none());
+        assert!(Story::from_event(&ev, t0 + day + 1).is_none());
+        assert!(Story::from_event(&ev, t0 + 10 * day).is_none());
+    }
+
+    #[test]
+    fn expiry_is_read_from_the_event_not_from_when_it_arrived() {
+        // A node serving an old story does not put it back on screen: the
+        // filter looks at the signed field, not at delivery time.
+        let t0 = 1_800_000_000;
+        let stale = story_event("hash1alice", t0 - 90_000, t0 - 3_600, true);
+        assert!(Story::from_event(&stale, t0).is_none());
+    }
+
+    #[test]
+    fn a_story_without_media_is_not_a_story() {
+        let t0 = 1_800_000_000;
+        assert!(Story::from_event(&story_event("hash1alice", t0, t0 + 3600, false), t0).is_none());
+    }
+
+    #[test]
+    fn only_story_events_become_stories() {
+        let mut ev = story_event("hash1alice", 1_800_000_000, 1_800_003_600, true);
+        ev.r#type = "POST_CREATE".into();
+        assert!(Story::from_event(&ev, 1_800_000_000).is_none());
+    }
+
+    #[test]
+    fn a_tampered_payload_yields_no_story() {
+        // Signature checking happens in `social`; this is the layer below
+        // it refusing to invent fields from bytes it cannot decode.
+        let mut ev = story_event("hash1alice", 1_800_000_000, 1_800_003_600, true);
+        ev.payload = vec![0xff; 12];
+        assert!(Story::from_event(&ev, 1_800_000_000).is_none());
+    }
+
+    #[test]
+    fn the_client_never_asks_for_a_lifetime_the_protocol_refuses() {
+        assert_eq!(STORY_DEFAULT_SECS, 24 * 3600);
+        assert_eq!(STORY_MAX_SECS, hashgram_proto::limits::MAX_STORY_SECS);
+        // What `post_story` does to an out-of-range request.
+        assert_eq!(
+            (10 * 24 * 3600u64).clamp(60, STORY_MAX_SECS),
+            STORY_MAX_SECS
+        );
+        assert_eq!(1u64.clamp(60, STORY_MAX_SECS), 60);
+    }
 
     #[test]
     fn wall_names_are_bounded_and_plain() {

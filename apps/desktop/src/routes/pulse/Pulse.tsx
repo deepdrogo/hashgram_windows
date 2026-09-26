@@ -1,0 +1,223 @@
+// Pulse: the screen Hashgram opens on.
+//
+// Four feeds, none of them ranked by anything the user cannot see:
+//   Latest     every public post the nearest node holds, newest first
+//   Following  the people you follow, from their own signed chains
+//   Topics     subject pages anyone can open and post on
+//   Local      Latest, kept to authors who published the country you chose
+//
+// Local is worth spelling out: the country comes from the author's own
+// profile and from a country the user picked by hand. Nothing infers a
+// location from an IP address, a peer or a clock.
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+import { useNavigate, useParams } from "@solidjs/router";
+import { Plus, RefreshCw, MapPin } from "lucide-solid";
+import { Button, Empty, Skeleton, Tabs, Select, Notice } from "~/components/ui";
+import { OfflineBanner, ErrorState } from "~/components/States";
+import { ipc, errText, type FeedItem, type Profile } from "~/lib/ipc";
+import { store } from "~/lib/store";
+import { rememberTab, recallTab, trackScroll } from "~/lib/uistate";
+import { PostCard, PostView, ComposeDialog, SourceLine, usePages, NewPosts } from "~/routes/feed/Feed";
+import { DiscoveryRail } from "~/components/social/DiscoveryRail";
+import { StoriesRow } from "~/components/social/Stories";
+import { TopicsHome } from "~/routes/topics/Topics";
+
+type Tab = "latest" | "following" | "topics";
+const TAB_IDS: Tab[] = ["latest", "following", "topics"];
+
+/** Tabs that became sections of their own, and where they went. */
+const MOVED: Record<string, string> = { reels: "/reels", local: "/local" };
+
+export function PulseRoute() {
+  const params = useParams<{ tab?: string; id?: string }>();
+  const navigate = useNavigate();
+  const [compose, setCompose] = createSignal(false);
+
+  // Reels and Local are rail sections now. A stored tab or an old link can
+  // still name them, so send those to the real page instead of falling back
+  // to Latest and looking like the feature was removed.
+  createEffect(() => {
+    const moved = MOVED[params.tab ?? ""];
+    if (moved) navigate(moved, { replace: true });
+  });
+
+  // /pulse/post/<id> opens one post; /pulse/tag/<tag> a hashtag page.
+  const mode = () => {
+    const t = params.tab ?? "";
+    if (t === "post" && params.id) return { kind: "post" as const, id: params.id };
+    if (t === "tag" && params.id) return { kind: "tag" as const, tag: decodeURIComponent(params.id) };
+    return { kind: "feed" as const };
+  };
+  const tab = (): Tab => {
+    const t = params.tab as Tab;
+    if (TAB_IDS.includes(t)) return t;
+    const remembered = recallTab("pulse", "latest") as Tab;
+    return TAB_IDS.includes(remembered) ? remembered : "latest";
+  };
+  createEffect(() => {
+    if (mode().kind === "feed") rememberTab("pulse", tab());
+  });
+
+  return (
+    <div class="flex h-full min-h-0">
+      <div class="flex min-w-0 flex-1 flex-col">
+        <OfflineBanner />
+        <Show when={mode().kind === "post"} fallback={<PulseBody tab={tab()} mode={mode()} onCompose={() => setCompose(true)} />}>
+          <PostView id={params.id!} onBack={() => (window.history.length > 1 ? window.history.back() : navigate("/pulse"))} />
+        </Show>
+      </div>
+      <DiscoveryRail />
+      <ComposeDialog open={compose()} onClose={() => setCompose(false)} />
+    </div>
+  );
+}
+
+function PulseBody(props: { tab: Tab; mode: { kind: string; tag?: string }; onCompose: () => void }) {
+  const navigate = useNavigate();
+  const tagged = () => (props.mode.kind === "tag" ? (props.mode.tag ?? "") : "");
+
+  return (
+    <>
+      <div class="flex items-center gap-2 border-b border-border px-3">
+        <Tabs
+          class="flex-1 border-b-0"
+          value={tagged() ? "" : props.tab}
+          onChange={(v) => navigate(`/pulse/${v}`)}
+          tabs={[
+            { id: "latest", label: "Latest" },
+            { id: "following", label: "Following" },
+            { id: "topics", label: "Topics" },
+          ]}
+        />
+        <Button variant="ghost" size="icon-sm" title="Refresh" onClick={() => { void ipc.feedRefresh().catch(() => undefined); store.bump("feed"); }}>
+          <RefreshCw size={13} />
+        </Button>
+        <Button variant="brand" size="sm" onClick={props.onCompose}>
+          <Plus size={13} /> Post
+        </Button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto" ref={(el) => onCleanup(trackScroll(`scroll:pulse:${tagged() || props.tab}`, el))}>
+        <div class="mx-auto max-w-2xl px-4 py-3">
+          <Show when={!tagged() && props.tab !== "topics"}>
+            <StoriesRow />
+          </Show>
+          <Show when={tagged()} fallback={<FeedFor tab={props.tab} />}>
+            <TagFeed tag={tagged()} />
+          </Show>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function FeedFor(props: { tab: Tab }) {
+  return (
+    <>
+      <Show when={props.tab === "latest"}>
+        <LatestFeed />
+      </Show>
+      <Show when={props.tab === "following"}>
+        <FollowingFeed />
+      </Show>
+      <Show when={props.tab === "topics"}>
+        <TopicsHome />
+      </Show>
+    </>
+  );
+}
+
+/** Everything public the nearest node holds, newest first. */
+function LatestFeed() {
+  const navigate = useNavigate();
+  // One timeline, refreshed in place: the sync tick is a refresh, not a
+  // different list, so the posts on screen stay where they are.
+  const pages = usePages(
+    (before) => ipc.hashwallExplore(before, 30),
+    () => "latest",
+    () => store.ticks().feed,
+  );
+  return (
+    <>
+      <span ref={pages.topMark} aria-hidden="true" />
+      <SourceLine page={pages.source()} />
+      <NewPosts count={pages.waiting()} onShow={pages.showWaiting} />
+      <Show when={pages.error() && !pages.items().length}>
+        <ErrorState error={pages.error()} onRetry={() => void pages.reload()} />
+      </Show>
+      <Show when={pages.loading() && !pages.items().length}>
+        <Skeleton lines={5} />
+      </Show>
+      <Show when={!pages.loading() && !pages.items().length && !pages.error()}>
+        <Empty title="Nothing here yet">The nodes you are connected to hold no public posts. Post something, or follow someone.</Empty>
+      </Show>
+      <For each={pages.items()}>{(it) => <PostCard it={it} onOpen={() => navigate(`/pulse/post/${it.id}`)} />}</For>
+      <MoreLine pages={pages} />
+    </>
+  );
+}
+
+/** The people you follow, from their own chains — works offline. */
+function FollowingFeed() {
+  const navigate = useNavigate();
+  const [items, { refetch }] = createResource(
+    () => ({ tick: store.ticks().feed, locked: store.locked() }),
+    (k) => (k.locked ? Promise.resolve([] as FeedItem[]) : ipc.feedFollowing(0, 100)),
+  );
+  return (
+    <>
+      <Show when={items.error}>
+        <ErrorState error={items.error} onRetry={() => void refetch()} />
+      </Show>
+      <Show when={items.loading && !items()}>
+        <Skeleton lines={5} />
+      </Show>
+      <Show when={items() && !items()!.length}>
+        <Empty title="You do not follow anyone yet">Open somebody's profile from Latest or Topics and press Follow. Their posts then appear here, even offline.</Empty>
+      </Show>
+      <For each={items() ?? []}>{(it) => <PostCard it={it} onOpen={() => navigate(`/pulse/post/${it.id}`)} />}</For>
+    </>
+  );
+}
+
+/** One hashtag's posts. */
+function TagFeed(props: { tag: string }) {
+  const navigate = useNavigate();
+  const pages = usePages(
+    (before) => ipc.hashwallExplore(before, 30, props.tag),
+    () => props.tag,
+    () => store.ticks().feed,
+  );
+  return (
+    <>
+      <span ref={pages.topMark} aria-hidden="true" />
+      <div class="mb-3 flex items-center justify-between">
+        <h1 class="text-base font-semibold">#{props.tag}</h1>
+        <Button size="sm" variant="secondary" onClick={() => navigate("/pulse/latest")}>
+          Back to Pulse
+        </Button>
+      </div>
+      <SourceLine page={pages.source()} />
+      <NewPosts count={pages.waiting()} onShow={pages.showWaiting} />
+      <Show when={pages.loading() && !pages.items().length}>
+        <Skeleton lines={4} />
+      </Show>
+      <Show when={!pages.loading() && !pages.items().length}>
+        <Empty title={`No posts tagged #${props.tag}`} />
+      </Show>
+      <For each={pages.items()}>{(it) => <PostCard it={it} onOpen={() => navigate(`/pulse/post/${it.id}`)} />}</For>
+      <MoreLine pages={pages} />
+    </>
+  );
+}
+
+function MoreLine(props: { pages: ReturnType<typeof usePages> }) {
+  return (
+    <div class="py-4 text-center" ref={props.pages.sentinel}>
+      <Show when={!props.pages.done()} fallback={<span class="text-xs text-muted">That is everything this node holds.</span>}>
+        <Button size="sm" variant="secondary" loading={props.pages.loading()} onClick={() => void props.pages.more()}>
+          Load more
+        </Button>
+      </Show>
+    </div>
+  );
+}

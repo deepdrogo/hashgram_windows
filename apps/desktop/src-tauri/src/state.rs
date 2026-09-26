@@ -100,6 +100,8 @@ pub struct AppState {
     pub pending_tx: Mutex<Vec<String>>,
     /// Ask the sync loop to run a round now.
     pub sync_wake: tokio::sync::Notify,
+    /// The node process this app runs, if the user asked for one.
+    pub node: Arc<crate::node_supervisor::Supervisor>,
 }
 
 impl AppState {

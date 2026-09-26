@@ -397,7 +397,11 @@ async fn hashgram_any(
                     .collect()
             })
             .unwrap_or_default();
-        return stamped(&app, StatusCode::OK, serde_json::json!({ "registrations": regs }));
+        return stamped(
+            &app,
+            StatusCode::OK,
+            serde_json::json!({ "registrations": regs }),
+        );
     }
     if let Some(name) = rest.strip_prefix("username/v1/availability/") {
         let name = name.to_lowercase();
@@ -553,10 +557,11 @@ async fn main() {
             }
         }
     }
-    let usernames: std::collections::BTreeMap<String, String> = parse_pairs(&cli.usernames, "username")
-        .into_iter()
-        .map(|(n, a)| (n.to_lowercase(), a))
-        .collect();
+    let usernames: std::collections::BTreeMap<String, String> =
+        parse_pairs(&cli.usernames, "username")
+            .into_iter()
+            .map(|(n, a)| (n.to_lowercase(), a))
+            .collect();
     let app = Arc::new(App {
         chain_id: cli.chain_id.clone(),
         height: AtomicU64::new(cli.height),

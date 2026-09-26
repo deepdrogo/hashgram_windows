@@ -22,6 +22,9 @@ type S<'a> = State<'a, Arc<AppState>>;
 const MAX_MEDIA: usize = 20;
 const MAX_MEDIA_BYTES: u64 = 64 * 1024 * 1024;
 
+/// A story's caption is a line, not an essay.
+const STORY_CAPTION_CHARS: usize = 200;
+
 fn limit_of(l: Option<usize>) -> usize {
     l.unwrap_or(50).clamp(1, 200)
 }
@@ -32,7 +35,9 @@ async fn read_media(path: &str) -> CmdResult<(Vec<u8>, String, String)> {
     if meta.len() > MAX_MEDIA_BYTES {
         return Err(UiError::invalid("media over 64 MiB is not supported"));
     }
-    let mime = mime_guess::from_path(&p).first_or_octet_stream().to_string();
+    let mime = mime_guess::from_path(&p)
+        .first_or_octet_stream()
+        .to_string();
     let kind = if mime.starts_with("image/") {
         "image"
     } else if mime.starts_with("video/") {
@@ -47,7 +52,11 @@ async fn read_media(path: &str) -> CmdResult<(Vec<u8>, String, String)> {
 
 /// Following feed (chronological, local cache).
 #[tauri::command]
-pub async fn feed_following(state: S<'_>, before: Option<u64>, limit: Option<usize>) -> CmdResult<Vec<FeedItem>> {
+pub async fn feed_following(
+    state: S<'_>,
+    before: Option<u64>,
+    limit: Option<usize>,
+) -> CmdResult<Vec<FeedItem>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one.feed().following(before.unwrap_or(0), limit_of(limit))?)
@@ -55,7 +64,11 @@ pub async fn feed_following(state: S<'_>, before: Option<u64>, limit: Option<usi
 
 /// Friends feed.
 #[tauri::command]
-pub async fn feed_friends(state: S<'_>, before: Option<u64>, limit: Option<usize>) -> CmdResult<Vec<FeedItem>> {
+pub async fn feed_friends(
+    state: S<'_>,
+    before: Option<u64>,
+    limit: Option<usize>,
+) -> CmdResult<Vec<FeedItem>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one.feed().friends(before.unwrap_or(0), limit_of(limit))?)
@@ -63,17 +76,29 @@ pub async fn feed_friends(state: S<'_>, before: Option<u64>, limit: Option<usize
 
 /// One author's posts (refreshes from the network first when online).
 #[tauri::command]
-pub async fn feed_author(state: S<'_>, address: String, before: Option<u64>, limit: Option<usize>) -> CmdResult<Vec<FeedItem>> {
+pub async fn feed_author(
+    state: S<'_>,
+    address: String,
+    before: Option<u64>,
+    limit: Option<usize>,
+) -> CmdResult<Vec<FeedItem>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let _ = one.feed().refresh_author(address.trim(), 100).await;
-    Ok(one.feed().author(address.trim(), before.unwrap_or(0), limit_of(limit))?)
+    Ok(one
+        .feed()
+        .author(address.trim(), before.unwrap_or(0), limit_of(limit))?)
 }
 
 /// Explore: the indexer's chronological or hashtag feed. `None` when no
 /// indexer is configured.
 #[tauri::command]
-pub async fn feed_explore(state: S<'_>, before: Option<u64>, limit: Option<usize>, tag: Option<String>) -> CmdResult<Option<serde_json::Value>> {
+pub async fn feed_explore(
+    state: S<'_>,
+    before: Option<u64>,
+    limit: Option<usize>,
+    tag: Option<String>,
+) -> CmdResult<Option<serde_json::Value>> {
     let indexer = state.settings.read().await.indexer().map(str::to_owned);
     let Some(base) = indexer else { return Ok(None) };
     let mut g = state.one.lock().await;
@@ -82,7 +107,12 @@ pub async fn feed_explore(state: S<'_>, before: Option<u64>, limit: Option<usize
     let before = before.unwrap_or(0);
     let path = match tag.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => {
-            let t: String = t.trim_start_matches('#').chars().filter(|c| c.is_alphanumeric() || *c == '_').take(64).collect();
+            let t: String = t
+                .trim_start_matches('#')
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_')
+                .take(64)
+                .collect();
             format!("/v1/feed/hashtag/{t}?limit={limit}&before={before}")
         }
         None => format!("/v1/feed/chronological?limit={limit}&before={before}"),
@@ -112,8 +142,12 @@ pub async fn feed_post(
     sensitive: bool,
     channel: Option<String>,
 ) -> CmdResult<String> {
-    let channel = channel.map(|c| c.trim().to_ascii_lowercase()).unwrap_or_default();
-    if !channel.is_empty() && (channel.len() != 64 || !channel.chars().all(|c| c.is_ascii_hexdigit())) {
+    let channel = channel
+        .map(|c| c.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !channel.is_empty()
+        && (channel.len() != 64 || !channel.chars().all(|c| c.is_ascii_hexdigit()))
+    {
         return Err(UiError::invalid("wall id"));
     }
     if text.trim().is_empty() && media_paths.is_empty() {
@@ -143,6 +177,222 @@ pub async fn feed_post(
         .await?;
     one.save()?;
     Ok(id)
+}
+
+/// One file the composer is publishing, with whatever the webview could
+/// measure about it (videos only; pictures are decoded on this side).
+#[derive(Debug, Clone, Deserialize)]
+pub struct MediaUpload {
+    /// Path the user picked.
+    pub path: String,
+    /// Width, height, duration and poster frame from `<video>`, if any.
+    #[serde(default)]
+    pub client: crate::media::ClientMeta,
+}
+
+/// How far a post with attachments has got.
+#[derive(Debug, Clone, Serialize)]
+struct MediaProgress {
+    op: String,
+    stage: &'static str,
+    index: usize,
+    total: usize,
+    name: String,
+}
+
+fn media_progress(
+    app: &tauri::AppHandle,
+    op: &str,
+    stage: &'static str,
+    index: usize,
+    total: usize,
+    name: &str,
+) {
+    use tauri::Emitter;
+    let _ = app.emit(
+        "media:progress",
+        MediaProgress {
+            op: op.to_owned(),
+            stage,
+            index,
+            total,
+            name: name.to_owned(),
+        },
+    );
+}
+
+/// Creates a public post with pictures or video.
+///
+/// Each file is read, measured and uploaded as its own public blob before
+/// the event is signed, so the post never carries the bytes — only a CID,
+/// a size and a poster. Progress goes out on `media:progress` so the window
+/// stays usable while a large video uploads.
+#[tauri::command]
+pub async fn feed_post_media(
+    state: S<'_>,
+    app: tauri::AppHandle,
+    text: String,
+    hashtags: Vec<String>,
+    files: Vec<MediaUpload>,
+    sensitive: bool,
+    channel: Option<String>,
+    op: Option<String>,
+) -> CmdResult<String> {
+    let op = op.unwrap_or_default();
+    let channel = channel
+        .map(|c| c.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !channel.is_empty()
+        && (channel.len() != 64 || !channel.chars().all(|c| c.is_ascii_hexdigit()))
+    {
+        return Err(UiError::invalid("topic id"));
+    }
+    if text.trim().is_empty() && files.is_empty() {
+        return Err(UiError::invalid("write something or add a picture"));
+    }
+    if files.len() > MAX_MEDIA {
+        return Err(UiError::invalid("20 files at most"));
+    }
+    let total = files.len();
+
+    // Read and measure first: a file that cannot be decoded should fail
+    // before anything has been signed or pushed to a provider.
+    let mut prepared = Vec::with_capacity(total);
+    for (i, f) in files.iter().enumerate() {
+        let name = std::path::Path::new(&f.path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        media_progress(&app, &op, "preparing", i, total, &name);
+        let (bytes, mime, _kind) = match read_media(&f.path).await {
+            Ok(x) => x,
+            Err(e) => {
+                media_progress(&app, &op, "failed", i, total, &name);
+                return Err(e);
+            }
+        };
+        prepared.push((name, crate::media::prepare(bytes, mime, &f.client)));
+    }
+
+    let tags: Vec<String> = hashtags
+        .into_iter()
+        .map(|t| t.trim().trim_start_matches('#').to_lowercase())
+        .filter(|t| !t.is_empty() && t.len() <= 64)
+        .collect();
+
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    let mut media = Vec::with_capacity(total);
+    for (i, (name, p)) in prepared.iter().enumerate() {
+        media_progress(&app, &op, "uploading", i, total, name);
+        match one
+            .feed()
+            .upload_media_with(&p.bytes, &p.mime, &p.kind, &p.meta)
+            .await
+        {
+            Ok(m) => media.push(m),
+            Err(e) => {
+                media_progress(&app, &op, "failed", i, total, name);
+                return Err(e.into());
+            }
+        }
+    }
+    media_progress(&app, &op, "publishing", total, total, "");
+    let id = match one
+        .feed()
+        .post_on(text.trim(), tags, media, sensitive, &channel)
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            media_progress(&app, &op, "failed", total, total, "");
+            return Err(e.into());
+        }
+    };
+    one.save()?;
+    media_progress(&app, &op, "published", total, total, "");
+    Ok(id)
+}
+
+/// Publishes a story: one picture or video that active surfaces stop
+/// showing after `ttl_hours` (default 24, protocol maximum 48).
+///
+/// See `docs/STORIES.md`: expiry means Pulse, profiles and indexes stop
+/// serving it. It is not deletion from the network, and no string in this
+/// app may claim otherwise.
+#[tauri::command]
+pub async fn story_create(
+    state: S<'_>,
+    app: tauri::AppHandle,
+    caption: String,
+    file: MediaUpload,
+    ttl_hours: Option<u64>,
+    sensitive: bool,
+    op: Option<String>,
+) -> CmdResult<String> {
+    let op = op.unwrap_or_default();
+    // A story is a picture or a video with a line under it. Anything
+    // longer is a post, which is a different thing and does not expire.
+    if caption.chars().count() > STORY_CAPTION_CHARS {
+        return Err(UiError::invalid(format!(
+            "a story caption is at most {STORY_CAPTION_CHARS} characters — write a post instead"
+        )));
+    }
+    let name = std::path::Path::new(&file.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    media_progress(&app, &op, "preparing", 0, 1, &name);
+    let (bytes, mime, _) = read_media(&file.path).await?;
+    if !mime.starts_with("image/") && !mime.starts_with("video/") {
+        return Err(UiError::invalid("a story is a picture or a video"));
+    }
+    let prepared = crate::media::prepare(bytes, mime, &file.client);
+    let ttl = ttl_hours.unwrap_or(24).clamp(1, 48) * 3600;
+
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    media_progress(&app, &op, "uploading", 0, 1, &name);
+    let media = one
+        .feed()
+        .upload_media_with(
+            &prepared.bytes,
+            &prepared.mime,
+            &prepared.kind,
+            &prepared.meta,
+        )
+        .await?;
+    media_progress(&app, &op, "publishing", 1, 1, "");
+    let id = one
+        .feed()
+        .post_story(caption.trim(), vec![media], ttl, sensitive)
+        .await?;
+    one.save()?;
+    media_progress(&app, &op, "published", 1, 1, "");
+    Ok(id)
+}
+
+/// Unexpired stories from the people we follow, and our own.
+#[tauri::command]
+pub async fn stories_active(state: S<'_>) -> CmdResult<Vec<hashgram_sdk::feed::Story>> {
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    let mut authors = one.feed().follows();
+    authors.insert(one.address().to_owned());
+    Ok(one.feed().active_stories(&authors)?)
+}
+
+/// One author's unexpired stories, oldest first.
+#[tauri::command]
+pub async fn stories_of(
+    state: S<'_>,
+    address: String,
+) -> CmdResult<Vec<hashgram_sdk::feed::Story>> {
+    let address = address.trim().to_owned();
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    let _ = one.feed().refresh_author(&address, 100).await;
+    Ok(one.feed().stories_of(&address)?)
 }
 
 /// Comments on a post.
@@ -217,11 +467,20 @@ pub async fn feed_follows(state: S<'_>) -> CmdResult<Vec<String>> {
 /// Updates our public profile; `avatar_path` (optional) is uploaded as
 /// public media.
 #[tauri::command]
-pub async fn feed_profile_update(state: S<'_>, name: String, bio: String, avatar_path: Option<String>) -> CmdResult<String> {
+pub async fn feed_profile_update(
+    state: S<'_>,
+    name: String,
+    bio: String,
+    avatar_path: Option<String>,
+) -> CmdResult<String> {
     if name.len() > 128 || bio.len() > 4096 {
         return Err(UiError::invalid("name ≤ 128 and bio ≤ 4096 characters"));
     }
-    let avatar = match avatar_path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+    let avatar = match avatar_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
         Some(p) => Some(read_media(p).await?),
         None => None,
     };
@@ -237,7 +496,10 @@ pub async fn feed_profile_update(state: S<'_>, name: String, bio: String, avatar
         }
         None => String::new(),
     };
-    let id = one.feed().update_profile(name.trim(), bio.trim(), &avatar_cid).await?;
+    let id = one
+        .feed()
+        .update_profile(name.trim(), bio.trim(), &avatar_cid)
+        .await?;
     one.save()?;
     Ok(id)
 }
@@ -271,6 +533,29 @@ pub async fn feed_media_fetch(state: S<'_>, cid: String, mime: String) -> CmdRes
     Ok(p.display().to_string())
 }
 
+/// Opens public media in the machine's own player or viewer.
+///
+/// The webview can decode H.264/AAC in MP4 and WebM, and nothing else.
+/// A perfectly good file in another format — H.265, MKV, AV1 in a container
+/// Windows hands to a different decoder — plays fine in a real player and
+/// shows a black rectangle here. Rather than blame the file, the viewer
+/// offers this: the bytes are already downloaded and verified against their
+/// CID, so opening them costs nothing extra.
+///
+/// It takes a CID, not a path. A command that opened any path the webview
+/// named would be a much larger thing to hand to a renderer than this is.
+#[tauri::command]
+pub async fn feed_media_open(
+    state: S<'_>,
+    app: tauri::AppHandle,
+    cid: String,
+    mime: String,
+) -> CmdResult<String> {
+    let path = feed_media_fetch(state, cid, mime).await?;
+    crate::util::open_path(&app, std::path::Path::new(&path))?;
+    Ok(path)
+}
+
 // ---------------------------------------------------------------------------
 // Circles
 // ---------------------------------------------------------------------------
@@ -285,14 +570,22 @@ pub async fn circles_list(state: S<'_>) -> CmdResult<Vec<CircleInfo>> {
 
 /// Creates a circle with members (addresses or names, resolved here).
 #[tauri::command]
-pub async fn circles_create(state: S<'_>, name: String, description: String, members: Vec<String>) -> CmdResult<String> {
+pub async fn circles_create(
+    state: S<'_>,
+    name: String,
+    description: String,
+    members: Vec<String>,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let mut addrs = Vec::new();
     for m in members {
         addrs.push(one.people().resolve(m.trim()).await?.address);
     }
-    let id = one.circles().create(name.trim(), description.trim(), &addrs).await?;
+    let id = one
+        .circles()
+        .create(name.trim(), description.trim(), &addrs)
+        .await?;
     one.save()?;
     Ok(id)
 }
@@ -310,7 +603,11 @@ pub async fn circles_add_member(state: S<'_>, circle: String, member: String) ->
 
 /// Removes a member.
 #[tauri::command]
-pub async fn circles_remove_member(state: S<'_>, circle: String, address: String) -> CmdResult<usize> {
+pub async fn circles_remove_member(
+    state: S<'_>,
+    circle: String,
+    address: String,
+) -> CmdResult<usize> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let n = one.circles().remove_member(&circle, address.trim()).await?;
@@ -361,7 +658,16 @@ async fn private_media(one: &mut HashgramOne, paths: &[String]) -> CmdResult<Vec
             Some(app::mail_attachment::Source::InlineData(d)) => {
                 // Small media still travel as blobs for Circles: upload.
                 let device = one.account.device()?;
-                let up = hashgram_sdk::blob::upload(&one.link, &one.network, &device, &d, &mime, true, 2).await?;
+                let up = hashgram_sdk::blob::upload(
+                    &one.link,
+                    &one.network,
+                    &device,
+                    &d,
+                    &mime,
+                    true,
+                    2,
+                )
+                .await?;
                 out.push(app::BlobRef {
                     cid: hex::decode(&up.cid).unwrap_or_default(),
                     key: hex::decode(up.key.unwrap_or_default()).unwrap_or_default(),
@@ -394,7 +700,12 @@ pub async fn circles_post(
     }
     let poll = match poll {
         Some(p) => {
-            let opts: Vec<String> = p.options.into_iter().map(|o| o.trim().to_owned()).filter(|o| !o.is_empty()).collect();
+            let opts: Vec<String> = p
+                .options
+                .into_iter()
+                .map(|o| o.trim().to_owned())
+                .filter(|o| !o.is_empty())
+                .collect();
             if opts.len() < 2 || opts.len() > 12 || p.question.trim().is_empty() {
                 return Err(UiError::invalid("a poll needs a question and 2–12 options"));
             }
@@ -410,14 +721,22 @@ pub async fn circles_post(
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let media = private_media(one, &media_paths).await?;
-    let id = one.circles().post(&circle, text.trim(), media, Vec::new(), poll).await?;
+    let id = one
+        .circles()
+        .post(&circle, text.trim(), media, Vec::new(), poll)
+        .await?;
     one.save()?;
     Ok(id)
 }
 
 /// Comments.
 #[tauri::command]
-pub async fn circles_comment(state: S<'_>, circle: String, post: String, text: String) -> CmdResult<String> {
+pub async fn circles_comment(
+    state: S<'_>,
+    circle: String,
+    post: String,
+    text: String,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let id = one.circles().comment(&circle, &post, text.trim()).await?;
@@ -427,17 +746,30 @@ pub async fn circles_comment(state: S<'_>, circle: String, post: String, text: S
 
 /// Reacts.
 #[tauri::command]
-pub async fn circles_react(state: S<'_>, circle: String, target: String, reaction: String) -> CmdResult<String> {
+pub async fn circles_react(
+    state: S<'_>,
+    circle: String,
+    target: String,
+    reaction: String,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let id = one.circles().react(&circle, &target, reaction.trim()).await?;
+    let id = one
+        .circles()
+        .react(&circle, &target, reaction.trim())
+        .await?;
     one.save()?;
     Ok(id)
 }
 
 /// Votes.
 #[tauri::command]
-pub async fn circles_vote(state: S<'_>, circle: String, post: String, choices: Vec<u32>) -> CmdResult<String> {
+pub async fn circles_vote(
+    state: S<'_>,
+    circle: String,
+    post: String,
+    choices: Vec<u32>,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let id = one.circles().vote(&circle, &post, choices).await?;
@@ -457,17 +789,30 @@ pub async fn circles_delete(state: S<'_>, circle: String, target: String) -> Cmd
 
 /// Renames / describes.
 #[tauri::command]
-pub async fn circles_set_info(state: S<'_>, circle: String, name: String, description: String) -> CmdResult<String> {
+pub async fn circles_set_info(
+    state: S<'_>,
+    circle: String,
+    name: String,
+    description: String,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let id = one.circles().set_info(&circle, name.trim(), description.trim()).await?;
+    let id = one
+        .circles()
+        .set_info(&circle, name.trim(), description.trim())
+        .await?;
     one.save()?;
     Ok(id)
 }
 
 /// Posts page.
 #[tauri::command]
-pub async fn circles_posts(state: S<'_>, circle: String, before_ms: Option<u64>, limit: Option<usize>) -> CmdResult<Vec<CircleItemView>> {
+pub async fn circles_posts(
+    state: S<'_>,
+    circle: String,
+    before_ms: Option<u64>,
+    limit: Option<usize>,
+) -> CmdResult<Vec<CircleItemView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one
@@ -480,10 +825,19 @@ pub async fn circles_posts(state: S<'_>, circle: String, before_ms: Option<u64>,
 
 /// Comments of a post.
 #[tauri::command]
-pub async fn circles_comments(state: S<'_>, circle: String, post: String) -> CmdResult<Vec<CircleItemView>> {
+pub async fn circles_comments(
+    state: S<'_>,
+    circle: String,
+    post: String,
+) -> CmdResult<Vec<CircleItemView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.circles().comments(&circle, &post)?.iter().map(CircleItemView::from).collect())
+    Ok(one
+        .circles()
+        .comments(&circle, &post)?
+        .iter()
+        .map(CircleItemView::from)
+        .collect())
 }
 
 /// A merged item across circles.
@@ -497,7 +851,11 @@ pub struct MergedItem {
 
 /// Merged private timeline across all circles.
 #[tauri::command]
-pub async fn circles_merged(state: S<'_>, before_ms: Option<u64>, limit: Option<usize>) -> CmdResult<Vec<MergedItem>> {
+pub async fn circles_merged(
+    state: S<'_>,
+    before_ms: Option<u64>,
+    limit: Option<usize>,
+) -> CmdResult<Vec<MergedItem>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one
@@ -513,7 +871,12 @@ pub async fn circles_merged(state: S<'_>, before_ms: Option<u64>, limit: Option<
 
 /// Decrypts a Circle media blob to the scratch folder and returns its path.
 #[tauri::command]
-pub async fn circles_media_fetch(state: S<'_>, circle: String, item: String, index: usize) -> CmdResult<String> {
+pub async fn circles_media_fetch(
+    state: S<'_>,
+    circle: String,
+    item: String,
+    index: usize,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     // Find the blob ref inside the item (keys never leave here).

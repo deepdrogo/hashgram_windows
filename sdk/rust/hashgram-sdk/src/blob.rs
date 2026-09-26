@@ -69,6 +69,14 @@ pub struct Uploaded {
     pub plaintext_hash: String,
 }
 
+/// How many providers public media is pushed to.
+///
+/// Matches the network's own `TARGET_REPLICAS`, so a node's repair pass
+/// treats a fresh avatar or post image as complete rather than as
+/// under-replicated and in need of copying. Uploading to fewer than the
+/// target is how media quietly ends up with one copy.
+pub const PUBLIC_REPLICAS: usize = 3;
+
 /// Uploads `data` to up to `replicas` store peers. Every chunk is pushed
 /// only where the manifest was accepted.
 pub async fn upload(
@@ -293,6 +301,56 @@ pub async fn providers(link: &Link, c: &[u8]) -> Vec<PeerId> {
     for p in link.peers_with_role("media").await {
         if !out.contains(&p) {
             out.push(p);
+        }
+    }
+    out
+}
+
+/// What this client could find out about where a blob actually is.
+///
+/// These are answers from nodes that were reachable at the time, not a
+/// guarantee: a provider that is offline may still hold a complete copy,
+/// and one that answers may lose it tomorrow. `asked` is there so the UI
+/// can say "2 of the 3 nodes we could reach" instead of implying it
+/// surveyed the network.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct Availability {
+    /// Providers that answered with a complete copy.
+    pub complete: u32,
+    /// Providers that answered with some chunks but not all.
+    pub partial: u32,
+    /// Providers asked, including ones that did not answer.
+    pub asked: u32,
+    /// Providers that answered at all.
+    pub answered: u32,
+    /// What the network aims for ([`PUBLIC_REPLICAS`]).
+    pub target: u32,
+}
+
+/// Asks the providers this client can reach whether they hold `cid`.
+///
+/// One round of `BlobHas`, bounded, so a Drive listing can show real
+/// numbers without turning into a crawl.
+pub async fn availability(link: &Link, c: &[u8]) -> Availability {
+    const MAX_ASKED: usize = 8;
+    let peers = providers(link, c).await;
+    let mut out = Availability {
+        target: PUBLIC_REPLICAS as u32,
+        ..Default::default()
+    };
+    for peer in peers.into_iter().take(MAX_ASKED) {
+        out.asked += 1;
+        let body = pb::request::Body::BlobHas(pb::BlobHas { cid: c.to_vec() });
+        match link.request(peer, body).await {
+            Ok(pb::response::Body::BlobHas(r)) => {
+                out.answered += 1;
+                if r.has_manifest && r.chunks_total > 0 && r.chunks_present >= r.chunks_total {
+                    out.complete += 1;
+                } else if r.chunks_present > 0 || r.has_manifest {
+                    out.partial += 1;
+                }
+            }
+            _ => continue,
         }
     }
     out

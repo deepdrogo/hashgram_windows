@@ -27,6 +27,31 @@ const source = (f: string) => {
 };
 const srcFiles = files.filter((f) => f.startsWith(join(DESKTOP, "src") + sep) && (f.endsWith(".ts") || f.endsWith(".tsx")));
 
+// A `//` comment between JSX tags is not a comment. It is text, and the
+// app renders it: a paragraph of source prose appeared in the Stories row
+// where the pictures should have been. Inside markup the comment form is
+// `{/* … */}`, and prose about a component belongs above it.
+describe("the app never renders its own source comments", () => {
+  it("no // comment sits inside JSX children", () => {
+    const offenders: string[] = [];
+    for (const f of srcFiles.filter((p) => p.endsWith(".tsx"))) {
+      const lines = readFileSync(f, "utf8").split(/\r?\n/);
+      for (let i = 0; i < lines.length - 1; i++) {
+        const open = lines[i]!.trimEnd();
+        // An opening tag: ends with `>`, is not self-closing, is not a
+        // closing tag, and is not a type annotation ending in `;`.
+        if (!open.endsWith(">") || open.endsWith("/>") || open.endsWith("=>")) continue;
+        if (!/<[A-Za-z]/.test(open)) continue;
+        let j = i + 1;
+        while (j < lines.length && lines[j]!.trim() === "") j++;
+        const next = lines[j]?.trim() ?? "";
+        if (next.startsWith("//")) offenders.push(`${relative(APPS, f)}:${j + 1}: ${next.slice(0, 60)}`);
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+});
+
 describe("no hardcoded server", () => {
   const SEED_PREFIX = ["186", "241"].join(".");
   it("the seed node address appears nowhere under apps/", () => {
@@ -69,9 +94,24 @@ describe("no mining", () => {
   it("the section is called Earn and the rail is in the specified order", () => {
     const shell = readFileSync(join(DESKTOP, "src", "components", "Shell.tsx"), "utf8");
     const keys = [...shell.matchAll(/key:\s*"nav_([a-z]+)"/g)].map((m) => m[1]);
-    // Explore and My profile were added later; the original sections keep their relative order.
-    expect(keys).toEqual(["mail", "drive", "feed", "explore", "people", "spaces", "earn", "wallet", "network", "me", "settings"]);
-    expect(keys.filter((k) => !["explore", "me"].includes(k ?? ""))).toEqual(["mail", "drive", "feed", "people", "spaces", "earn", "wallet", "network", "settings"]);
+    // Social first, infrastructure second, the person last. Mail is no longer
+    // the home screen; Pulse is. Reels and Local sit next to Pulse because
+    // they are places to go, not filters of the timeline.
+    expect(keys).toEqual([
+      "pulse",
+      "reels",
+      "local",
+      "chats",
+      "mail",
+      "drive",
+      "spaces",
+      "contacts",
+      "wallet",
+      "earn",
+      "network",
+      "profile",
+      "settings",
+    ]);
   });
 });
 

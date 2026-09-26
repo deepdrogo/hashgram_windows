@@ -51,7 +51,11 @@ pub async fn settings_set(state: S<'_>, app: AppHandle, settings: Settings) -> C
 
 /// Exports an encrypted backup of the vault to `path`.
 #[tauri::command]
-pub async fn backup_export(state: S<'_>, path: String, passphrase: String) -> CmdResult<hashgram_sdk::backup::BackupMeta> {
+pub async fn backup_export(
+    state: S<'_>,
+    path: String,
+    passphrase: String,
+) -> CmdResult<hashgram_sdk::backup::BackupMeta> {
     if passphrase.chars().count() < hashgram_sdk::backup::MIN_PASSPHRASE {
         return Err(UiError::invalid(format!(
             "a backup passphrase is at least {} characters",
@@ -87,7 +91,8 @@ pub fn help_list() -> Vec<crate::help::HelpPage> {
 /// One help page as HTML.
 #[tauri::command]
 pub fn help_page(slug: String) -> CmdResult<String> {
-    crate::help::render(&slug, crate::cmd_identity::COMMIT).ok_or_else(|| UiError::not_found("no such help page"))
+    crate::help::render(&slug, crate::cmd_identity::COMMIT)
+        .ok_or_else(|| UiError::not_found("no such help page"))
 }
 
 /// Performance spans.
@@ -200,7 +205,9 @@ pub async fn about_info(state: S<'_>, app: AppHandle) -> CmdResult<AboutInfo> {
         genesis_hash: identity.genesis_hash,
         chain_id: identity.chain_id,
         kdf: crate::cmd_identity::kdf_label(),
-        code_signed: option_env!("HASHGRAM_CODESIGNED").map(|v| v == "1").unwrap_or(false),
+        code_signed: option_env!("HASHGRAM_CODESIGNED")
+            .map(|v| v == "1")
+            .unwrap_or(false),
         updater_endpoint,
         data_dir: paths::data_dir().display().to_string(),
         logs_dir: paths::logs_dir().display().to_string(),
@@ -230,7 +237,11 @@ pub async fn leases_list(state: S<'_>) -> CmdResult<Vec<hashgram_sdk::storage_le
 
 /// Verifies an epoch of a lease.
 #[tauri::command]
-pub async fn leases_verify(state: S<'_>, lease_id: String, epoch: u64) -> CmdResult<hashgram_sdk::storage_lease::Verification> {
+pub async fn leases_verify(
+    state: S<'_>,
+    lease_id: String,
+    epoch: u64,
+) -> CmdResult<hashgram_sdk::storage_lease::Verification> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one.leases().verify_epoch(&lease_id, epoch).await?)

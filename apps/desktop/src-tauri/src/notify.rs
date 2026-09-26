@@ -36,7 +36,8 @@ pub async fn on_sync_event(app: &AppHandle, state: &Arc<AppState>, ev: &SyncEven
                         match rec {
                             Some(r) => {
                                 let sender = r.authenticated_sender.clone();
-                                let name = one.people().username_of(&sender).await.unwrap_or_default();
+                                let name =
+                                    one.people().username_of(&sender).await.unwrap_or_default();
                                 if name.is_empty() {
                                     short(&sender)
                                 } else {
@@ -52,7 +53,10 @@ pub async fn on_sync_event(app: &AppHandle, state: &Arc<AppState>, ev: &SyncEven
             if inbox {
                 ("New mail".to_owned(), format!("New mail from {who}"))
             } else {
-                ("New request".to_owned(), format!("{who} wrote to you for the first time"))
+                (
+                    "New request".to_owned(),
+                    format!("{who} wrote to you for the first time"),
+                )
             }
         }
         SyncEvent::ContactsChanged => {

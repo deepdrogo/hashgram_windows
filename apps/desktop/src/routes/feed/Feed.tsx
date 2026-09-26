@@ -4,19 +4,23 @@
 // one page at a time. Composer for public posts (text, media, hashtags,
 // sensitive, optional wall) and Circle posts (circle picker, poll builder).
 // Post view with comments and reactions pulled from the network.
-import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+// Solid's `on` is aliased: this file also imports the IPC event `on`.
+import { For, Show, createEffect, createMemo, createResource, createSignal, on as onSource, onCleanup, onMount } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
-import { Image as ImageIcon, Send, MessageSquare, Heart, Repeat2, Trash2, Plus, Users, RefreshCw, Vote, Eye, EyeOff, UserPlus, X, Pin, PinOff, Link as LinkIcon, Megaphone, Hash } from "lucide-solid";
+import { Image as ImageIcon, Send, MessageSquare, Heart, Repeat2, Trash2, Plus, Users, RefreshCw, Vote, Eye, EyeOff, UserPlus, X, Pin, PinOff, Link as LinkIcon, Megaphone, Hash, ArrowUp } from "lucide-solid";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Button, Checkbox, Dialog, Field, Input, Notice, Tabs, Textarea, Badge, Empty, Select } from "~/components/ui";
 import { OfflineBanner, ErrorState } from "~/components/States";
 import { Who, PersonAvatar } from "~/components/identity";
-import { ipc, errText, type FeedItem, type CircleInfo, type CircleItemView, type MergedItem, type PollInput, type WallInfo, type ExplorePage } from "~/lib/ipc";
+import { ipc, on, errText, type MediaProgress, type FeedItem, type CircleInfo, type CircleItemView, type MergedItem, type PollInput, type WallInfo, type ExplorePage } from "~/lib/ipc";
 import { store } from "~/lib/store";
+import { go } from "~/lib/nav";
 import { t } from "~/lib/i18n";
 import { formatMs, shortWhen, splitRecipients } from "~/lib/format";
 import { pickFile, confirm } from "~/lib/dialogs";
 import { copyText } from "~/lib/clipboard";
+import { MediaStrip } from "~/components/social/Media";
+import { measureVideo } from "~/lib/mediameta";
 
 type Tab = "friends" | "following" | "walls" | "circles" | "post";
 
@@ -32,18 +36,49 @@ export function hashtags(it: FeedItem): string[] {
 }
 
 /**
- * Pages of a remote timeline (Explore, a wall, a hashtag): loads one page,
- * then the next when the sentinel scrolls into view or on "Load more".
+ * Pages of a remote timeline (Explore, a wall, a hashtag).
+ *
+ * Newest at the top, older below, and — this is the part that took a
+ * rewrite — **the list is never thrown away while somebody is reading it**.
+ *
+ * It used to be. The pager reset its items whenever its key changed, and
+ * the key included the feed tick, which the sync loop raises after every
+ * round that brought anything at all. So a few seconds into scrolling, the
+ * list emptied, a skeleton flashed, the reading position was lost and every
+ * picture on screen was fetched again. The content was arriving correctly;
+ * the screen was being rebuilt underneath it.
+ *
+ * Now two different things are told apart:
+ *
+ *   * **Identity** — which timeline this is (a tag, a wall, a tab). When it
+ *     changes the list really is a different list, so it resets.
+ *   * **Refresh** — the same timeline, new data. The first page is fetched
+ *     again and merged: posts already on screen keep their place and their
+ *     object identity, so Solid does not re-render them and their media is
+ *     not re-fetched. Genuinely new posts go above.
+ *
+ * New posts are only inserted straight away when the top of the list is on
+ * screen. Otherwise they wait behind a count — moving what somebody is
+ * reading is worse than making them click.
+ *
  * Dedups by id because a page boundary may re-serve one second's posts.
  */
-export function usePages(fetchPage: (before: number) => Promise<ExplorePage>, key: () => unknown) {
+export function usePages(
+  fetchPage: (before: number) => Promise<ExplorePage>,
+  identity: () => unknown,
+  refresh?: () => unknown,
+) {
   const [items, setItems] = createSignal<FeedItem[]>([]);
+  const [waiting, setWaiting] = createSignal<FeedItem[]>([]);
   const [next, setNext] = createSignal<number>(0);
   const [done, setDone] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<unknown>(null);
   const [source, setSource] = createSignal<ExplorePage | null>(null);
+  const [atTop, setAtTop] = createSignal(true);
   let inflight = false;
+  let lastMerge = 0;
+
   const load = async (reset: boolean) => {
     if (inflight) return;
     if (!reset && done()) return;
@@ -65,13 +100,62 @@ export function usePages(fetchPage: (before: number) => Promise<ExplorePage>, ke
       inflight = false;
     }
   };
-  createEffect(() => {
-    key();
-    setItems([]);
-    setNext(0);
-    setDone(false);
-    void load(true);
-  });
+
+  /**
+   * Re-reads the first page and merges. Never clears the list, never shows
+   * the skeleton, and never reports an error: a failed background refresh
+   * means what is on screen is a little old, which is not worth a red box
+   * over content that is perfectly readable.
+   */
+  const merge = async () => {
+    if (inflight) return;
+    // A sync round can finish every few seconds, and asking a node for the
+    // first page that often costs it work for nothing. A timeline that is
+    // at most fifteen seconds stale reads as live.
+    const now = Date.now();
+    if (now - lastMerge < 15_000) return;
+    lastMerge = now;
+    inflight = true;
+    try {
+      const page = await fetchPage(0);
+      setSource(page);
+      const known = new Set([...items(), ...waiting()].map((i) => i.id));
+      const fresh = page.items.filter((i) => !known.has(i.id));
+      if (!fresh.length) return;
+      if (atTop()) setItems([...fresh, ...items()]);
+      else setWaiting([...fresh, ...waiting()]);
+    } catch {
+      // Keep what is on screen.
+    } finally {
+      inflight = false;
+    }
+  };
+
+  /** Puts the held-back posts at the top of the list. */
+  const showWaiting = () => {
+    const held = waiting();
+    if (!held.length) return;
+    setWaiting([]);
+    setItems([...held, ...items()]);
+  };
+
+  createEffect(
+    onSource(identity, () => {
+      setItems([]);
+      setWaiting([]);
+      setNext(0);
+      setDone(false);
+      void load(true);
+    }),
+  );
+  createEffect(
+    onSource(
+      () => refresh?.(),
+      () => void merge(),
+      { defer: true },
+    ),
+  );
+
   /** Attach to an element at the end of the list to load more when visible. */
   const sentinel = (el: HTMLElement) => {
     const obs = new IntersectionObserver((entries) => {
@@ -80,7 +164,49 @@ export function usePages(fetchPage: (before: number) => Promise<ExplorePage>, ke
     obs.observe(el);
     onCleanup(() => obs.disconnect());
   };
-  return { items, done, loading, error, source, more: () => load(false), reload: () => load(true), sentinel };
+
+  /**
+   * Attach to an element at the very top of the list. Whether it is on
+   * screen is how the pager knows it may insert new posts without moving
+   * anything the reader is looking at — it works with whatever element is
+   * actually scrolling, which a ref passed down from a parent would not.
+   */
+  const topMark = (el: HTMLElement) => {
+    const obs = new IntersectionObserver((entries) => {
+      const visible = entries.some((e) => e.isIntersecting);
+      setAtTop(visible);
+      if (visible) showWaiting();
+    });
+    obs.observe(el);
+    onCleanup(() => obs.disconnect());
+  };
+
+  return {
+    items,
+    done,
+    loading,
+    error,
+    source,
+    waiting: () => waiting().length,
+    showWaiting,
+    more: () => load(false),
+    reload: () => load(true),
+    sentinel,
+    topMark,
+  };
+}
+
+/** The "N new posts" button, shown only when posts are actually waiting. */
+export function NewPosts(props: { count: number; onShow: () => void }) {
+  return (
+    <Show when={props.count}>
+      <div class="sticky top-0 z-10 -mt-1 mb-2 flex justify-center">
+        <button type="button" class="btn-primary btn-sm rounded-full shadow-none" onClick={props.onShow}>
+          <ArrowUp size={12} /> {props.count} new {props.count === 1 ? "post" : "posts"}
+        </button>
+      </div>
+    </Show>
+  );
 }
 
 /** Where a page came from: node distance and operator, never an address. */
@@ -108,107 +234,40 @@ export function SourceLine(props: { page: ExplorePage | null }) {
   );
 }
 
-function Media(props: { cid: string; mime: string; sensitive?: boolean }) {
-  const [shown, setShown] = createSignal(!props.sensitive);
-  const [src] = createResource(
-    () => (shown() && props.mime.startsWith("image/") ? props.cid : null),
-    (cid) => ipc.feedMediaFetch(cid, props.mime).then(convertFileSrc).catch(() => null),
-  );
-  return (
-    <Show when={props.mime.startsWith("image/")} fallback={<Badge>{props.mime}</Badge>}>
-      <Show when={shown()} fallback={<Button variant="secondary" size="sm" onClick={() => setShown(true)}><EyeOff size={12} /> sensitive — show</Button>}>
-        <Show when={src()} fallback={<div class="skeleton h-40 w-full" />}>
-          <img src={src()!} alt="" class="max-h-96 rounded-md border border-border object-contain" />
-        </Show>
-      </Show>
-    </Show>
-  );
-}
-
-export function FeedRoute() {
-  const params = useParams<{ tab?: string; id?: string }>();
-  const navigate = useNavigate();
-  const tab = (): Tab => (params.tab as Tab) || "friends";
-  const [compose, setCompose] = createSignal<false | { wall?: string }>(false);
-  // Under /hashwall/walls/<id> the id is a wall; anywhere else it is a post.
-  const wallId = () => (tab() === "walls" && params.id && WALL_ID.test(params.id) ? params.id : null);
-  const postId = () => (params.id && !wallId() ? params.id : null);
-
+/**
+ * Circles: posts inside a private MLS group, decrypted on this device and
+ * merged into one list. They are not part of Pulse because nothing here is
+ * public — Pulse is the network, a Circle is a room.
+ */
+export function CirclesRoute() {
+  const [compose, setCompose] = createSignal(false);
   const [items, { refetch }] = createResource(
-    () => ({ tab: tab(), tick: store.ticks().feed }),
-    async (k) => {
-      if (k.tab === "friends") return { kind: "public" as const, items: await ipc.feedFriends(0, 100) };
-      if (k.tab === "following") return { kind: "public" as const, items: await ipc.feedFollowing(0, 100) };
-      if (k.tab === "walls") return { kind: "walls" as const, items: await ipc.wallsPinned() };
-      if (k.tab === "circles") return { kind: "circles" as const, items: await ipc.circlesMerged(0, 100) };
-      return { kind: "public" as const, items: [] as FeedItem[] };
-    },
+    () => ({ tick: store.ticks().circles, locked: store.locked() }),
+    (k) => (k.locked ? Promise.resolve([] as MergedItem[]) : ipc.circlesMerged(0, 100)),
   );
-
   return (
     <div class="flex h-full flex-col">
       <OfflineBanner />
-      <Show when={postId()} fallback={
-        <Show when={wallId()} fallback={
-          <div class="flex min-h-0 flex-1 flex-col">
-            <div class="flex items-center gap-2 border-b border-border px-3">
-              <Tabs
-                class="flex-1 border-b-0"
-                value={tab()}
-                onChange={(v) => navigate(`/hashwall/${v}`)}
-                tabs={[
-                  { id: "friends", label: t("feed_friends") },
-                  { id: "following", label: t("feed_following") },
-                  { id: "walls", label: t("feed_walls") },
-                  { id: "circles", label: t("feed_circles") },
-                ]}
-              />
-              <Button variant="ghost" size="sm" title="Discover posts, walls and people across the network" onClick={() => navigate("/explore")}>
-                <Hash size={13} /> {t("feed_explore")}
-              </Button>
-              <Button variant="ghost" size="icon-sm" title="Refresh" onClick={() => { void ipc.feedRefresh().catch(() => undefined); void refetch(); }}>
-                <RefreshCw size={13} />
-              </Button>
-              <Button variant="brand" size="sm" onClick={() => setCompose({})}>
-                <Plus size={13} /> {t("feed_post")}
-              </Button>
-            </div>
-            <div class="min-h-0 flex-1 overflow-auto">
-              <Show when={!items.error} fallback={<ErrorState error={items.error} onRetry={() => void refetch()} />}>
-                <div class="mx-auto max-w-2xl px-4 py-3">
-                  <Show when={tab() === "circles"}>
-                    <CirclesBar />
-                  </Show>
-                  <Show when={items()}>
-                    {(r) => (
-                      <>
-                        <Show when={r().kind === "public"}>
-                          <Show when={(r().items as FeedItem[]).length} fallback={<Empty title={t("nothing_here")}>{tab() === "friends" ? "Posts from your contacts appear here. Find people in Explore." : "Follow people from their profile to see their posts here."}</Empty>}>
-                            <For each={r().items as FeedItem[]}>{(it) => <PostCard it={it} onOpen={() => navigate(`/hashwall/${tab()}/${it.id}`)} />}</For>
-                          </Show>
-                        </Show>
-                        <Show when={r().kind === "walls"}>
-                          <WallsHome walls={r().items as WallInfo[]} onChanged={() => void refetch()} />
-                        </Show>
-                        <Show when={r().kind === "circles"}>
-                          <Show when={(r().items as MergedItem[]).length} fallback={<Empty title="No circle posts yet">Create a Circle above, or wait for one you were added to.</Empty>}>
-                            <For each={r().items as MergedItem[]}>{(m) => <CirclePost circle={m.circle} item={m.item} />}</For>
-                          </Show>
-                        </Show>
-                      </>
-                    )}
-                  </Show>
-                </div>
-              </Show>
-            </div>
+      <div class="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        <h1 class="flex-1 text-sm font-semibold">{t("feed_circles")}</h1>
+        <Button variant="ghost" size="icon-sm" title="Refresh" onClick={() => void refetch()}>
+          <RefreshCw size={13} />
+        </Button>
+        <Button variant="brand" size="sm" onClick={() => setCompose(true)}>
+          <Plus size={13} /> {t("feed_post")}
+        </Button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto">
+        <Show when={!items.error} fallback={<ErrorState error={items.error} onRetry={() => void refetch()} />}>
+          <div class="mx-auto max-w-2xl px-4 py-3">
+            <CirclesBar />
+            <Show when={(items() ?? []).length} fallback={<Empty title="No circle posts yet">Create a Circle above, or wait for one you were added to.</Empty>}>
+              <For each={items() ?? []}>{(m) => <CirclePost circle={m.circle} item={m.item} />}</For>
+            </Show>
           </div>
-        }>
-          {(id) => <WallView id={id()} onBack={() => navigate("/hashwall/walls")} onCompose={() => setCompose({ wall: id() })} />}
         </Show>
-      }>
-        {(id) => <PostView id={id()} onBack={() => (window.history.length > 1 ? window.history.back() : navigate(`/hashwall/${tab() === "post" ? "friends" : tab()}`))} />}
-      </Show>
-      <ComposeDialog open={!!compose()} onClose={() => setCompose(false)} defaultCircle={tab() === "circles"} defaultWall={(compose() || {}).wall} />
+      </div>
+      <ComposeDialog open={compose()} onClose={() => setCompose(false)} defaultCircle />
     </div>
   );
 }
@@ -221,7 +280,7 @@ export function WallChip(props: { id: string }) {
     (id) => ipc.wallsInfo(id).catch(() => null),
   );
   return (
-    <button type="button" class="badge inline-flex items-center gap-1 hover:border-brand" title="Open wall" onClick={(e) => { e.stopPropagation(); navigate(`/hashwall/walls/${props.id}`); }}>
+    <button type="button" class="badge inline-flex items-center gap-1 hover:border-brand" title="Open wall" onClick={(e) => { e.stopPropagation(); navigate(`/pulse/walls/${props.id}`); }}>
       <Megaphone size={10} /> {info()?.name ?? `${props.id.slice(0, 8)}…`}
     </button>
   );
@@ -235,6 +294,7 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
     (id) => ipc.feedThread(id).catch(() => null),
   );
   const sensitive = () => !!(props.it.payload as { sensitive?: boolean }).sensitive;
+  const [revealed, setRevealed] = createSignal(false);
   const isMe = () => store.status()?.address === props.it.author;
   const react = async (r: string) => {
     try {
@@ -247,10 +307,10 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
   return (
     <article class="card mb-2 p-3 text-[13px]" data-post={props.it.id}>
       <div class="flex items-center gap-2">
-        <button type="button" class="shrink-0" title="Open profile" onClick={() => navigate(`/people/${props.it.author}`)}>
+        <button type="button" class="shrink-0" title="Open profile" onClick={() => navigate(`/profile/${props.it.author}`)}>
           <PersonAvatar address={props.it.author} size={24} />
         </button>
-        <button type="button" class="min-w-0 font-medium hover:underline" title="Open profile" onClick={() => navigate(`/people/${props.it.author}`)}>
+        <button type="button" class="min-w-0 font-medium hover:underline" title="Open profile" onClick={() => navigate(`/profile/${props.it.author}`)}>
           <Who address={props.it.author} />
         </button>
         <Show when={props.it.kind === "REPOST"}>
@@ -288,10 +348,10 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
           </For>
         </p>
       </Show>
-      <Show when={props.it.media.length}>
-        <div class="mt-2 flex flex-wrap gap-2">
-          <For each={props.it.media}>{([cid, mime]) => <Media cid={cid} mime={mime} sensitive={sensitive()} />}</For>
-        </div>
+      <Show when={sensitive() && props.it.media.length && !revealed()} fallback={<MediaStrip item={props.it} />}>
+        <Button class="mt-2" variant="secondary" size="sm" onClick={() => setRevealed(true)}>
+          <EyeOff size={12} /> sensitive — show
+        </Button>
       </Show>
       <div class="mt-2 flex items-center gap-3 text-xs text-muted">
         <button type="button" class="inline-flex items-center gap-1 hover:text-fg" onClick={() => void react("❤")} title="React">
@@ -311,7 +371,7 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
   );
 }
 
-function PostView(props: { id: string; onBack: () => void }) {
+export function PostView(props: { id: string; onBack: () => void }) {
   const [thread, { refetch }] = createResource(
     () => ({ id: props.id, tick: store.ticks().feed }),
     // The network's view: the post plus every comment and reaction a node
@@ -404,7 +464,7 @@ export function WallCard(props: { w: WallInfo; onOpen?: () => void }) {
   );
 }
 
-function WallsHome(props: { walls: WallInfo[]; onChanged: () => void }) {
+export function WallsHome(props: { walls: WallInfo[]; onChanged: () => void }) {
   const navigate = useNavigate();
   const [create, setCreate] = createSignal(false);
   const [open, setOpen] = createSignal("");
@@ -418,16 +478,16 @@ function WallsHome(props: { walls: WallInfo[]; onChanged: () => void }) {
           <Hash size={12} /> Find walls
         </Button>
         <span class="flex-1" />
-        <Input class="h-7 w-64" placeholder="Open a wall by id or link…" value={open()} onInput={(e) => setOpen(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") { const m = open().trim().toLowerCase().match(/[0-9a-f]{64}/); if (m) navigate(`/hashwall/walls/${m[0]}`); else store.toast("That is not a wall id or link", "error"); } }} />
+        <Input class="h-7 w-64" placeholder="Open a wall by id or link…" value={open()} onInput={(e) => setOpen(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") { const m = open().trim().toLowerCase().match(/[0-9a-f]{64}/); if (m) navigate(`/pulse/walls/${m[0]}`); else store.toast("That is not a wall id or link", "error"); } }} />
       </div>
       <Show when={props.walls.length} fallback={
         <Empty title="No walls pinned yet" icon={<Megaphone size={24} />}>
           A wall is a topic — a protest, a profession, a town, a project. Open one and everyone on the network can write on it, or find active walls in Explore.
         </Empty>
       }>
-        <For each={props.walls}>{(w) => <WallCard w={w} onOpen={() => navigate(`/hashwall/walls/${w.id}`)} />}</For>
+        <For each={props.walls}>{(w) => <WallCard w={w} onOpen={() => navigate(`/pulse/walls/${w.id}`)} />}</For>
       </Show>
-      <CreateWallDialog open={create()} onClose={() => { setCreate(false); props.onChanged(); }} onCreated={(w) => navigate(`/hashwall/walls/${w.id}`)} />
+      <CreateWallDialog open={create()} onClose={() => { setCreate(false); props.onChanged(); }} onCreated={(w) => navigate(`/pulse/walls/${w.id}`)} />
     </div>
   );
 }
@@ -484,13 +544,17 @@ export function CreateWallDialog(props: { open: boolean; onClose: () => void; on
   );
 }
 
-function WallView(props: { id: string; onBack: () => void; onCompose: () => void }) {
+export function WallView(props: { id: string; onBack: () => void; onCompose: () => void }) {
   const navigate = useNavigate();
   const [info, { refetch: refetchInfo }] = createResource(
     () => props.id,
     (id) => ipc.wallsInfo(id),
   );
-  const pages = usePages((before) => ipc.wallsPage(props.id, before, 20), () => ({ id: props.id, tick: store.ticks().feed }));
+  const pages = usePages(
+    (before) => ipc.wallsPage(props.id, before, 20),
+    () => props.id,
+    () => store.ticks().feed,
+  );
   const me = () => store.status()?.address;
   const canPost = () => !!info() && (info()!.open_posting || info()!.creator === me());
   const link = () => `hashgram://wall/${props.id}`;
@@ -562,10 +626,12 @@ function WallView(props: { id: string; onBack: () => void; onCompose: () => void
           )}
         </Show>
       </Show>
+      <span ref={pages.topMark} aria-hidden="true" />
       <SourceLine page={pages.source()} />
-      <Show when={!pages.error()} fallback={<ErrorState error={pages.error()} onRetry={() => void pages.reload()} />}>
+      <NewPosts count={pages.waiting()} onShow={pages.showWaiting} />
+      <Show when={!pages.error() || pages.items().length} fallback={<ErrorState error={pages.error()} onRetry={() => void pages.reload()} />}>
         <For each={pages.items()} fallback={<Show when={!pages.loading()}><Empty title="Nothing on this wall yet">{canPost() ? "Be the first to write here." : "The creator has not posted yet."}</Empty></Show>}>
-          {(it) => <PostCard it={it} hideWall onOpen={() => navigate(`/hashwall/post/${it.id}`)} />}
+          {(it) => <PostCard it={it} hideWall onOpen={() => navigate(`/pulse/post/${it.id}`)} />}
         </For>
         <div ref={pages.sentinel} class="flex items-center justify-center py-3 text-xs text-muted">
           <Show when={pages.loading()}><span class="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" /></Show>
@@ -583,7 +649,7 @@ function WallView(props: { id: string; onBack: () => void; onCompose: () => void
 // Circles
 // ---------------------------------------------------------------------------
 
-function CirclesBar() {
+export function CirclesBar() {
   const [circles, { refetch }] = createResource(
     () => store.ticks().circles,
     () => ipc.circlesList().catch(() => [] as CircleInfo[]),
@@ -829,7 +895,7 @@ function CircleMedia(props: { circle: string; item: string; index: number; mime:
   );
 }
 
-function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircle?: boolean; defaultWall?: string }) {
+export function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircle?: boolean; defaultWall?: string }) {
   const [text, setText] = createSignal("");
   const [tags, setTags] = createSignal("");
   const [media, setMedia] = createSignal<string[]>([]);
@@ -859,6 +925,15 @@ function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircl
   const [multi, setMulti] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [stage, setStage] = createSignal<Omit<MediaProgress, "op"> | null>(null);
+  const opId = `post-${Math.random().toString(36).slice(2, 10)}`;
+  onMount(() => {
+    const p = on("media:progress", (ev) => {
+      if (ev.op !== opId) return;
+      setStage(ev.stage === "published" ? null : ev);
+    });
+    onCleanup(() => void p.then((un) => un()));
+  });
   const registered = () => store.identity()?.this_device_registered !== false;
   const [circles] = createResource(
     () => (props.open ? store.ticks().circles : null),
@@ -873,7 +948,17 @@ function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircl
     setError(null);
     try {
       if (isPublic()) {
-        await ipc.feedPost(text(), tags().split(/[\s,#]+/).filter(Boolean), media(), sensitive(), wallOf());
+        const files = media();
+        if (files.length) {
+          // Videos are measured here, where a decoder already exists; the
+          // poster frame is re-encoded on the Rust side before upload.
+          setStage({ stage: "preparing", index: 0, total: files.length, name: "" });
+          const uploads = [];
+          for (const path of files) uploads.push({ path, client: await measureVideo(path) });
+          await ipc.feedPostMedia(text(), tags().split(/[\s,#]+/).filter(Boolean), uploads, sensitive(), wallOf(), opId);
+        } else {
+          await ipc.feedPost(text(), tags().split(/[\s,#]+/).filter(Boolean), [], sensitive(), wallOf());
+        }
         store.bump("feed");
       } else {
         const p: PollInput | undefined = poll() ? { question: question(), options: options().filter((o) => o.trim()), multiple_choice: multi(), closes_at_ms: 0 } : undefined;
@@ -887,6 +972,7 @@ function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircl
       setError(errText(e));
     } finally {
       setBusy(false);
+      setStage(null);
     }
   };
   return (
@@ -944,13 +1030,26 @@ function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircl
           </Button>
           <span class="truncate text-xs text-muted">{media().map((m) => m.split(/[\\/]/).pop()).join(", ")}</span>
         </div>
+        <Show when={stage()}>
+          {(s) => (
+            <div class="flex items-center gap-2 text-xs text-muted" role="status">
+              <RefreshCw size={12} class="animate-spin" />
+              <span class="flex-1 truncate">
+                {s().stage === "preparing" && `Preparing ${s().name || "media"}…`}
+                {s().stage === "uploading" && `Uploading ${s().name || "media"} (${s().index + 1} of ${s().total})…`}
+                {s().stage === "publishing" && "Publishing…"}
+                {s().stage === "failed" && `Failed on ${s().name || "media"}`}
+              </span>
+            </div>
+          )}
+        </Show>
         <Show when={error()}>
           <Notice strong>{error()}</Notice>
         </Show>
         <Show when={!registered()}>
           <Notice strong title="Finish identity setup">
             Nodes accept signed posts only from an active device. Receive at least 0.01 HASH, then register this PC once in Wallet → Devices.
-            <Button class="mt-2" size="sm" onClick={() => { props.onClose(); window.location.hash = "/wallet/devices"; }}>
+            <Button class="mt-2" size="sm" onClick={() => { props.onClose(); go("/wallet/devices"); }}>
               Open Wallet → Devices
             </Button>
           </Notice>

@@ -178,6 +178,7 @@ Two pagination styles exist:
 | `/v1/accounts/{address}/transactions` | `limit`(50/500) | |
 | `/v1/providers` | `limit`(200/1000) | |
 | `/v1/blocks/latest` | `limit`(20/200) | |
+| `/v1/txs` | `limit`(50/500), `address`, `q` | newest first; `address` matches signer, sender or recipient; `q` is a hash prefix or a memo substring |
 | `/v1/txs/{hash}` | — | |
 
 ### 4.2 `GET /v1/leaderboards/holders`

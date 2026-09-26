@@ -1,14 +1,17 @@
-// No colour outside the tokens. Every colour literal in the stylesheets and
-// components must be one of the dark tokens, the light tokens or the one
-// accent. User content (images) is not chrome and is not covered here.
+// No colour outside the tokens, and no hue anywhere.
+//
+// The app is monochrome: every colour literal in the stylesheets and
+// components must be one of the dark tokens or one of the light tokens.
+// There is no accent hue — emphasis is contrast, so a primary action is the
+// foreground colour of its theme. User content (images) is not chrome and is
+// not covered here.
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 
 const DARK = ["#000000", "#0d0d0d", "#1a1a1a", "#262626", "#404040", "#808080", "#ffffff"];
 const LIGHT = ["#ffffff", "#f5f5f5", "#ebebeb", "#dcdcdc", "#b3b3b3", "#6b6b6b", "#0d0d0d"];
-const ACCENT = ["#7a8fa6", "#4f6479"];
-const ALLOWED = new Set([...DARK, ...LIGHT, ...ACCENT]);
+const ALLOWED = new Set([...DARK, ...LIGHT]);
 const ROOT = join(__dirname, "..", "src");
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -66,17 +69,40 @@ describe("palette", () => {
     expect(offenders, offenders.join("\n")).toEqual([]);
   });
 
-  it("defines the eight roles for both themes and exactly one accent", () => {
+  it("defines the eight roles for both themes, with no hue", () => {
     const tokens = readFileSync(join(ROOT, "styles", "tokens.css"), "utf8");
     expect(tokens).toContain("--color-*: initial");
     const dark = tokens.slice(tokens.indexOf('html[data-theme="dark"]'), tokens.indexOf('html[data-theme="light"]'));
     const light = tokens.slice(tokens.indexOf('html[data-theme="light"]'));
     const colours = (s: string) => [...s.matchAll(/--t-[a-z0-9-]+:\s*(#[0-9a-fA-F]{6})/g)].map((m) => m[1]!.toLowerCase());
-    expect(new Set(colours(dark))).toEqual(new Set([...DARK, ACCENT[0]!]));
-    expect(new Set(colours(light))).toEqual(new Set([...LIGHT, ACCENT[1]!]));
+    expect(new Set(colours(dark))).toEqual(new Set(DARK));
+    expect(new Set(colours(light))).toEqual(new Set(LIGHT));
     const roles = (s: string) => [...s.matchAll(/--t-([a-z0-9-]+):/g)].map((m) => m[1]);
     expect(roles(dark)).toEqual(["bg", "surface", "surface-2", "border", "accent", "muted", "fg", "brand"]);
     expect(roles(light)).toEqual(roles(dark));
+  });
+
+  // Grey is r == g == b; anything else is a hue, and a hue is what made a
+  // primary button look blue on a white page.
+  it("every token is a grey", () => {
+    const tokens = readFileSync(join(ROOT, "styles", "tokens.css"), "utf8");
+    const coloured = [...tokens.matchAll(/--t-[a-z0-9-]+:\s*#([0-9a-fA-F]{6})/g)]
+      .map((m) => m[1]!.toLowerCase())
+      .filter((h) => !(h.slice(0, 2) === h.slice(2, 4) && h.slice(2, 4) === h.slice(4, 6)));
+    expect(coloured, `not greys: ${coloured.join(", ")}`).toEqual([]);
+  });
+
+  // A primary action is emphasised by contrast, which is what makes it
+  // black on the light theme and white on the dark one.
+  it("emphasis is the foreground colour of the theme", () => {
+    const tokens = readFileSync(join(ROOT, "styles", "tokens.css"), "utf8");
+    for (const theme of ["dark", "light"]) {
+      const start = tokens.indexOf(`html[data-theme="${theme}"]`);
+      const block = tokens.slice(start, tokens.indexOf("}", start));
+      const fg = /--t-fg:\s*(#[0-9a-fA-F]{6})/.exec(block)?.[1];
+      const brand = /--t-brand:\s*(#[0-9a-fA-F]{6})/.exec(block)?.[1];
+      expect(brand, theme).toBe(fg);
+    }
   });
 
   it("bundles Inter locally and loads no remote font", () => {

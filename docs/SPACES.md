@@ -218,6 +218,68 @@ hashgram-client one space list; one space show $SP; one space members $SP; one s
 
 ---
 
+### 9b. The public directory
+
+A Space is private by construction: its content lives in an MLS group, so
+nobody outside the roster can read it. "Public Space" therefore does **not**
+mean an open group. It means a **public listing** that lets people find the
+Space and ask its owner for an invitation. The group itself stays shut.
+
+A listing is an ordinary `CHANNEL_CREATE` social event — the same primitive
+Topics use. That choice is deliberate: channel events already gossip across
+the network, nodes already count activity on them, and every client already
+fetches them, so the directory needs no new message type, no new table and
+no server. Any client that reads social events can build the same directory.
+
+The listing's description starts with three plain lines:
+
+```
+Hashgram Space
+Category: Technology
+Space: <hex space id>
+
+<free description>
+```
+
+Readable by design. There is no hidden encoding: someone dumping the raw
+event sees exactly what the app shows. A channel whose description does not
+begin with `Hashgram Space` is an ordinary Topic and is not listed.
+
+* **Category** must be one of `cmd_spaces::SPACE_CATEGORIES`; anything else
+  is read as `Other`. A fixed list is what makes browsing possible — free
+  text would just be hashtags with extra steps.
+* **Popularity** is the public post and poster count on the listing, as
+  reported by the node that answered the digest. It is one node's count,
+  not a network total, and the UI says so on the row.
+* **Posting** on a listing is closed: it is the owner's notice board.
+* **Joining** is the owner's decision. "Ask to join" sends them a message;
+  nothing in the protocol lets an outsider add themselves to an MLS group,
+  and nothing here pretends otherwise.
+* **Publishing is irreversible.** The event is signed and gossiped; the app
+  says so before it publishes.
+* **Owner only**, and once. `spaces_publish` refuses a non-Owner and refuses
+  a Space that is already listed. Listed space ids are remembered in
+  `settings.social.listed_spaces`, so the app knows the answer offline and
+  cannot list the same Space twice because a network lookup failed.
+
+What the listing does **not** carry: members, message, file, or any count of
+them. There is no "open Space" in this protocol — every Space is closed, and
+listing one changes whether it can be *found*, never whether it can be
+*read*. `apps/desktop/tests/spaces-privacy.test.ts` enforces that boundary
+at the source level: Space content may leave the device only through
+`send_app` (the MLS path), the commands may touch `feed()` only to create or
+read a listing, and the UI copy must keep saying so.
+
+The space id in a listing is deliberate and is **not** a capability: nothing
+in the protocol grants access by id, and membership is the only gate. It is
+there so the Owner's app can say "already listed" and a member can confirm a
+listing is theirs.
+
+Commands: `spaces_publish`, `spaces_is_listed`, `spaces_directory` (by
+`category` and `sort=popular|new`), `spaces_categories`.
+
+---
+
 ## Part II — Circles
 
 ### 10. Model

@@ -1,5 +1,12 @@
-// UI primitives. Monochrome plus one accent; motion is short and honours
-// reduced-motion. Everything here is keyboard reachable.
+// UI primitives. Monochrome; motion is short and honours reduced-motion.
+// Everything here is keyboard reachable.
+//
+// `variant="brand"` and `variant="primary"` are the same button now that
+// emphasis is contrast rather than a hue: the filled action is the theme's
+// foreground, so black on white and white on black. Both names are kept
+// because call sites use them to mean different things — "the action of
+// this screen" and "the action of this dialog" — and renaming a hundred of
+// them would be churn with no user-visible effect.
 import { splitProps, Show, For, type JSX, type ParentProps, createEffect, onCleanup, createSignal, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
 import { X, ChevronDown } from "lucide-solid";

@@ -38,7 +38,12 @@ pages![
     ("mail", "Mail", "docs/HASHMAIL.md", "mail.md"),
     ("drive", "Drive", "docs/HASHDRIVE.md", "drive.md"),
     ("people", "People", "docs/PRIVACY_MODEL.md", "people.md"),
-    ("feed", "Feed and Circles", "docs/SOCIAL_PROTOCOL.md", "feed.md"),
+    (
+        "feed",
+        "Feed and Circles",
+        "docs/SOCIAL_PROTOCOL.md",
+        "feed.md"
+    ),
     ("spaces", "Spaces", "docs/SPACES.md", "spaces.md"),
     (
         "earn",

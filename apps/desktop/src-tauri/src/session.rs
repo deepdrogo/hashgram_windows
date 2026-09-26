@@ -98,7 +98,9 @@ pub fn spawn_link(app: AppHandle, state: Arc<AppState>) {
             }
             let settings = state.settings.read().await.clone();
             let result = match config(&settings, Duration::from_secs(8)) {
-                Ok(cfg) => HashgramOne::connect_link(&cfg).await.map_err(|e| e.to_string()),
+                Ok(cfg) => HashgramOne::connect_link(&cfg)
+                    .await
+                    .map_err(|e| e.to_string()),
                 Err(e) => Err(e.message),
             };
             match result {
@@ -164,12 +166,21 @@ pub async fn reattach_link(state: &Arc<AppState>) {
     }
     let settings = state.settings.read().await.clone();
     let chain_api = settings.network.chain_api.trim().to_owned();
-    match one.replace_link(link, if chain_api.is_empty() { None } else { Some(&chain_api) }) {
+    match one.replace_link(
+        link,
+        if chain_api.is_empty() {
+            None
+        } else {
+            Some(&chain_api)
+        },
+    ) {
         Ok(()) => tracing::info!("session re-attached to the network link"),
         Err(e) => tracing::warn!(error = %e, "could not re-attach the session to the link"),
     }
 }
 
+/// The no-rejections case, which is what the tests exercise.
+#[cfg(test)]
 fn link_needs_restart(unhealthy_checks: &mut u8, peers: usize, has_store: bool) -> bool {
     link_needs_restart_with(unhealthy_checks, peers, has_store, 0)
 }
@@ -424,7 +435,7 @@ async fn spawn_sync_loop(app: AppHandle, state: Arc<AppState>) {
     let task = tauri::async_runtime::spawn(async move {
         let state = loop_state;
         loop {
-            let (delay, done) = {
+            let (delay, done, chat) = {
                 let mut g = state.one.lock().await;
                 let Some(one) = g.as_mut() else { break };
                 let r = one.sync().round().await;
@@ -450,18 +461,35 @@ async fn spawn_sync_loop(app: AppHandle, state: Arc<AppState>) {
                         st.last_error = Some(e.to_string());
                     }
                 }
-                let done = r.ok().map(|rep| UiSyncEvent::RoundDone {
-                    mail: rep.mail,
-                    drive: rep.drive,
-                    people: rep.people,
-                    circles: rep.circles,
-                    spaces: rep.spaces,
-                    feed: rep.feed,
-                    drive_committed: rep.drive_committed,
-                    elapsed_ms: rep.elapsed_ms,
+                // Chat lines the dispatcher could not route to an app
+                // module are conversations; they are stored below, outside
+                // this lock, because the store needs the session read lock.
+                let mut chat = Vec::new();
+                let done = r.ok().map(|rep| {
+                    chat = rep.chat;
+                    UiSyncEvent::RoundDone {
+                        mail: rep.mail,
+                        drive: rep.drive,
+                        people: rep.people,
+                        circles: rep.circles,
+                        spaces: rep.spaces,
+                        feed: rep.feed,
+                        drive_committed: rep.drive_committed,
+                        elapsed_ms: rep.elapsed_ms,
+                    }
                 });
-                (delay, done)
+                (delay, done, chat)
             };
+            let mut arrived = 0;
+            for r in &chat {
+                if crate::cmd_chat::accept_incoming(&state, r).await {
+                    arrived += 1;
+                }
+            }
+            crate::cmd_chat::flush_queue(&state).await;
+            if arrived > 0 {
+                let _ = app.emit("chat:changed", arrived);
+            }
             if let Some(d) = done {
                 let _ = app.emit("sync:event", d);
             }
@@ -494,9 +522,7 @@ pub fn spawn_housekeeping(app: AppHandle, state: Arc<AppState>) {
                         Some(l) => {
                             let peers = l.peers().await.len();
                             let has_store = !l.peers_with_role("store").await.is_empty();
-                            let tr = l
-                                .transport_rejections_within(Duration::from_secs(15))
-                                .await;
+                            let tr = l.transport_rejections_within(Duration::from_secs(15)).await;
                             (peers, has_store, tr)
                         }
                         None => (0, false, 0),
@@ -533,6 +559,17 @@ pub fn spawn_housekeeping(app: AppHandle, state: Arc<AppState>) {
     });
 }
 
+/// Opens a vault by passphrase on a blocking thread (Argon2id).
+pub async fn open_account(passphrase: Zeroizing<String>) -> CmdResult<Account> {
+    let vault = paths::vault_path();
+    if !vault.exists() {
+        return Err(UiError::not_found("no vault on this PC"));
+    }
+    tauri::async_runtime::spawn_blocking(move || Account::open(&vault, &passphrase, kdf()))
+        .await
+        .map_err(|e| UiError::internal(e.to_string()))?
+        .map_err(UiError::from)
+}
 #[cfg(test)]
 mod tests {
     use super::link_needs_restart;
@@ -562,16 +599,4 @@ mod tests {
         // With a peer still connected the fast path does not apply.
         assert!(!link_needs_restart_with(&mut checks, 1, false, 5));
     }
-}
-
-/// Opens a vault by passphrase on a blocking thread (Argon2id).
-pub async fn open_account(passphrase: Zeroizing<String>) -> CmdResult<Account> {
-    let vault = paths::vault_path();
-    if !vault.exists() {
-        return Err(UiError::not_found("no vault on this PC"));
-    }
-    tauri::async_runtime::spawn_blocking(move || Account::open(&vault, &passphrase, kdf()))
-        .await
-        .map_err(|e| UiError::internal(e.to_string()))?
-        .map_err(UiError::from)
 }

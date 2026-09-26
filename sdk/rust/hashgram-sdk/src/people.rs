@@ -49,6 +49,23 @@ pub struct Profile {
     pub bio: String,
     /// Avatar CID (hex).
     pub avatar_cid: String,
+    /// Cover image CID (hex).
+    #[serde(default)]
+    pub banner_cid: String,
+    /// Website the author put on their profile, as they typed it.
+    #[serde(default)]
+    pub website: String,
+    /// Country the author chose to show. Self-declared, never inferred.
+    #[serde(default)]
+    pub country: String,
+    /// Hash of the on-chain payment the author claims backs a verified
+    /// badge. A claim only: it means nothing until the transaction has been
+    /// read off the chain and checked.
+    #[serde(default)]
+    pub verify_tx: String,
+    /// Time of the profile event this was read from (s), 0 when unknown.
+    #[serde(default)]
+    pub updated_at: u64,
     /// Our contact flags for them.
     pub states: Vec<String>,
 }
@@ -270,12 +287,25 @@ impl<'a> People<'a> {
             .filter(|e| e.r#type == "PROFILE_UPDATE")
             .max_by_key(|e| (e.timestamp, e.sequence))
         {
-            if let Ok(p) = <hashgram_proto::pb::ProfileUpdate as prost::Message>::decode(
-                ev.payload.as_slice(),
-            ) {
+            if let Ok(p) =
+                <hashgram_proto::pb::ProfileUpdate as prost::Message>::decode(ev.payload.as_slice())
+            {
                 prof.display_name = p.display_name;
                 prof.bio = p.bio;
                 prof.avatar_cid = hex::encode(&p.avatar_cid);
+                prof.banner_cid = hex::encode(&p.banner_cid);
+                prof.website = p.website;
+                prof.country = p
+                    .attributes
+                    .get(crate::feed::ATTR_COUNTRY)
+                    .cloned()
+                    .unwrap_or_default();
+                prof.verify_tx = p
+                    .attributes
+                    .get(crate::feed::ATTR_VERIFY_TX)
+                    .cloned()
+                    .unwrap_or_default();
+                prof.updated_at = ev.timestamp;
             }
         }
         self.one.store.put(

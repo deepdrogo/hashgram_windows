@@ -12,5 +12,18 @@
 # means a hijacked name can at most withhold peers, never point a node at a
 # different chain.
 #
-# Empty until an operator publishes a name. Names run by different people
-# in different jurisdictions are worth more than several names run by one.
+# Names run by different people in different jurisdictions are worth more
+# than several names run by one.
+#
+# To publish the record below, add a TXT record at
+# _dnsaddr.bootstrap.hashgram.io for every node that should answer:
+#
+#   _dnsaddr.bootstrap.hashgram.io. TXT "dnsaddr=/ip4/<ip>/udp/26670/quic-v1/p2p/<peer-id>"
+#
+# Until that record exists the lookup simply finds nothing, which costs a
+# fresh client one failed DNS query and changes nothing else. The reason to
+# ship the name anyway is that it is the only bootstrap layer that can be
+# repointed without building and distributing a new binary: if the
+# addresses in bootstrap_peers.txt ever go away, this is what lets an
+# already-shipped installer still find the network.
+bootstrap.hashgram.io

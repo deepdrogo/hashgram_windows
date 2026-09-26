@@ -34,9 +34,20 @@ pub struct NetworkSettings {
     /// Devnet convenience only.
     #[serde(default)]
     pub chain_api: String,
-    /// Public indexer base URL (leaderboards, Explore). Empty = none.
+    /// Public indexer base URL (leaderboards, discovery). Empty = none.
+    ///
+    /// Kept as the first entry of [`Self::indexer_urls`]; a settings file
+    /// written by an older build still has only this one.
     #[serde(default)]
     pub indexer_url: String,
+    /// Further indexers to fall back to when the first does not answer.
+    ///
+    /// An indexer is a cache, never an authority, so having several is
+    /// cheap and losing one should not take discovery with it. One
+    /// operator's indexer going away was a single point of failure in
+    /// everything but name.
+    #[serde(default)]
+    pub indexer_urls: Vec<String>,
     /// The mail gateway's identity (`@name` or `hash1…`) for external
     /// e-mail (`ext-to:`). Empty = external sending disabled.
     #[serde(default)]
@@ -76,7 +87,9 @@ pub struct AppearanceSettings {
     /// `comfortable` | `compact`.
     #[serde(default = "default_density")]
     pub density: String,
-    /// UI language: `en` | `ka`.
+    /// UI language. `en` is the only complete one, so it is the only one
+    /// accepted; see `src/lib/i18n.ts` for why a partial table is worse
+    /// than none.
     #[serde(default = "default_language")]
     pub language: String,
 }
@@ -98,6 +111,49 @@ impl Default for AppearanceSettings {
             reduced_motion: false,
             density: default_density(),
             language: default_language(),
+        }
+    }
+}
+
+/// Social preferences.
+///
+/// `local_country` is what Pulse's Local tab filters on. It is a choice the
+/// user makes, never a guess from an address, a connection or a clock: the
+/// app has no geolocation of any kind.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SocialSettings {
+    /// Two-letter country code, or empty for no Local tab.
+    #[serde(default)]
+    pub local_country: String,
+    /// Who may start a Chat: `everyone` | `nobody`.
+    #[serde(default = "default_who_can_chat")]
+    pub who_can_chat: String,
+    /// Hex ids of the Spaces this device has published a public listing
+    /// for, so a Space can be shown as listed without asking the network
+    /// and cannot be listed twice by mistake.
+    ///
+    /// Only listed Spaces appear here, and a listing is public already, so
+    /// this file learns nothing that is not.
+    #[serde(default)]
+    pub listed_spaces: Vec<String>,
+}
+
+fn default_who_can_chat() -> String {
+    "everyone".to_owned()
+}
+
+// Written by hand rather than derived. A settings file from a build before
+// this section existed has no `social` object at all, and `#[serde(default)]`
+// on the *field* fills it with `SocialSettings::default()` — the derived
+// version of which would leave `who_can_chat` empty, which `validate`
+// refuses. Every save then failed with "who may chat must be everyone or
+// nobody", including the one the theme switch makes.
+impl Default for SocialSettings {
+    fn default() -> Self {
+        Self {
+            local_country: String::new(),
+            who_can_chat: default_who_can_chat(),
+            listed_spaces: Vec::new(),
         }
     }
 }
@@ -197,6 +253,9 @@ pub struct Settings {
     /// Notifications.
     #[serde(default)]
     pub notifications: NotificationSettings,
+    /// Social.
+    #[serde(default)]
+    pub social: SocialSettings,
     /// Mail presentation.
     #[serde(default)]
     pub mail: MailPrefs,
@@ -224,6 +283,7 @@ impl Default for Settings {
                 bootstrap: Vec::new(),
                 chain_api: String::new(),
                 indexer_url: String::new(),
+                indexer_urls: Vec::new(),
                 gateway_address: String::new(),
             },
             security: SecuritySettings {
@@ -233,6 +293,7 @@ impl Default for Settings {
             },
             appearance: AppearanceSettings::default(),
             notifications: NotificationSettings::default(),
+            social: SocialSettings::default(),
             mail: MailPrefs::default(),
             updates: UpdateSettings {
                 auto_check: true,
@@ -254,13 +315,21 @@ impl Settings {
     /// A 0.1.x file is read too: unknown sections are ignored and new ones
     /// take their defaults.
     pub fn load(path: &Path) -> Self {
-        match std::fs::read(path) {
+        let mut s: Self = match std::fs::read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "settings unreadable; using defaults");
                 Self::default()
             }),
             Err(_) => Self::default(),
+        };
+        // A value this build no longer offers is corrected on the way in,
+        // not rejected. A stored choice that fails validation turns the next
+        // unrelated save — a theme toggle, say — into an error the user
+        // cannot explain or fix.
+        if s.appearance.language != "en" {
+            s.appearance.language = default_language();
         }
+        s
     }
 
     /// Writes settings atomically.
@@ -274,25 +343,45 @@ impl Settings {
         std::fs::rename(&tmp, path)
     }
 
-    /// The indexer URL, if one is configured and looks like a URL.
+    /// The first configured indexer, if one looks like a URL.
     #[must_use]
     pub fn indexer(&self) -> Option<&str> {
-        let u = self.network.indexer_url.trim();
-        if u.starts_with("https://") || u.starts_with("http://") {
-            Some(u)
-        } else {
-            None
-        }
+        self.indexers().into_iter().next()
+    }
+
+    /// Every configured indexer, in the order to try them.
+    #[must_use]
+    pub fn indexers(&self) -> Vec<&str> {
+        let looks_like_url = |u: &&str| u.starts_with("https://") || u.starts_with("http://");
+        std::iter::once(self.network.indexer_url.trim())
+            .chain(self.network.indexer_urls.iter().map(|u| u.trim()))
+            .filter(looks_like_url)
+            .fold(Vec::new(), |mut acc, u| {
+                if !acc.contains(&u) {
+                    acc.push(u);
+                }
+                acc
+            })
     }
 
     /// Validates the parts a user can mistype.
     pub fn validate(&self) -> Result<(), String> {
-        let u = self.network.indexer_url.trim();
-        if !u.is_empty() && !(u.starts_with("https://") || u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost")) {
-            return Err("indexer URL must be https:// (plain http only on this PC)".into());
+        for u in std::iter::once(&self.network.indexer_url).chain(&self.network.indexer_urls) {
+            let u = u.trim();
+            if !u.is_empty()
+                && !(u.starts_with("https://")
+                    || u.starts_with("http://127.0.0.1")
+                    || u.starts_with("http://localhost"))
+            {
+                return Err("indexer URL must be https:// (plain http only on this PC)".into());
+            }
         }
         let c = self.network.chain_api.trim();
-        if !c.is_empty() && !(c.starts_with("https://") || c.starts_with("http://127.0.0.1") || c.starts_with("http://localhost")) {
+        if !c.is_empty()
+            && !(c.starts_with("https://")
+                || c.starts_with("http://127.0.0.1")
+                || c.starts_with("http://localhost"))
+        {
             return Err("chain API must be https:// (plain http only on this PC)".into());
         }
         if self.network.kind == NetworkKind::Devnet {
@@ -304,8 +393,20 @@ impl Settings {
         if !["dark", "light", "system"].contains(&self.appearance.theme.as_str()) {
             return Err("theme must be dark, light or system".into());
         }
-        if !["en", "ka"].contains(&self.appearance.language.as_str()) {
-            return Err("language must be en or ka".into());
+        if !self.appearance.language.is_empty() && self.appearance.language != "en" {
+            return Err("English is the only complete translation".into());
+        }
+        let country = self.social.local_country.trim();
+        if !country.is_empty()
+            && (country.len() != 2 || !country.chars().all(|c| c.is_ascii_alphabetic()))
+        {
+            return Err("the local country is a two-letter code, or empty".into());
+        }
+        // Empty is "not set", which reads as the default rather than as an
+        // error: a stricter check here only ever punished a user upgrading
+        // from a build that had no such setting.
+        if !["", "everyone", "nobody"].contains(&self.social.who_can_chat.as_str()) {
+            return Err("who may chat must be everyone or nobody".into());
         }
         Ok(())
     }
@@ -314,6 +415,44 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_file_from_before_the_social_section_still_saves() {
+        // The theme switch saves the whole settings object. A file written
+        // by an older build has no `social` key, and if the default for it
+        // were the derived one this would fail validation with "who may
+        // chat must be everyone or nobody" — which is exactly what it did.
+        let old = r#"{
+            "network": {"kind":"mainnet","devnet_genesis_hash":"","bootstrap":[],"chain_api":"","indexer_url":"","gateway_address":""},
+            "security": {"auto_lock_minutes":15,"hello_enabled":false,"clipboard_clear_secs":30},
+            "appearance": {"theme":"dark","reduced_motion":false,"density":"comfortable","language":"en"},
+            "updates": {"auto_check":true,"channel":"stable"},
+            "advanced": {"log_level":"info"}
+        }"#;
+        let mut s: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(s.social.who_can_chat, "everyone");
+        assert!(s.validate().is_ok(), "{:?}", s.validate());
+
+        // And switching the theme on it still validates.
+        s.appearance.theme = "light".into();
+        assert!(s.validate().is_ok());
+    }
+
+    /// A language this build dropped must not poison the file: the next
+    /// save of anything at all would fail validation otherwise.
+    #[test]
+    fn a_retired_language_is_corrected_on_load_not_rejected() {
+        let d = std::env::temp_dir().join(format!("hg-lang-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&d);
+        let p = d.join("settings.json");
+        let mut s = Settings::default();
+        s.appearance.language = "ka".into();
+        s.save(&p).unwrap();
+        let back = Settings::load(&p);
+        assert_eq!(back.appearance.language, "en");
+        assert!(back.validate().is_ok());
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn defaults_are_mainnet_with_no_endpoints() {

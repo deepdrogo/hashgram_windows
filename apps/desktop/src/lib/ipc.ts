@@ -99,11 +99,15 @@ export interface Settings {
     bootstrap: string[];
     chain_api: string;
     indexer_url: string;
+    /** Further indexers to try when the first does not answer. */
+    indexer_urls: string[];
     gateway_address: string;
   };
   security: { auto_lock_minutes: number; hello_enabled: boolean; clipboard_clear_secs: number };
-  appearance: { theme: "dark" | "light" | "system"; reduced_motion: boolean; density: "comfortable" | "compact"; language: "en" | "ka" };
+  appearance: { theme: "dark" | "light" | "system"; reduced_motion: boolean; density: "comfortable" | "compact"; language: "en" };
   notifications: { mail: boolean; requests: boolean; spaces: boolean; circles: boolean };
+  /** Social preferences. The country is chosen by hand; nothing is inferred. */
+  social: { local_country: string; who_can_chat: "everyone" | "nobody" };
   mail: { threaded: boolean; mark_read_after_secs: number };
   updates: { auto_check: boolean; channel: string };
   advanced: { log_level: string };
@@ -338,6 +342,30 @@ export interface FolderEntryView {
   size: number;
   modified_at_ms: number;
 }
+/** One file the composer is publishing. */
+export interface MediaUpload {
+  path: string;
+  client: { width: number; height: number; duration_ms: number; poster_base64: string };
+}
+/** How far a post with attachments has got. */
+export interface MediaProgress {
+  op: string;
+  stage: "preparing" | "uploading" | "publishing" | "published" | "failed";
+  index: number;
+  total: number;
+  name: string;
+}
+/**
+ * What the nodes we could reach said about a blob. Not a survey of the
+ * network: a provider that is offline may hold a copy this never saw.
+ */
+export interface Availability {
+  complete: number;
+  partial: number;
+  asked: number;
+  answered: number;
+  target: number;
+}
 export interface DriveProgress {
   op: string;
   stage: "reading" | "encrypting" | "uploading" | "done" | "failed";
@@ -361,8 +389,31 @@ export interface Profile {
   display_name: string;
   bio: string;
   avatar_cid: string;
+  banner_cid: string;
+  website: string;
+  country: string;
+  updated_at: number;
   states: string[];
 }
+/** Where a profile's numbers came from: an indexer, a complete local log, or part of one. */
+export type StatsSource = "indexer" | "device" | "partial";
+export interface ProfileStats {
+  posts: number;
+  replies: number;
+  media: number;
+  likes: number;
+  following: number;
+  /** null when nothing could answer it — never a guess. */
+  followers: number | null;
+  first_event: number;
+  source: StatsSource;
+}
+export interface ProfileView extends Profile {
+  is_me: boolean;
+  following: boolean;
+  stats: ProfileStats;
+}
+export type ProfileTab = "posts" | "replies" | "media" | "likes";
 export interface ContactRecord {
   address: string;
   username: string;
@@ -378,18 +429,122 @@ export interface CardView {
 }
 
 // Feed / circles
+/** One picture, video or file attached to an event. */
+export interface PostMedia {
+  cid: string;
+  mime: string;
+  size: number;
+  kind: string;
+  /** 0 when the author's client did not measure it. */
+  width: number;
+  height: number;
+  duration_ms: number;
+  /** Poster frame CID, "" when there is none. */
+  poster_cid: string;
+}
 export interface FeedItem {
   id: string;
   kind: string;
   author: string;
   timestamp: number;
   payload: Record<string, unknown>;
-  media: [string, string, number][];
+  media: PostMedia[];
   visibility: string;
   /** Wall (channel) hex id, "" for none. */
   channel: string;
   /** Post replied to, hex id, "" for none. */
   reply_to: string;
+}
+// Chats
+/** One conversation in the list. */
+export interface ConversationView {
+  id: string;
+  peer: string;
+  members: string[];
+  name: string;
+  direct: boolean;
+  last_at_ms: number;
+  last_text: string;
+  unread: number;
+}
+/** One message. `state` is what this device knows, not a read receipt. */
+export interface ChatMessage {
+  id: string;
+  group_id: string;
+  sender: string;
+  at_ms: number;
+  outgoing: boolean;
+  state: "sent" | "queued" | "failed";
+  text: string;
+}
+/**
+ * A file in a message. What opens it — the CID, key and nonce — stays on
+ * the Rust side; the webview asks for an index and gets a decrypted path.
+ */
+export interface ChatAttachment {
+  message_id: string;
+  index: number;
+  name: string;
+  mime: string;
+  size: number;
+  kind: "image" | "video" | "audio" | "file";
+  width: number;
+  height: number;
+  duration_ms: number;
+}
+export interface ChatPage {
+  messages: ChatMessage[];
+  attachments: ChatAttachment[];
+}
+
+// Your node
+export type NodeState =
+  | "not_installed"
+  | "stopped"
+  | "starting"
+  | "connecting"
+  | "syncing"
+  | "running"
+  | "degraded"
+  | "stopping"
+  | "crashed"
+  | "error";
+/** What the app knows about the node it started. Spawned is not running. */
+export interface NodeStatus {
+  state: NodeState;
+  message: string;
+  pid: number | null;
+  uptime_secs: number;
+  version: string;
+  peer_id: string;
+  peers: number;
+  height: number;
+  storage_used: number;
+  storage_quota: number;
+  roles: string[];
+  restarts: number;
+  installed: boolean;
+  configured: boolean;
+  starts_at_logon: boolean;
+  home: string;
+}
+/** One condition checked before the node is launched. */
+export interface NodeCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+  blocking: boolean;
+}
+
+/** A story. `expires_at` is when active surfaces stop showing it. */
+export interface Story {
+  id: string;
+  author: string;
+  caption: string;
+  media: PostMedia[];
+  created_at: number;
+  expires_at: number;
+  sensitive: boolean;
 }
 export interface PostThread {
   post: FeedItem;
@@ -549,6 +704,19 @@ export interface SpaceSummary {
   members: number;
   group_id: string;
   created_at_ms: number;
+}
+/** A public directory listing for a Space. */
+export interface SpaceListing {
+  listing: string;
+  space: string;
+  name: string;
+  category: string;
+  description: string;
+  owner: string;
+  posts: number;
+  authors: number;
+  last_post: number;
+  created_at: number;
 }
 export interface SpaceMember {
   address: string;
@@ -871,6 +1039,7 @@ export const ipc = {
   driveSearch: (q: string, limit?: number) => call<EntryView[]>("drive_search", { q, limit }),
   driveEntry: (id: string) => call<EntryView | null>("drive_entry", { id }),
   driveVersions: (id: string) => call<VersionView[]>("drive_versions", { id }),
+  driveAvailability: (id: string) => call<Availability>("drive_availability", { id }),
   driveUsage: () => call<DriveUsage>("drive_usage"),
   driveResolvePath: (path: string) => call<string | null>("drive_resolve_path", { path }),
   driveMkdir: (parent: string, name: string) => call<string>("drive_mkdir", { parent, name }),
@@ -930,6 +1099,27 @@ export const ipc = {
   feedThread: (post: string) => call<PostThread | null>("feed_thread", { post }),
   feedPost: (text: string, hashtags: string[], mediaPaths: string[], sensitive: boolean, channel?: string) =>
     call<string>("feed_post", { text, hashtags, mediaPaths, sensitive, channel }),
+  feedPostMedia: (text: string, hashtags: string[], files: MediaUpload[], sensitive: boolean, channel?: string, op?: string) =>
+    call<string>("feed_post_media", { text, hashtags, files, sensitive, channel, op }),
+  // chats
+  chatList: () => call<ConversationView[]>("chat_list"),
+  chatOpen: (address: string) => call<string>("chat_open", { address }),
+  chatCreateGroup: (name: string, members: string[]) => call<string>("chat_create_group", { name, members }),
+  chatAddMember: (conversation: string, address: string) => call<void>("chat_add_member", { conversation, address }),
+  chatLeave: (conversation: string) => call<void>("chat_leave", { conversation }),
+  chatHistory: (conversation: string, beforeMs?: number, limit?: number) => call<ChatPage>("chat_history", { conversation, beforeMs, limit }),
+  chatSend: (conversation: string, text: string) => call<ChatMessage>("chat_send", { conversation, text }),
+  chatSendMedia: (conversation: string, text: string, files: MediaUpload[]) => call<ChatMessage>("chat_send_media", { conversation, text, files }),
+  chatAttachmentOpen: (message: string, index: number) => call<string>("chat_attachment_open", { message, index }),
+  chatFlush: () => call<number>("chat_flush"),
+  chatMarkRead: (conversation: string, atMs: number) => call<void>("chat_mark_read", { conversation, atMs }),
+  chatSearch: (query: string, limit?: number) => call<ChatMessage[]>("chat_search", { query, limit }),
+  chatUnread: () => call<number>("chat_unread"),
+
+  storyCreate: (caption: string, file: MediaUpload, ttlHours: number, sensitive: boolean, op?: string) =>
+    call<string>("story_create", { caption, file, ttlHours, sensitive, op }),
+  storiesActive: () => call<Story[]>("stories_active"),
+  storiesOf: (address: string) => call<Story[]>("stories_of", { address }),
   feedComment: (post: string, text: string) => call<string>("feed_comment", { post, text }),
   feedReact: (target: string, reaction: string) => call<string>("feed_react", { target, reaction }),
   feedRepost: (post: string, comment: string) => call<string>("feed_repost", { post, comment }),
@@ -939,6 +1129,7 @@ export const ipc = {
   feedFollows: () => call<string[]>("feed_follows"),
   feedProfileUpdate: (name: string, bio: string, avatarPath?: string) => call<string>("feed_profile_update", { name, bio, avatarPath }),
   feedMediaFetch: (cid: string, mime: string) => call<string>("feed_media_fetch", { cid, mime }),
+  feedMediaOpen: (cid: string, mime: string) => call<string>("feed_media_open", { cid, mime }),
   circlesList: () => call<CircleInfo[]>("circles_list"),
   circlesCreate: (name: string, description: string, members: string[]) => call<string>("circles_create", { name, description, members }),
   circlesAddMember: (circle: string, member: string) => call<void>("circles_add_member", { circle, member }),
@@ -968,6 +1159,14 @@ export const ipc = {
   peopleAvatar: (cid: string) => call<string>("people_avatar", { cid }),
   profileMe: () => call<MyProfile>("profile_me"),
   profileMyEvents: (before?: number, limit?: number) => call<FeedItem[]>("profile_my_events", { before, limit }),
+
+  // social profiles
+  profileOf: (address: string) => call<ProfileView>("profile_of", { address }),
+  profileMine: () => call<ProfileView>("profile_mine"),
+  profileSave: (p: { displayName: string; bio: string; website: string; country: string; avatarCid: string; bannerCid: string }) => call<string>("profile_save", p),
+  profileUploadImage: (path: string) => call<string>("profile_upload_image", { path }),
+  profileTimeline: (address: string, tab: ProfileTab, before?: number, limit?: number) => call<FeedItem[]>("profile_timeline", { address, tab, before, limit }),
+  profileFollowList: (address: string, which: "followers" | "following") => call<string[]>("profile_follow_list", { address, which }),
   networkHolders: (limit?: number) => call<Holders>("network_holders", { limit }),
   networkProviders: () => call<ProviderStatus[]>("network_providers"),
 
@@ -987,6 +1186,7 @@ export const ipc = {
   spacesComment: (space: string, post: string, text: string) => call<string>("spaces_comment", { space, post, text }),
   spacesShareDrive: (space: string, entry: string, path: string, live: boolean) => call<string>("spaces_share_drive", { space, entry, path, live }),
   spacesUnshareDrive: (space: string, share: string) => call<string>("spaces_unshare_drive", { space, share }),
+  spacesChatOpen: (space: string) => call<string>("spaces_chat_open", { space }),
   spacesMail: (space: string, subject: string, body: string) => call<string>("spaces_mail", { space, subject, body }),
   spacesDriveDownload: (space: string, share: string, outPath: string) => call<number>("spaces_drive_download", { space, share, outPath }),
   spacesDriveOpen: (space: string, share: string) => call<string>("spaces_drive_open", { space, share }),
@@ -1006,8 +1206,12 @@ export const ipc = {
   nodeOverview: () => call<NodeOverview>("node_overview"),
   nodeConfigure: (setup: NodeSetup) => call<string>("node_configure", { setup }),
   nodeInstall: () => call<Registration>("node_install"),
-  nodeStart: () => call<void>("node_start"),
+  nodeStart: () => call<number>("node_start"),
   nodeStop: () => call<void>("node_stop"),
+  nodeStatus: () => call<NodeStatus>("node_status"),
+  nodePreflight: () => call<NodeCheck[]>("node_preflight"),
+  nodeLogs: () => call<string[]>("node_logs"),
+  nodeOpenFolder: () => call<void>("node_open_folder"),
   nodeUninstall: () => call<void>("node_uninstall"),
   nodeGenerateColdAddress: () => call<ColdAddress>("node_generate_cold_address"),
   nodeLogTail: (lines?: number) => call<string>("node_log_tail", { lines }),
@@ -1043,6 +1247,16 @@ export const ipc = {
   networkSupply: () => call<Record<string, unknown>>("network_supply"),
   networkTop: (what: "holders" | "validators" | "providers" | "earners", limit?: number) => call<unknown | null>("network_top", { what, limit }),
   networkStats: () => call<unknown | null>("network_stats"),
+  verifyTerms: () => call<{ price_uhash: string; price_hash: string; destination: string | null; destination_label: string; memo: string }>("verify_terms"),
+  verifyStatus: (address: string) => call<unknown>("verify_status", { address }),
+  verifyPurchase: (confirm: string) => call<unknown>("verify_purchase", { confirm }),
+  verifyRecord: (tx: string) => call<unknown>("verify_record", { tx }),
+  spacesPublish: (space: string, category: string, description: string) => call<unknown>("spaces_publish", { space, category, description }),
+  spacesDirectory: (category?: string, sort?: "popular" | "new") => call<SpaceListing[]>("spaces_directory", { category, sort }),
+  spacesIsListed: (space: string) => call<boolean>("spaces_is_listed", { space }),
+  spacesCategories: () => call<string[]>("spaces_categories"),
+  networkTransactions: (a: { address?: string; q?: string; limit?: number }) => call<unknown | null>("network_transactions", a),
+  networkTransaction: (hash: string) => call<unknown | null>("network_transaction", { hash }),
   netReconnect: () => call<void>("net_reconnect"),
   netForgetPeers: () => call<void>("net_forget_peers"),
   diagnosticsExport: () => call<string>("diagnostics_export"),
@@ -1085,6 +1299,8 @@ export interface EventMap {
   "net:changed": null;
   "tx:update": { hash: string; state: string; height?: number; raw_log?: string };
   "drive:progress": DriveProgress;
+  "media:progress": MediaProgress;
+  "chat:changed": number;
   "deep-link": { url: string };
 }
 

@@ -19,6 +19,27 @@ pub const DENOM: &str = "uhash";
 /// SLIP-0044 coin type, shared with the Go tooling.
 pub const COIN_TYPE: u32 = 118;
 
+/// The address of a Cosmos SDK module account, derived the way the chain
+/// derives it: bech32 of the first twenty bytes of `SHA-256(name)`.
+///
+/// This is `authtypes.NewModuleAddress` in Go — a pure function of the
+/// module's name, with no key behind it and nothing to look up. It is here
+/// so a client can *name* a module account (the community pool, say) rather
+/// than carry a hard-coded address that a typo could point at a stranger.
+///
+/// Deriving is not the same as trusting: anything about to send money to
+/// one of these should still ask the chain whether the address really is
+/// that module's account, and refuse if the chain cannot confirm it.
+#[must_use]
+pub fn module_address(name: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(name.as_bytes());
+    let truncated: Vec<u8> = digest.into_iter().take(20).collect();
+    AccountId::new(BECH32_PREFIX, &truncated)
+        .ok()
+        .map(|a| a.to_string())
+}
+
 /// Why a wallet could not be built.
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {

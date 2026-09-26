@@ -236,9 +236,18 @@ impl RateLimiter {
             }
         }
         let b = m.entry(author.to_owned()).or_insert(AuthorBuckets {
-            any: Bucket { tokens: ANY_BURST, last: now },
-            posts: Bucket { tokens: POST_BURST, last: now },
-            daily: Bucket { tokens: DAILY_BURST, last: now },
+            any: Bucket {
+                tokens: ANY_BURST,
+                last: now,
+            },
+            posts: Bucket {
+                tokens: POST_BURST,
+                last: now,
+            },
+            daily: Bucket {
+                tokens: DAILY_BURST,
+                last: now,
+            },
         });
         // Check the strictest applicable bucket first so a refusal does not
         // consume from the others.
@@ -675,21 +684,22 @@ impl SocialService {
         // full. Shared by every index walk below.
         let mut scanned = 0usize;
         let mut last_ts = 0u64;
-        let mut push = |id: &[u8], ts: u64, out: &mut Vec<pb::SocialEvent>| -> anyhow::Result<bool> {
-            scanned += 1;
-            last_ts = ts;
-            if blocked(id) {
-                return Ok(out.len() >= limit);
-            }
-            if let Some(v) = events.get(id)? {
-                if let Ok(ev) = pb::SocialEvent::decode(v.value()) {
-                    if filter.passes(&ev) {
-                        out.push(ev);
+        let mut push =
+            |id: &[u8], ts: u64, out: &mut Vec<pb::SocialEvent>| -> anyhow::Result<bool> {
+                scanned += 1;
+                last_ts = ts;
+                if blocked(id) {
+                    return Ok(out.len() >= limit);
+                }
+                if let Some(v) = events.get(id)? {
+                    if let Ok(ev) = pb::SocialEvent::decode(v.value()) {
+                        if filter.passes(&ev) {
+                            out.push(ev);
+                        }
                     }
                 }
-            }
-            Ok(out.len() >= limit || scanned >= MAX_TIMELINE_SCAN)
-        };
+                Ok(out.len() >= limit || scanned >= MAX_TIMELINE_SCAN)
+            };
 
         if !f.ids.is_empty() {
             for id in f.ids.iter().take(limit) {
@@ -1013,7 +1023,10 @@ impl SocialService {
             authors: window_authors,
             total_events: totals.events,
             total_authors: totals.authors,
-            top_authors: top_authors.into_iter().take(MAX_DIGEST_ENTRIES as usize).collect(),
+            top_authors: top_authors
+                .into_iter()
+                .take(MAX_DIGEST_ENTRIES as usize)
+                .collect(),
             top_hashtags: top_hashtags
                 .into_iter()
                 .take(MAX_DIGEST_ENTRIES as usize)
@@ -1354,7 +1367,14 @@ mod tests {
         e
     }
 
-    fn post(author: &str, seq: u64, ts: u64, text: &str, tags: &[&str], channel: &[u8]) -> pb::SocialEvent {
+    fn post(
+        author: &str,
+        seq: u64,
+        ts: u64,
+        text: &str,
+        tags: &[&str],
+        channel: &[u8],
+    ) -> pb::SocialEvent {
         typed(
             author,
             seq,
@@ -1388,10 +1408,21 @@ mod tests {
         );
         assert!(s.store(&wall).unwrap());
         for i in 0..30u64 {
-            let tags: &[&str] = if i % 3 == 0 { &["#Georgia", "news"] } else { &["news"] };
+            let tags: &[&str] = if i % 3 == 0 {
+                &["#Georgia", "news"]
+            } else {
+                &["news"]
+            };
             let ch: &[u8] = if i % 5 == 0 { &wall.id } else { &[] };
-            s.store(&post("hash1alice", i, 2_000 + i, &format!("post {i}"), tags, ch))
-                .unwrap();
+            s.store(&post(
+                "hash1alice",
+                i,
+                2_000 + i,
+                &format!("post {i}"),
+                tags,
+                ch,
+            ))
+            .unwrap();
         }
         // Follows are not posts and must be filtered out by `types`.
         s.store(&typed(
@@ -1399,7 +1430,10 @@ mod tests {
             0,
             2_500,
             "FOLLOW",
-            pb::Follow { target: "hash1alice".into() }.encode_to_vec(),
+            pb::Follow {
+                target: "hash1alice".into(),
+            }
+            .encode_to_vec(),
         ))
         .unwrap();
 
@@ -1430,7 +1464,12 @@ mod tests {
             .unwrap();
         // The +1 cursor re-serves the boundary second; the client dedups.
         assert_eq!(p2.events[0].timestamp, 2_020);
-        let mut all: Vec<u64> = p1.events.iter().chain(&p2.events).map(|e| e.timestamp).collect();
+        let mut all: Vec<u64> = p1
+            .events
+            .iter()
+            .chain(&p2.events)
+            .map(|e| e.timestamp)
+            .collect();
         all.dedup();
         assert_eq!(all.len(), 19);
 
@@ -1456,7 +1495,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(on_wall.events.len(), 6);
-        assert!(on_wall.events.iter().all(|e| e.r#type == "POST_CREATE"), "the wall's own creation is not a post");
+        assert!(
+            on_wall.events.iter().all(|e| e.r#type == "POST_CREATE"),
+            "the wall's own creation is not a post"
+        );
 
         let latest = s
             .fetch_page(
@@ -1469,7 +1511,10 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(latest.events.iter().map(|e| e.sequence).collect::<Vec<_>>(), vec![29, 28, 27]);
+        assert_eq!(
+            latest.events.iter().map(|e| e.sequence).collect::<Vec<_>>(),
+            vec![29, 28, 27]
+        );
     }
 
     #[test]
@@ -1484,7 +1529,12 @@ mod tests {
                 i,
                 t - 400 + i,
                 "COMMENT_CREATE",
-                pb::CommentCreate { post: p.id.clone(), text: "hi".into(), ..Default::default() }.encode_to_vec(),
+                pb::CommentCreate {
+                    post: p.id.clone(),
+                    text: "hi".into(),
+                    ..Default::default()
+                }
+                .encode_to_vec(),
             ))
             .unwrap();
         }
@@ -1493,28 +1543,60 @@ mod tests {
             0,
             t - 300,
             "REACTION",
-            pb::Reaction { target: p.id.clone(), reaction: "❤".into() }.encode_to_vec(),
+            pb::Reaction {
+                target: p.id.clone(),
+                reaction: "❤".into(),
+            }
+            .encode_to_vec(),
         ))
         .unwrap();
         // Old: outside a one-day window.
-        s.store(&post("hash1old", 0, t - 10 * 86_400, "ancient", &[], &[])).unwrap();
+        s.store(&post("hash1old", 0, t - 10 * 86_400, "ancient", &[], &[]))
+            .unwrap();
 
         let under = s
-            .fetch_page(&pb::EventFetch { target: p.id.clone(), ..Default::default() }, None)
+            .fetch_page(
+                &pb::EventFetch {
+                    target: p.id.clone(),
+                    ..Default::default()
+                },
+                None,
+            )
             .unwrap();
         assert_eq!(under.events.len(), 4);
         assert_eq!(under.events[0].r#type, "COMMENT_CREATE", "oldest first");
         assert_eq!(under.events[3].r#type, "REACTION");
 
         let d = s
-            .digest(&pb::SocialDigest { window_secs: 86_400, limit: 10 }, None)
+            .digest(
+                &pb::SocialDigest {
+                    window_secs: 86_400,
+                    limit: 10,
+                },
+                None,
+            )
             .unwrap();
         assert_eq!(d.events, 5);
         assert_eq!(d.total_events, 6);
         assert_eq!(d.total_authors, 4);
-        let alice = d.top_authors.iter().find(|a| a.author == "hash1alice").unwrap();
-        assert_eq!((alice.posts, alice.comments_received, alice.reactions_received), (1, 3, 1));
-        let bob = d.top_authors.iter().find(|a| a.author == "hash1bob").unwrap();
+        let alice = d
+            .top_authors
+            .iter()
+            .find(|a| a.author == "hash1alice")
+            .unwrap();
+        assert_eq!(
+            (
+                alice.posts,
+                alice.comments_received,
+                alice.reactions_received
+            ),
+            (1, 3, 1)
+        );
+        let bob = d
+            .top_authors
+            .iter()
+            .find(|a| a.author == "hash1bob")
+            .unwrap();
         assert_eq!(bob.comments, 3);
         assert_eq!(d.top_authors[0].author, "hash1bob", "most active first");
         assert_eq!(d.top_hashtags[0].tag, "hello");
@@ -1537,15 +1619,36 @@ mod tests {
             let txn = db.begin_write().unwrap();
             {
                 let mut events = txn.open_table(EVENTS).unwrap();
-                events.insert(p.id.as_slice(), p.encode_to_vec().as_slice()).unwrap();
-                txn.open_table(BY_AUTHOR).unwrap().insert(("hash1alice", 0u64, p.id.as_slice()), ()).unwrap();
-                txn.open_table(BY_TIME).unwrap().insert((10u64, p.id.as_slice()), ()).unwrap();
+                events
+                    .insert(p.id.as_slice(), p.encode_to_vec().as_slice())
+                    .unwrap();
+                txn.open_table(BY_AUTHOR)
+                    .unwrap()
+                    .insert(("hash1alice", 0u64, p.id.as_slice()), ())
+                    .unwrap();
+                txn.open_table(BY_TIME)
+                    .unwrap()
+                    .insert((10u64, p.id.as_slice()), ())
+                    .unwrap();
             }
             txn.commit().unwrap();
         }
-        let s = SocialService::open(db, "hashgram-devnet", Arc::new(PermissiveAuthority), 90, 1_000).unwrap();
+        let s = SocialService::open(
+            db,
+            "hashgram-devnet",
+            Arc::new(PermissiveAuthority),
+            90,
+            1_000,
+        )
+        .unwrap();
         let by_tag = s
-            .fetch_page(&pb::EventFetch { hashtag: "tag".into(), ..Default::default() }, None)
+            .fetch_page(
+                &pb::EventFetch {
+                    hashtag: "tag".into(),
+                    ..Default::default()
+                },
+                None,
+            )
             .unwrap();
         assert_eq!(by_tag.events.len(), 1);
     }
@@ -1556,7 +1659,10 @@ mod tests {
         let t = 1_000_000u64;
         // A person: a post every few minutes all day is fine.
         for i in 0..100u64 {
-            assert!(r.allow("hash1alice", "POST_CREATE", t + i * 300), "post {i}");
+            assert!(
+                r.allow("hash1alice", "POST_CREATE", t + i * 300),
+                "post {i}"
+            );
         }
         // A script: six posts in one second are allowed, the seventh is not.
         for _ in 0..6 {
@@ -1591,7 +1697,12 @@ mod tests {
             0,
             2,
             "COMMENT_CREATE",
-            pb::CommentCreate { post: vec![7; 32], text: "x".into(), parent_comment: vec![8; 32] }.encode_to_vec(),
+            pb::CommentCreate {
+                post: vec![7; 32],
+                text: "x".into(),
+                parent_comment: vec![8; 32],
+            }
+            .encode_to_vec(),
         );
         assert_eq!(refs_of(&c).targets, vec![vec![7; 32], vec![8; 32]]);
     }

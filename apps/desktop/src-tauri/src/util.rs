@@ -105,14 +105,20 @@ mod tests {
             let e = base64_encode(&v);
             assert_eq!(base64_decode(&e).unwrap(), v, "len {n}");
         }
-        assert_eq!(base64_decode("data:image/png;base64,AQID").unwrap(), vec![1, 2, 3]);
+        assert_eq!(
+            base64_decode("data:image/png;base64,AQID").unwrap(),
+            vec![1, 2, 3]
+        );
         assert_eq!(base64_decode("AQ ID\n").unwrap(), vec![1, 2, 3]);
         assert!(base64_decode("!!").is_none());
     }
 
     #[test]
     fn truncation() {
-        assert_eq!(truncate_middle("hash1abcdefghijklmnop", 8, 4), "hash1abc…mnop");
+        assert_eq!(
+            truncate_middle("hash1abcdefghijklmnop", 8, 4),
+            "hash1abc…mnop"
+        );
         assert_eq!(truncate_middle("short", 8, 4), "short");
     }
 }

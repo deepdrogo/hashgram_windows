@@ -67,7 +67,11 @@ pub async fn hashwall_explore(
 /// What is active on the network, from the nearest node: most active
 /// authors, hashtags and walls over `window_secs` (default a week).
 #[tauri::command]
-pub async fn hashwall_digest(state: S<'_>, window_secs: Option<u64>, limit: Option<u32>) -> CmdResult<Digest> {
+pub async fn hashwall_digest(
+    state: S<'_>,
+    window_secs: Option<u64>,
+    limit: Option<u32>,
+) -> CmdResult<Digest> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one
@@ -96,10 +100,18 @@ pub async fn hashwall_thread(state: S<'_>, post: String) -> CmdResult<Option<Pos
 
 /// Opens a wall.
 #[tauri::command]
-pub async fn walls_create(state: S<'_>, name: String, description: String, open_posting: bool) -> CmdResult<WallInfo> {
+pub async fn walls_create(
+    state: S<'_>,
+    name: String,
+    description: String,
+    open_posting: bool,
+) -> CmdResult<WallInfo> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let w = one.feed().create_wall(&name, &description, open_posting).await?;
+    let w = one
+        .feed()
+        .create_wall(&name, &description, open_posting)
+        .await?;
     one.save()?;
     Ok(w)
 }
@@ -115,11 +127,19 @@ pub async fn walls_info(state: S<'_>, wall: String) -> CmdResult<WallInfo> {
 
 /// One page of a wall's posts.
 #[tauri::command]
-pub async fn walls_page(state: S<'_>, wall: String, before: Option<u64>, limit: Option<u32>) -> CmdResult<ExplorePage> {
+pub async fn walls_page(
+    state: S<'_>,
+    wall: String,
+    before: Option<u64>,
+    limit: Option<u32>,
+) -> CmdResult<ExplorePage> {
     let wall = check_hex_id("wall", &wall)?;
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.feed().wall_page(&wall, before.unwrap_or(0), page_limit(limit)).await?)
+    Ok(one
+        .feed()
+        .wall_page(&wall, before.unwrap_or(0), page_limit(limit))
+        .await?)
 }
 
 /// Pins or unpins a wall in the sidebar.
@@ -287,7 +307,11 @@ pub async fn profile_me(state: S<'_>) -> CmdResult<MyProfile> {
 
 /// Everything I did, newest first (posts, comments, reactions, follows…).
 #[tauri::command]
-pub async fn profile_my_events(state: S<'_>, before: Option<u64>, limit: Option<usize>) -> CmdResult<Vec<hashgram_sdk::feed::FeedItem>> {
+pub async fn profile_my_events(
+    state: S<'_>,
+    before: Option<u64>,
+    limit: Option<usize>,
+) -> CmdResult<Vec<hashgram_sdk::feed::FeedItem>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one
@@ -332,14 +356,21 @@ mod tests {
 
     #[test]
     fn sniffs_image_bytes() {
-        assert_eq!(image_extension(&[0x89, b'P', b'N', b'G', 0, 0, 0, 0]), Some("png"));
+        assert_eq!(
+            image_extension(&[0x89, b'P', b'N', b'G', 0, 0, 0, 0]),
+            Some("png")
+        );
         assert_eq!(image_extension(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("jpg"));
         assert_eq!(image_extension(b"GIF89a"), Some("gif"));
         let mut webp = b"RIFF\0\0\0\0WEBPVP8 ".to_vec();
         webp.extend_from_slice(&[0; 8]);
         assert_eq!(image_extension(&webp), Some("webp"));
         assert_eq!(image_extension(b"<html>"), None);
-        assert_eq!(image_extension(b"MZ\x90"), None, "executables are not avatars");
+        assert_eq!(
+            image_extension(b"MZ\x90"),
+            None,
+            "executables are not avatars"
+        );
     }
 
     #[test]

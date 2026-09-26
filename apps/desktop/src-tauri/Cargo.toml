@@ -2,7 +2,7 @@
 name = "hashgram-desktop"
 workspace = "../../../node"
 description = "Hashgram One for Windows: one identity, one inbox, one vault, one network"
-version = "0.3.1"
+version = "1.6.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -52,6 +52,9 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 chacha20poly1305 = "0.10"
 zeroize = { version = "1", features = ["derive"] }
 qrcode = { version = "0.14", default-features = false }
+# Decoding a picked image to learn its size and make a thumbnail. Decoders
+# only: nothing here reaches the network, and no video codec is pulled in.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 bech32.workspace = true
 time = { version = "0.3", features = ["formatting", "parsing"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
@@ -64,6 +67,7 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Memory",
     "Win32_System_WinRT",
+    "Win32_Storage_FileSystem",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
     "Security_Credentials",

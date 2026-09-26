@@ -9,9 +9,14 @@ import { Lock } from "./routes/Lock";
 import { MailRoute } from "./routes/mail/Mail";
 
 const Drive = lazy(() => import("./routes/drive/Drive").then((m) => ({ default: m.DriveRoute })));
-const Feed = lazy(() => import("./routes/feed/Feed").then((m) => ({ default: m.FeedRoute })));
-const Explore = lazy(() => import("./routes/Explore").then((m) => ({ default: m.ExploreRoute })));
+const Pulse = lazy(() => import("./routes/pulse/Pulse").then((m) => ({ default: m.PulseRoute })));
+const ReelsRoute = lazy(() => import("./routes/pulse/Reels").then((m) => ({ default: m.ReelsPage })));
+const LocalRoute = lazy(() => import("./routes/local/Local").then((m) => ({ default: m.LocalRoute })));
+const Topics = lazy(() => import("./routes/topics/Topics").then((m) => ({ default: m.TopicRoute })));
+const Circles = lazy(() => import("./routes/feed/Feed").then((m) => ({ default: m.CirclesRoute })));
+const Chats = lazy(() => import("./routes/chats/Chats").then((m) => ({ default: m.ChatsRoute })));
 const Me = lazy(() => import("./routes/Me").then((m) => ({ default: m.MeRoute })));
+const Profile = lazy(() => import("./routes/profile/Profile").then((m) => ({ default: m.ProfileRoute })));
 const People = lazy(() => import("./routes/People").then((m) => ({ default: m.PeopleRoute })));
 const Spaces = lazy(() => import("./routes/spaces/Spaces").then((m) => ({ default: m.SpacesRoute })));
 const Earn = lazy(() => import("./routes/Earn").then((m) => ({ default: m.EarnRoute })));
@@ -128,32 +133,82 @@ export function App() {
             </Shell>
           )}
         >
-          <Route path="/" component={() => <Navigate href="/mail/inbox" />} />
+          <Route path="/" component={() => <Navigate href="/pulse" />} />
+          <Route path="/pulse/:tab?/:id?" component={Pulse} />
+          <Route path="/reels" component={ReelsRoute} />
+          <Route path="/local" component={LocalRoute} />
+          <Route path="/topics/:id?" component={Topics} />
+          <Route path="/chats/:id?" component={Chats} />
+          <Route path="/circles" component={Circles} />
           <Route path="/mail/:folder?/:id?" component={MailRoute} />
           <Route path="/drive/:parent?" component={Drive} />
-          <Route path="/hashwall/:tab?/:id?" component={Feed} />
-          <Route path="/feed/:tab?/:id?" component={FeedRedirect} />
-          <Route path="/explore/:section?/:arg?" component={Explore} />
-          <Route path="/me" component={Me} />
-          <Route path="/people/:address?" component={People} />
+          <Route path="/profile/:address?" component={Profile} />
+          <Route path="/activity" component={Me} />
+          <Route path="/contacts/:address?" component={People} />
           <Route path="/spaces/:id?/:tab?" component={Spaces} />
           <Route path="/earn/:tab?" component={Earn} />
           <Route path="/wallet/:tab?" component={Wallet} />
           <Route path="/network" component={Network} />
           <Route path="/settings/:tab?" component={Settings} />
           <Route path="/help/:slug?" component={Help} />
-          <Route path="*" component={() => <Navigate href="/mail/inbox" />} />
+          {/* Reels and Local were tabs of Pulse in 1.3.0; links to them,
+              including the ones in that release's own UI, still work. */}
+          <Route path="/pulse/reels" component={() => <Navigate href="/reels" />} />
+          <Route path="/pulse/local" component={() => <Navigate href="/local" />} />
+          {/* Links, bookmarks and deep links minted before the rename. */}
+          <Route path="/hashwall/:tab?/:id?" component={PulseRedirect} />
+          <Route path="/feed/:tab?/:id?" component={PulseRedirect} />
+          <Route path="/explore/:section?/:arg?" component={ExploreRedirect} />
+          <Route path="/people/:address?" component={ContactsRedirect} />
+          <Route path="/me" component={() => <Navigate href="/profile/me" />} />
+          <Route path="*" component={() => <Navigate href="/pulse" />} />
         </HashRouter>
       </Match>
     </Switch>
   );
 }
 
-/** `/feed/…` → `/hashwall/…`, same tab and post. */
-function FeedRedirect() {
+/** `/feed/…` and `/hashwall/…` → `/pulse/…`, as close as the tab maps. */
+function PulseRedirect() {
   const params = useParams<{ tab?: string; id?: string }>();
-  const target = () => `/hashwall${params.tab ? `/${params.tab}` : ""}${params.id ? `/${params.id}` : ""}`;
+  const tab = () => {
+    switch (params.tab) {
+      case "friends":
+      case "following":
+        return "following";
+      case "walls":
+        return params.id ? "" : "topics";
+      case "circles":
+        return "";
+      default:
+        return params.tab ?? "";
+    }
+  };
+  const target = () => {
+    if (params.tab === "walls" && params.id) return `/topics/${params.id}`;
+    if (params.tab === "circles") return "/circles";
+    if (params.id) return `/pulse/post/${params.id}`;
+    return `/pulse${tab() ? `/${tab()}` : ""}`;
+  };
   return <Navigate href={target()} />;
+}
+
+/** Explore was split: posts and people into Pulse, the registries into Network. */
+function ExploreRedirect() {
+  const params = useParams<{ section?: string; arg?: string }>();
+  const target = () => {
+    if (params.section === "holders" || params.section === "providers") return "/network";
+    if (params.section === "walls") return "/pulse/topics";
+    if (params.arg) return `/pulse/tag/${params.arg}`;
+    return "/pulse/latest";
+  };
+  return <Navigate href={target()} />;
+}
+
+/** `/people/…` → `/contacts/…`, same person. */
+function ContactsRedirect() {
+  const params = useParams<{ address?: string }>();
+  return <Navigate href={`/contacts${params.address ? `/${params.address}` : ""}`} />;
 }
 
 /** hashgram:// links: mail/<id>, space/<id>, drive/<id>, user/<addr|@name>, wall/<id>, post/<id>, tag/<name>. */
@@ -167,12 +222,12 @@ function DeepLinks() {
       if (head === "mail" && arg) navigate(`/mail/inbox/${arg}`);
       else if (head === "space" && arg) navigate(`/spaces/${arg}`);
       else if (head === "drive" && arg) navigate(`/drive/?select=${arg}`);
-      else if (head === "user" && arg) navigate(arg.startsWith("hash1") ? `/people/${arg}` : `/people?q=${encodeURIComponent(arg)}`);
-      else if (head === "wall" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/hashwall/walls/${arg.toLowerCase()}`);
-      else if (head === "post" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/hashwall/friends/${arg.toLowerCase()}`);
+      else if (head === "user" && arg) navigate(arg.startsWith("hash1") ? `/profile/${arg}` : `/contacts?q=${encodeURIComponent(arg)}`);
+      else if (head === "wall" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/pulse/walls/${arg.toLowerCase()}`);
+      else if (head === "post" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/pulse/post/${arg.toLowerCase()}`);
       else if (head === "tag" && arg) navigate(`/explore/posts/${encodeURIComponent(arg.replace(/^#/, ""))}`);
-      else if (/^hash1/.test(rest)) navigate(`/people/${rest}`);
-      else if (rest.startsWith("@")) navigate(`/people?q=${encodeURIComponent(rest)}`);
+      else if (/^hash1/.test(rest)) navigate(`/profile/${rest}`);
+      else if (rest.startsWith("@")) navigate(`/contacts?q=${encodeURIComponent(rest)}`);
       else store.toast(`Unrecognised link: ${url}`, "error");
     });
   });

@@ -37,6 +37,85 @@ impl From<&app::MailAddress> for AddressView {
     }
 }
 
+/// How many of each thing a profile shows, and where the numbers came from.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProfileStatsView {
+    /// Original posts and reels.
+    pub posts: u32,
+    /// Public replies and comments.
+    pub replies: u32,
+    /// Posts carrying media.
+    pub media: u32,
+    /// Reactions given and not withdrawn.
+    pub likes: u32,
+    /// Accounts this profile follows.
+    pub following: u32,
+    /// Accounts following it, when something could answer that.
+    pub followers: Option<u32>,
+    /// First event seen (s); the closest honest answer to "joined".
+    pub first_event: u64,
+    /// `indexer`, `device` (a complete local log) or `partial`.
+    pub source: String,
+}
+
+/// A public profile as a social screen needs it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileView {
+    /// Address.
+    pub address: String,
+    /// Registered username, without the `@`.
+    pub username: String,
+    /// Display name the author published.
+    pub display_name: String,
+    /// Bio.
+    pub bio: String,
+    /// Avatar CID (hex), empty when none.
+    pub avatar_cid: String,
+    /// Cover CID (hex), empty when none.
+    pub banner_cid: String,
+    /// Website as published.
+    pub website: String,
+    /// Two-letter country the author chose to show.
+    pub country: String,
+    /// When the profile event was signed (s).
+    pub updated_at: u64,
+    /// Our local contact flags for them.
+    pub states: Vec<String>,
+    /// Whether this is us.
+    pub is_me: bool,
+    /// Whether we follow them.
+    pub following: bool,
+    /// Counts.
+    pub stats: ProfileStatsView,
+}
+
+impl ProfileView {
+    /// Builds the view from an SDK profile plus what only we know.
+    #[must_use]
+    pub fn new(
+        p: hashgram_sdk::people::Profile,
+        me: String,
+        following: bool,
+        stats: ProfileStatsView,
+    ) -> Self {
+        Self {
+            is_me: p.address == me,
+            address: p.address,
+            username: p.username,
+            display_name: p.display_name,
+            bio: p.bio,
+            avatar_cid: p.avatar_cid,
+            banner_cid: p.banner_cid,
+            website: p.website,
+            country: p.country,
+            updated_at: p.updated_at,
+            states: p.states,
+            following,
+            stats,
+        }
+    }
+}
+
 /// Media without its key.
 #[derive(Debug, Clone, Serialize)]
 pub struct MediaView {
@@ -162,7 +241,9 @@ impl AttachmentView {
     #[must_use]
     pub fn of(index: usize, a: &app::MailAttachment) -> Self {
         let (kind, live, share_id, version_no, folder) = match &a.source {
-            Some(app::mail_attachment::Source::InlineData(_)) => ("inline", false, String::new(), 0, false),
+            Some(app::mail_attachment::Source::InlineData(_)) => {
+                ("inline", false, String::new(), 0, false)
+            }
             Some(app::mail_attachment::Source::Blob(_)) => ("blob", false, String::new(), 0, false),
             Some(app::mail_attachment::Source::Drive(c)) => (
                 "drive",
@@ -642,8 +723,13 @@ impl SpaceStateView {
     /// Maps a state for `me`.
     #[must_use]
     pub fn of(s: &State, me: &str) -> Self {
-        let mut drive: Vec<SpaceSharedEntryView> = s.drive.values().map(SpaceSharedEntryView::from).collect();
-        drive.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.capability.name.cmp(&b.capability.name)));
+        let mut drive: Vec<SpaceSharedEntryView> =
+            s.drive.values().map(SpaceSharedEntryView::from).collect();
+        drive.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then_with(|| a.capability.name.cmp(&b.capability.name))
+        });
         Self {
             space_id: s.space_id.clone(),
             name: s.name.clone(),
@@ -784,10 +870,21 @@ mod tests {
 
     fn forbidden(json: &str) {
         let j = json.to_ascii_lowercase();
-        for word in ["\"key\"", "nonce", "seed", "secret", "mnemonic", "base_nonce", "manifest_key"] {
+        for word in [
+            "\"key\"",
+            "nonce",
+            "seed",
+            "secret",
+            "mnemonic",
+            "base_nonce",
+            "manifest_key",
+        ] {
             assert!(!j.contains(word), "{word} leaked: {json}");
         }
-        assert!(!j.contains(&hex::encode([0xAAu8; 32])), "object key bytes leaked");
+        assert!(
+            !j.contains(&hex::encode([0xAAu8; 32])),
+            "object key bytes leaked"
+        );
     }
 
     #[test]

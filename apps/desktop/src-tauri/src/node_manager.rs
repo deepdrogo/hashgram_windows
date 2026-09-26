@@ -207,7 +207,7 @@ pub fn read_setup() -> Option<NodeSetup> {
 }
 
 /// How the node is registered to run.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Registration {
     /// Not registered.
@@ -237,23 +237,131 @@ fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// Which registration exists.
+/// Answers that cost a process launch, remembered.
+///
+/// `sc.exe`, `schtasks.exe`, `net.exe` and `hashgram-node node-id` each
+/// cost tens to thousands of milliseconds on Windows, and the screens
+/// that wanted them polled every few seconds — which is how a peer-to-peer
+/// client ended up spending its time waiting for the service controller.
+/// None of these answers changes unless the app itself changes them, so
+/// they are cached and [`forget_cached`] is called when it does.
+mod cache {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    use super::Registration;
+
+    /// Long enough that polling is free, short enough that a change made
+    /// outside the app is noticed within a minute.
+    const TTL: Duration = Duration::from_secs(60);
+
+    struct Cached<T> {
+        value: Option<(T, Instant)>,
+    }
+
+    impl<T: Clone> Cached<T> {
+        const fn new() -> Self {
+            Self { value: None }
+        }
+        fn get(&self) -> Option<T> {
+            self.value
+                .as_ref()
+                .filter(|(_, at)| at.elapsed() < TTL)
+                .map(|(v, _)| v.clone())
+        }
+        fn set(&mut self, v: T) {
+            self.value = Some((v, Instant::now()));
+        }
+        fn clear(&mut self) {
+            self.value = None;
+        }
+    }
+
+    static REGISTRATION: Mutex<Cached<Registration>> = Mutex::new(Cached::new());
+    static ELEVATED: Mutex<Option<bool>> = Mutex::new(None);
+    static NODE_ID: Mutex<Option<String>> = Mutex::new(None);
+
+    pub(super) fn registration(compute: impl FnOnce() -> Registration) -> Registration {
+        let mut g = match REGISTRATION.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(v) = g.get() {
+            return v;
+        }
+        let v = compute();
+        g.set(v);
+        v
+    }
+
+    /// Elevation cannot change without restarting the process, so this one
+    /// is asked once and never again.
+    pub(super) fn elevated(compute: impl FnOnce() -> bool) -> bool {
+        let mut g = match ELEVATED.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        *g.get_or_insert_with(compute)
+    }
+
+    /// A node's peer id is derived from its key file; it changes only when
+    /// the key does, which means when the app writes a new configuration.
+    pub(super) fn node_id(compute: impl FnOnce() -> Option<String>) -> Option<String> {
+        let mut g = match NODE_ID.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(v) = g.as_ref() {
+            return Some(v.clone());
+        }
+        let v = compute();
+        if let Some(v) = &v {
+            *g = Some(v.clone());
+        }
+        v
+    }
+
+    pub(super) fn forget() {
+        if let Ok(mut g) = REGISTRATION.lock() {
+            g.clear();
+        }
+        if let Ok(mut g) = NODE_ID.lock() {
+            *g = None;
+        }
+    }
+}
+
+/// Forgets the cached registration and peer id. Called after anything that
+/// changes them: install, uninstall, or a new configuration.
+pub fn forget_cached() {
+    cache::forget();
+}
+
+/// Which registration exists. Cached; see [`forget_cached`].
 #[must_use]
 pub fn registration() -> Registration {
-    if run("sc.exe", &["query", SERVICE_NAME]).is_ok() {
-        return Registration::Service;
-    }
-    if run("schtasks.exe", &["/Query", "/TN", SERVICE_NAME]).is_ok() {
-        return Registration::ScheduledTask;
-    }
-    Registration::None
+    cache::registration(|| {
+        if run("sc.exe", &["query", SERVICE_NAME]).is_ok() {
+            return Registration::Service;
+        }
+        if run("schtasks.exe", &["/Query", "/TN", SERVICE_NAME]).is_ok() {
+            return Registration::ScheduledTask;
+        }
+        Registration::None
+    })
 }
 
 /// Whether the current process is elevated (a service can be created).
+/// Asked once: elevation cannot change while the process runs.
 #[must_use]
 pub fn is_elevated() -> bool {
     // `net session` succeeds only when elevated. Cheap and dependency-free.
-    run("net.exe", &["session"]).is_ok()
+    cache::elevated(|| run("net.exe", &["session"]).is_ok())
+}
+
+/// The node's peer id, cached after the first read.
+pub fn node_id_cached() -> Option<String> {
+    cache::node_id(|| node_id().ok())
 }
 
 /// Finds the service wrapper (`hashgram-node-service.exe`) next to the node
@@ -278,6 +386,7 @@ pub fn wrapper_binary() -> Option<PathBuf> {
 /// Both go through the wrapper, which supervises the node, restarts it
 /// with back-off and writes `node.log`.
 pub fn install() -> Result<Registration, String> {
+    forget_cached();
     let bin = node_binary()
         .ok_or_else(|| "hashgram-node.exe is not bundled with this build".to_owned())?;
     let wrapper = wrapper_binary()
@@ -379,7 +488,12 @@ fn xml_escape(s: &str) -> String {
 }
 
 /// The Task Scheduler definition for the per-user logon task.
-fn task_xml(wrapper: &std::path::Path, arguments: &str, home: &std::path::Path, user: &str) -> String {
+fn task_xml(
+    wrapper: &std::path::Path,
+    arguments: &str,
+    home: &std::path::Path,
+    user: &str,
+) -> String {
     let user_el = if user.is_empty() {
         String::new()
     } else {
@@ -483,6 +597,7 @@ pub fn stop() -> Result<(), String> {
 
 /// Removes the registration (keeps data).
 pub fn uninstall() -> Result<(), String> {
+    forget_cached();
     let _ = stop();
     match registration() {
         Registration::Service => run("sc.exe", &["delete", SERVICE_NAME]).map(|_| ()),
@@ -562,21 +677,28 @@ mod tests {
         let wrapper = PathBuf::from(
             r"C:\Users\someone with a long name\AppData\Local\Hashgram One\hashgram-node-service.exe",
         );
-        let home = PathBuf::from(r"C:\Users\someone with a long name\AppData\Local\Hashgram\data\node");
+        let home =
+            PathBuf::from(r"C:\Users\someone with a long name\AppData\Local\Hashgram\data\node");
         let args = format!(
             "--node \"{}\" --home \"{}\" --config \"{}\"",
             r"C:\Users\someone with a long name\AppData\Local\Hashgram One\hashgram-node.exe & co",
             home.display(),
             home.join("node.toml").display()
         );
-        assert!(args.len() + wrapper.display().to_string().len() > 261, "the case that broke /TR");
+        assert!(
+            args.len() + wrapper.display().to_string().len() > 261,
+            "the case that broke /TR"
+        );
         let xml = task_xml(&wrapper, &args, &home, r"PC\someone");
         assert!(xml.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
         assert!(xml.contains("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"));
         assert!(xml.contains("<UserId>PC\\someone</UserId>"));
         assert!(xml.contains("&amp; co"), "ampersands are escaped: {xml}");
         assert!(xml.contains("&quot;--home&quot;") || xml.contains("--home &quot;"));
-        assert!(!xml.contains("<Arguments>--node \"C:"), "quotes must be escaped inside XML");
+        assert!(
+            !xml.contains("<Arguments>--node \"C:"),
+            "quotes must be escaped inside XML"
+        );
         let d = std::env::temp_dir().join(format!("hg-task-{}.xml", std::process::id()));
         write_utf16(&d, &xml).unwrap();
         let bytes = std::fs::read(&d).unwrap();

@@ -570,6 +570,42 @@ function ShareDialog(props: { entry: EntryView | null; onClose: () => void }) {
   );
 }
 
+/**
+ * Where a file actually is.
+ *
+ * Asking the nodes we can reach is the only honest answer a client has:
+ * a provider that is offline may hold a perfect copy and this cannot see
+ * it, so the wording is "of the N nodes we reached" and never "healthy".
+ */
+function AvailabilityLine(props: { entry: EntryView }) {
+  const [a] = createResource(
+    () => (props.entry.kind === "file" ? props.entry.id : null),
+    (id) => ipc.driveAvailability(id).catch(() => null),
+  );
+  return (
+    <div class="mt-3 rounded-md border border-border px-3 py-2 text-xs" data-testid="availability">
+      <Show when={a()} fallback={<span class="text-muted">{a.loading ? "Asking the nodes we can reach…" : "Availability unknown — no node answered."}</span>}>
+        {(v) => (
+          <>
+            <p>
+              <span class="tnum font-medium">{v().complete}</span>
+              <span class="text-muted">
+                {" "}
+                of the {v().answered} node{v().answered === 1 ? "" : "s"} that answered hold a complete copy
+                <Show when={v().partial > 0}>, {v().partial} a partial one</Show>.
+              </span>
+            </p>
+            <p class="mt-0.5 text-muted">
+              Hashgram aims for {v().target}. Nodes that were offline may hold copies this cannot see, so this is what
+              was reachable now, not a survey of the network.
+            </p>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
 function VersionsDialog(props: { entry: EntryView | null; onClose: () => void }) {
   const [tick, setTick] = createSignal(0);
   const [versions] = createResource(
@@ -579,7 +615,8 @@ function VersionsDialog(props: { entry: EntryView | null; onClose: () => void })
   const current = () => versions()?.[versions()!.length - 1]?.version_no;
   return (
     <Dialog open={!!props.entry} onClose={props.onClose} title={`${t("drive_versions")} — ${props.entry?.name ?? ""}`} width="max-w-md">
-      <ul class="card divide-y divide-border" data-testid="versions">
+      <Show when={props.entry}>{(e) => <AvailabilityLine entry={e()} />}</Show>
+      <ul class="card mt-3 divide-y divide-border" data-testid="versions">
         <For each={[...(versions() ?? [])].reverse()} fallback={<li class="p-3 text-center text-xs text-muted">{versions.loading ? t("loading") : "no versions"}</li>}>
           {(v: VersionView) => (
             <li class="flex items-center gap-2 px-3 py-1.5 text-xs">
