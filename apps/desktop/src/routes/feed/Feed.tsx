@@ -248,10 +248,10 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
   return (
     <article class="card mb-2 p-3 text-[13px]" data-post={props.it.id}>
       <div class="flex items-center gap-2">
-        <button type="button" class="shrink-0" title="Open profile" onClick={() => navigate(`/contacts/${props.it.author}`)}>
+        <button type="button" class="shrink-0" title="Open profile" onClick={() => navigate(`/profile/${props.it.author}`)}>
           <PersonAvatar address={props.it.author} size={24} />
         </button>
-        <button type="button" class="min-w-0 font-medium hover:underline" title="Open profile" onClick={() => navigate(`/contacts/${props.it.author}`)}>
+        <button type="button" class="min-w-0 font-medium hover:underline" title="Open profile" onClick={() => navigate(`/profile/${props.it.author}`)}>
           <Who address={props.it.author} />
         </button>
         <Show when={props.it.kind === "REPOST"}>

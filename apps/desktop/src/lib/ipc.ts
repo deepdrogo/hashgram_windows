@@ -361,8 +361,31 @@ export interface Profile {
   display_name: string;
   bio: string;
   avatar_cid: string;
+  banner_cid: string;
+  website: string;
+  country: string;
+  updated_at: number;
   states: string[];
 }
+/** Where a profile's numbers came from: an indexer, a complete local log, or part of one. */
+export type StatsSource = "indexer" | "device" | "partial";
+export interface ProfileStats {
+  posts: number;
+  replies: number;
+  media: number;
+  likes: number;
+  following: number;
+  /** null when nothing could answer it — never a guess. */
+  followers: number | null;
+  first_event: number;
+  source: StatsSource;
+}
+export interface ProfileView extends Profile {
+  is_me: boolean;
+  following: boolean;
+  stats: ProfileStats;
+}
+export type ProfileTab = "posts" | "replies" | "media" | "likes";
 export interface ContactRecord {
   address: string;
   username: string;
@@ -968,6 +991,14 @@ export const ipc = {
   peopleAvatar: (cid: string) => call<string>("people_avatar", { cid }),
   profileMe: () => call<MyProfile>("profile_me"),
   profileMyEvents: (before?: number, limit?: number) => call<FeedItem[]>("profile_my_events", { before, limit }),
+
+  // social profiles
+  profileOf: (address: string) => call<ProfileView>("profile_of", { address }),
+  profileMine: () => call<ProfileView>("profile_mine"),
+  profileSave: (p: { displayName: string; bio: string; website: string; country: string; avatarCid: string; bannerCid: string }) => call<string>("profile_save", p),
+  profileUploadImage: (path: string) => call<string>("profile_upload_image", { path }),
+  profileTimeline: (address: string, tab: ProfileTab, before?: number, limit?: number) => call<FeedItem[]>("profile_timeline", { address, tab, before, limit }),
+  profileFollowList: (address: string, which: "followers" | "following") => call<string[]>("profile_follow_list", { address, which }),
   networkHolders: (limit?: number) => call<Holders>("network_holders", { limit }),
   networkProviders: () => call<ProviderStatus[]>("network_providers"),
 

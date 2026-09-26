@@ -40,7 +40,7 @@ describe("forbidden fields in command return types", () => {
   it("commands that return SDK records directly return only key-free types", () => {
     // Types the Rust commands pass through unchanged. Each is public data
     // by construction (addresses, names, counts, hex ids/hashes).
-    const passthrough = ["MailSummary", "FolderCounts", "EntryView", "DriveUsage", "ContactRecord", "Resolved", "Profile", "FeedItem", "PostThread", "CircleInfo", "SpaceSummary", "SpaceMember", "ProviderStatus", "Earnings", "Balance", "DeviceInfo", "PeerView"];
+    const passthrough = ["MailSummary", "FolderCounts", "EntryView", "DriveUsage", "ContactRecord", "Resolved", "Profile", "ProfileStats", "FeedItem", "PostThread", "CircleInfo", "SpaceSummary", "SpaceMember", "ProviderStatus", "Earnings", "Balance", "DeviceInfo", "PeerView"];
     for (const name of passthrough) {
       const i = typesOnly.indexOf(`export interface ${name} `);
       expect(i, name).toBeGreaterThan(-1);

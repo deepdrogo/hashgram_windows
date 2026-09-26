@@ -164,7 +164,7 @@ export function MeRoute() {
                                         </Show>
                                         <Show when={!postText(it) && target(it)}>
                                           <Show when={target(it).startsWith("hash1")} fallback={<button type="button" class="mt-0.5 block text-left text-xs text-muted hover:underline" onClick={() => navigate(`/pulse/post/${target(it)}`)}>on post {target(it).slice(0, 12)}…</button>}>
-                                            <button type="button" class="mt-0.5 block text-left text-xs text-muted hover:underline" onClick={() => navigate(`/contacts/${target(it)}`)}><Mono text={target(it)} head={12} tail={6} /></button>
+                                            <button type="button" class="mt-0.5 block text-left text-xs text-muted hover:underline" onClick={() => navigate(`/profile/${target(it)}`)}><Mono text={target(it)} head={12} tail={6} /></button>
                                           </Show>
                                         </Show>
                                       </span>

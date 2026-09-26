@@ -33,6 +33,7 @@ pub mod cmd_identity;
 pub mod cmd_mail;
 pub mod cmd_network;
 pub mod cmd_people;
+pub mod cmd_profile;
 pub mod cmd_settings;
 pub mod cmd_spaces;
 pub mod cmd_sync;
@@ -403,6 +404,13 @@ pub fn run() {
             cmd_hashwall::profile_my_events,
             cmd_hashwall::network_holders,
             cmd_hashwall::network_providers,
+            // social profiles
+            cmd_profile::profile_of,
+            cmd_profile::profile_mine,
+            cmd_profile::profile_save,
+            cmd_profile::profile_upload_image,
+            cmd_profile::profile_timeline,
+            cmd_profile::profile_follow_list,
             // spaces
             cmd_spaces::spaces_list,
             cmd_spaces::spaces_create,

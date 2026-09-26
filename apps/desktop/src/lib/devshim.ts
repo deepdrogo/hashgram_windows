@@ -173,6 +173,32 @@ const handlers: Record<string, (a: Args) => unknown> = {
   leases_list: () => [],
   tx_has_pending: () => false,
   settings_set: () => undefined,
+  people_follow: () => undefined,
+  profile_of: (a) => {
+    const who = String(a?.address);
+    const c = contacts.find((x) => x.address === who);
+    const mine = who === ME;
+    return {
+      address: who,
+      username: mine ? "me" : (c?.username ?? ""),
+      display_name: mine ? "Me" : (c?.display_name ?? ""),
+      bio: mine ? "Testing Hashgram One." : "Building things on the Hashgram network.",
+      avatar_cid: "",
+      banner_cid: "",
+      website: mine ? "https://hashgram.io" : "",
+      country: mine ? "GE" : "",
+      updated_at: Math.floor(now / 1000) - 8000,
+      states: c?.states ?? [],
+      is_me: mine,
+      following: !!c?.states.includes("following"),
+      stats: { posts: 3, replies: 5, media: 1, likes: 12, following: 2, followers: null, first_event: Math.floor(now / 1000) - 30 * 86400, source: "device" },
+    };
+  },
+  profile_mine: () => handlers.profile_of!({ address: ME }),
+  profile_save: () => "ab".repeat(32),
+  profile_upload_image: () => "cd".repeat(32),
+  profile_timeline: (a) => (a?.tab === "likes" ? [] : (handlers.feed_friends!({}) as unknown[]).slice(0, a?.tab === "media" ? 0 : 2)),
+  profile_follow_list: (a) => (a?.which === "followers" ? [] : [ALICE, BOB]),
 };
 
 export function installDevShim() {

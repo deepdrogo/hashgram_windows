@@ -12,6 +12,7 @@ const Drive = lazy(() => import("./routes/drive/Drive").then((m) => ({ default: 
 const Feed = lazy(() => import("./routes/feed/Feed").then((m) => ({ default: m.FeedRoute })));
 const Explore = lazy(() => import("./routes/Explore").then((m) => ({ default: m.ExploreRoute })));
 const Me = lazy(() => import("./routes/Me").then((m) => ({ default: m.MeRoute })));
+const Profile = lazy(() => import("./routes/profile/Profile").then((m) => ({ default: m.ProfileRoute })));
 const People = lazy(() => import("./routes/People").then((m) => ({ default: m.PeopleRoute })));
 const Spaces = lazy(() => import("./routes/spaces/Spaces").then((m) => ({ default: m.SpacesRoute })));
 const Earn = lazy(() => import("./routes/Earn").then((m) => ({ default: m.EarnRoute })));
@@ -133,7 +134,8 @@ export function App() {
           <Route path="/mail/:folder?/:id?" component={MailRoute} />
           <Route path="/drive/:parent?" component={Drive} />
           <Route path="/explore/:section?/:arg?" component={Explore} />
-          <Route path="/profile/me" component={Me} />
+          <Route path="/profile/:address?" component={Profile} />
+          <Route path="/activity" component={Me} />
           <Route path="/contacts/:address?" component={People} />
           <Route path="/spaces/:id?/:tab?" component={Spaces} />
           <Route path="/earn/:tab?" component={Earn} />
@@ -145,7 +147,6 @@ export function App() {
           <Route path="/hashwall/:tab?/:id?" component={PulseRedirect} />
           <Route path="/feed/:tab?/:id?" component={PulseRedirect} />
           <Route path="/people/:address?" component={ContactsRedirect} />
-          <Route path="/profile/:address" component={ContactsRedirect} />
           <Route path="/me" component={() => <Navigate href="/profile/me" />} />
           <Route path="*" component={() => <Navigate href="/pulse" />} />
         </HashRouter>
@@ -178,11 +179,11 @@ function DeepLinks() {
       if (head === "mail" && arg) navigate(`/mail/inbox/${arg}`);
       else if (head === "space" && arg) navigate(`/spaces/${arg}`);
       else if (head === "drive" && arg) navigate(`/drive/?select=${arg}`);
-      else if (head === "user" && arg) navigate(arg.startsWith("hash1") ? `/contacts/${arg}` : `/contacts?q=${encodeURIComponent(arg)}`);
+      else if (head === "user" && arg) navigate(arg.startsWith("hash1") ? `/profile/${arg}` : `/contacts?q=${encodeURIComponent(arg)}`);
       else if (head === "wall" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/pulse/walls/${arg.toLowerCase()}`);
       else if (head === "post" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/pulse/post/${arg.toLowerCase()}`);
       else if (head === "tag" && arg) navigate(`/explore/posts/${encodeURIComponent(arg.replace(/^#/, ""))}`);
-      else if (/^hash1/.test(rest)) navigate(`/contacts/${rest}`);
+      else if (/^hash1/.test(rest)) navigate(`/profile/${rest}`);
       else if (rest.startsWith("@")) navigate(`/contacts?q=${encodeURIComponent(rest)}`);
       else store.toast(`Unrecognised link: ${url}`, "error");
     });

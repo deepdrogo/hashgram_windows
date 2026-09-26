@@ -37,6 +37,85 @@ impl From<&app::MailAddress> for AddressView {
     }
 }
 
+/// How many of each thing a profile shows, and where the numbers came from.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProfileStatsView {
+    /// Original posts and reels.
+    pub posts: u32,
+    /// Public replies and comments.
+    pub replies: u32,
+    /// Posts carrying media.
+    pub media: u32,
+    /// Reactions given and not withdrawn.
+    pub likes: u32,
+    /// Accounts this profile follows.
+    pub following: u32,
+    /// Accounts following it, when something could answer that.
+    pub followers: Option<u32>,
+    /// First event seen (s); the closest honest answer to "joined".
+    pub first_event: u64,
+    /// `indexer`, `device` (a complete local log) or `partial`.
+    pub source: String,
+}
+
+/// A public profile as a social screen needs it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileView {
+    /// Address.
+    pub address: String,
+    /// Registered username, without the `@`.
+    pub username: String,
+    /// Display name the author published.
+    pub display_name: String,
+    /// Bio.
+    pub bio: String,
+    /// Avatar CID (hex), empty when none.
+    pub avatar_cid: String,
+    /// Cover CID (hex), empty when none.
+    pub banner_cid: String,
+    /// Website as published.
+    pub website: String,
+    /// Two-letter country the author chose to show.
+    pub country: String,
+    /// When the profile event was signed (s).
+    pub updated_at: u64,
+    /// Our local contact flags for them.
+    pub states: Vec<String>,
+    /// Whether this is us.
+    pub is_me: bool,
+    /// Whether we follow them.
+    pub following: bool,
+    /// Counts.
+    pub stats: ProfileStatsView,
+}
+
+impl ProfileView {
+    /// Builds the view from an SDK profile plus what only we know.
+    #[must_use]
+    pub fn new(
+        p: hashgram_sdk::people::Profile,
+        me: String,
+        following: bool,
+        stats: ProfileStatsView,
+    ) -> Self {
+        Self {
+            is_me: p.address == me,
+            address: p.address,
+            username: p.username,
+            display_name: p.display_name,
+            bio: p.bio,
+            avatar_cid: p.avatar_cid,
+            banner_cid: p.banner_cid,
+            website: p.website,
+            country: p.country,
+            updated_at: p.updated_at,
+            states: p.states,
+            following,
+            stats,
+        }
+    }
+}
+
 /// Media without its key.
 #[derive(Debug, Clone, Serialize)]
 pub struct MediaView {

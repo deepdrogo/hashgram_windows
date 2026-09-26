@@ -49,6 +49,18 @@ pub struct Profile {
     pub bio: String,
     /// Avatar CID (hex).
     pub avatar_cid: String,
+    /// Cover image CID (hex).
+    #[serde(default)]
+    pub banner_cid: String,
+    /// Website the author put on their profile, as they typed it.
+    #[serde(default)]
+    pub website: String,
+    /// Country the author chose to show. Self-declared, never inferred.
+    #[serde(default)]
+    pub country: String,
+    /// Time of the profile event this was read from (s), 0 when unknown.
+    #[serde(default)]
+    pub updated_at: u64,
     /// Our contact flags for them.
     pub states: Vec<String>,
 }
@@ -276,6 +288,14 @@ impl<'a> People<'a> {
                 prof.display_name = p.display_name;
                 prof.bio = p.bio;
                 prof.avatar_cid = hex::encode(&p.avatar_cid);
+                prof.banner_cid = hex::encode(&p.banner_cid);
+                prof.website = p.website;
+                prof.country = p
+                    .attributes
+                    .get(crate::feed::ATTR_COUNTRY)
+                    .cloned()
+                    .unwrap_or_default();
+                prof.updated_at = ev.timestamp;
             }
         }
         self.one.store.put(

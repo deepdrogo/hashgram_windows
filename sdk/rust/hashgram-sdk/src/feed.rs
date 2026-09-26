@@ -25,6 +25,9 @@ const NS_EVENTS: &str = "feed/events";
 const NS_FOLLOWS: &str = "feed/follows";
 const NS_WALLS: &str = "feed/walls";
 
+/// `ProfileUpdate.attributes` key for the country the user chose to show.
+pub const ATTR_COUNTRY: &str = "country";
+
 /// Most nodes tried for one Explore page before giving up.
 const EXPLORE_ATTEMPTS: usize = 3;
 
@@ -266,6 +269,63 @@ pub struct MyActivity {
     pub score: u64,
 }
 
+/// The tabs a public profile is read through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileTab {
+    /// Original posts and reposts.
+    Posts,
+    /// Public comments and replies to other posts.
+    Replies,
+    /// Posts and reels that carry media.
+    Media,
+    /// Reactions the author gave, which are public events.
+    Likes,
+}
+
+impl ProfileTab {
+    /// Parses the tab name used by the UI and the IPC layer.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "posts" => Some(Self::Posts),
+            "replies" => Some(Self::Replies),
+            "media" => Some(Self::Media),
+            "likes" => Some(Self::Likes),
+            _ => None,
+        }
+    }
+}
+
+/// What a profile can say about somebody's public activity.
+///
+/// Followers cannot be counted from the author's own chain — nothing in it
+/// records who followed them — so the field is `None` unless an indexer
+/// answered. Everything else is counted from the events this device holds,
+/// which is why `complete` matters: it is true only when the author's log
+/// was fetched from sequence zero without a gap.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct AuthorStats {
+    /// Address the numbers describe.
+    pub address: String,
+    /// Original posts and reels, deleted ones excluded.
+    pub posts: u32,
+    /// Public comments and replies.
+    pub replies: u32,
+    /// Posts carrying at least one media reference.
+    pub media: u32,
+    /// Reactions the author gave and has not withdrawn.
+    pub likes: u32,
+    /// Accounts the author follows, from their FOLLOW/UNFOLLOW events.
+    pub following: u32,
+    /// Accounts following them. Only an index over everybody's events can
+    /// answer this; `None` means nothing trustworthy is known.
+    pub followers: Option<u32>,
+    /// First event seen (s), which is the closest thing to a join date.
+    pub first_event: u64,
+    /// Whether the counted log starts at the author's first event.
+    pub complete: bool,
+}
+
 /// A plain, explainable activity score. Not a rank of worth: it counts
 /// public contribution so a profile can show a number that means
 /// something and that anyone can recompute from the public log.
@@ -473,21 +533,46 @@ impl<'a> Feed<'a> {
             .await
     }
 
-    /// Updates our public profile.
+    /// Updates our public profile (name, bio and avatar only).
     pub async fn update_profile(
         &mut self,
         display_name: &str,
         bio: &str,
         avatar_cid_hex: &str,
     ) -> Result<String, SdkError> {
+        self.update_profile_full(display_name, bio, avatar_cid_hex, "", "", "")
+            .await
+    }
+
+    /// Updates our public profile with everything a social profile shows.
+    ///
+    /// The country is a self-declared attribute the user may leave empty; it
+    /// is never inferred from an address or a connection.
+    pub async fn update_profile_full(
+        &mut self,
+        display_name: &str,
+        bio: &str,
+        avatar_cid_hex: &str,
+        banner_cid_hex: &str,
+        website: &str,
+        country: &str,
+    ) -> Result<String, SdkError> {
         let avatar_cid = hex::decode(avatar_cid_hex).unwrap_or_default();
+        let banner_cid = hex::decode(banner_cid_hex).unwrap_or_default();
+        let mut attributes = std::collections::HashMap::new();
+        let country = country.trim();
+        if !country.is_empty() {
+            attributes.insert(ATTR_COUNTRY.to_owned(), country.to_uppercase());
+        }
         self.publish(
             "PROFILE_UPDATE",
             &pb::ProfileUpdate {
                 display_name: display_name.to_owned(),
                 bio: bio.to_owned(),
                 avatar_cid,
-                ..Default::default()
+                banner_cid,
+                website: website.trim().to_owned(),
+                attributes,
             },
             vec![],
         )
@@ -651,6 +736,190 @@ impl<'a> Feed<'a> {
         let mut a = BTreeSet::new();
         a.insert(address.to_owned());
         self.timeline(&a, &["POST_CREATE", "REPOST"], before, limit)
+    }
+
+    /// Every cached event, with the set of posts their author deleted.
+    fn cached_events(&self) -> Result<(Vec<pb::SocialEvent>, BTreeSet<Vec<u8>>), SdkError> {
+        let events: Vec<pb::SocialEvent> = self
+            .one
+            .store
+            .scan::<pb::SocialEvent>(NS_EVENTS)?
+            .into_iter()
+            .filter(|(k, _)| !k.starts_with(b"cursor/"))
+            .map(|(_, e)| e)
+            .collect();
+        let mut deleted = BTreeSet::new();
+        for ev in &events {
+            if ev.r#type == "POST_DELETE" {
+                if let Ok(d) = pb::PostDelete::decode(ev.payload.as_slice()) {
+                    deleted.insert(d.post);
+                }
+            }
+        }
+        Ok((events, deleted))
+    }
+
+    /// One page of a profile tab, newest first, from the cached log.
+    ///
+    /// Call [`Self::refresh_author`] first when online; this reads only what
+    /// the device holds so a profile still opens with no network.
+    pub fn author_tab(
+        &self,
+        address: &str,
+        tab: ProfileTab,
+        before: u64,
+        limit: usize,
+    ) -> Result<Vec<FeedItem>, SdkError> {
+        let (events, deleted) = self.cached_events()?;
+        let mut items: Vec<FeedItem> = Vec::new();
+        for ev in events {
+            if ev.author != address || deleted.contains(&ev.id) {
+                continue;
+            }
+            if before != 0 && ev.timestamp >= before {
+                continue;
+            }
+            let it = item(&ev);
+            let keep = match tab {
+                ProfileTab::Posts => {
+                    (it.kind == "POST_CREATE" && it.reply_to.is_empty())
+                        || it.kind == "REEL_CREATE"
+                        || it.kind == "REPOST"
+                }
+                ProfileTab::Replies => {
+                    it.kind == "COMMENT_CREATE"
+                        || (it.kind == "POST_CREATE" && !it.reply_to.is_empty())
+                }
+                ProfileTab::Media => {
+                    !it.media.is_empty() && (it.kind == "POST_CREATE" || it.kind == "REEL_CREATE")
+                }
+                ProfileTab::Likes => it.kind == "REACTION",
+            };
+            if keep {
+                items.push(it);
+            }
+        }
+        if tab == ProfileTab::Likes {
+            // A later empty reaction withdraws an earlier one; show what
+            // still stands rather than the history of clicking.
+            let mut standing: BTreeMap<String, FeedItem> = BTreeMap::new();
+            items.sort_by_key(|i| i.timestamp);
+            for it in items.drain(..) {
+                let target = it
+                    .payload
+                    .get("target")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                let withdrawn = it
+                    .payload
+                    .get("reaction")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or_default()
+                    .is_empty();
+                if withdrawn {
+                    standing.remove(&target);
+                } else {
+                    standing.insert(target, it);
+                }
+            }
+            items = standing.into_values().collect();
+        }
+        items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+        items.truncate(limit);
+        Ok(items)
+    }
+
+    /// Who an address follows, from their own FOLLOW/UNFOLLOW events.
+    ///
+    /// For ourselves this is the local mirror [`Self::follows`]; for anyone
+    /// else it is replayed from the log this device holds for them.
+    pub fn following_of(&self, address: &str) -> Result<BTreeSet<String>, SdkError> {
+        if address == self.one.account.address() {
+            return Ok(self.follows());
+        }
+        let (events, _) = self.cached_events()?;
+        let mut theirs: Vec<&pb::SocialEvent> =
+            events.iter().filter(|e| e.author == address).collect();
+        theirs.sort_by_key(|e| (e.timestamp, e.sequence));
+        let mut set = BTreeSet::new();
+        for ev in theirs {
+            match ev.r#type.as_str() {
+                "FOLLOW" => {
+                    if let Ok(f) = pb::Follow::decode(ev.payload.as_slice()) {
+                        set.insert(f.target);
+                    }
+                }
+                "UNFOLLOW" => {
+                    if let Ok(f) = pb::Unfollow::decode(ev.payload.as_slice()) {
+                        set.remove(&f.target);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(set)
+    }
+
+    /// Counts an author's public activity from the cached log.
+    pub fn author_stats(&self, address: &str) -> Result<AuthorStats, SdkError> {
+        let (events, deleted) = self.cached_events()?;
+        let mut stats = AuthorStats {
+            address: address.to_owned(),
+            ..Default::default()
+        };
+        let mut following: BTreeSet<String> = BTreeSet::new();
+        let mut likes: BTreeMap<String, bool> = BTreeMap::new();
+        let mut lowest_sequence = u64::MAX;
+        let mut by_time: Vec<&pb::SocialEvent> = events
+            .iter()
+            .filter(|e| e.author == address && !deleted.contains(&e.id))
+            .collect();
+        by_time.sort_by_key(|e| (e.timestamp, e.sequence));
+        for ev in by_time {
+            lowest_sequence = lowest_sequence.min(ev.sequence);
+            if stats.first_event == 0 {
+                stats.first_event = ev.timestamp;
+            }
+            match ev.r#type.as_str() {
+                "POST_CREATE" | "REEL_CREATE" => {
+                    let reply = pb::PostCreate::decode(ev.payload.as_slice())
+                        .map(|p| !p.reply_to.is_empty())
+                        .unwrap_or(false);
+                    if reply {
+                        stats.replies += 1;
+                    } else {
+                        stats.posts += 1;
+                    }
+                    if !ev.media.is_empty() {
+                        stats.media += 1;
+                    }
+                }
+                "COMMENT_CREATE" => stats.replies += 1,
+                "REACTION" => {
+                    if let Ok(r) = pb::Reaction::decode(ev.payload.as_slice()) {
+                        likes.insert(hex::encode(&r.target), !r.reaction.is_empty());
+                    }
+                }
+                "FOLLOW" => {
+                    if let Ok(f) = pb::Follow::decode(ev.payload.as_slice()) {
+                        following.insert(f.target);
+                    }
+                }
+                "UNFOLLOW" => {
+                    if let Ok(f) = pb::Unfollow::decode(ev.payload.as_slice()) {
+                        following.remove(&f.target);
+                    }
+                }
+                _ => {}
+            }
+        }
+        stats.likes = likes.values().filter(|on| **on).count() as u32;
+        stats.following = following.len() as u32;
+        // Sequence 0 is an author's first event, so holding it means the
+        // count below started where their history did.
+        stats.complete = lowest_sequence == 0;
+        Ok(stats)
     }
 
     /// A post with its comments and reaction counts.

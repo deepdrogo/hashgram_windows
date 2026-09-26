@@ -170,6 +170,8 @@ pub async fn reattach_link(state: &Arc<AppState>) {
     }
 }
 
+/// The no-rejections case, which is what the tests exercise.
+#[cfg(test)]
 fn link_needs_restart(unhealthy_checks: &mut u8, peers: usize, has_store: bool) -> bool {
     link_needs_restart_with(unhealthy_checks, peers, has_store, 0)
 }
