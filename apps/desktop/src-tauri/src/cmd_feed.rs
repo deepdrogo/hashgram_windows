@@ -311,6 +311,85 @@ pub async fn feed_post_media(
     Ok(id)
 }
 
+/// Publishes a story: one picture or video that active surfaces stop
+/// showing after `ttl_hours` (default 24, protocol maximum 48).
+///
+/// See `docs/STORIES.md`: expiry means Pulse, profiles and indexes stop
+/// serving it. It is not deletion from the network, and no string in this
+/// app may claim otherwise.
+#[tauri::command]
+pub async fn story_create(
+    state: S<'_>,
+    app: tauri::AppHandle,
+    caption: String,
+    file: MediaUpload,
+    ttl_hours: Option<u64>,
+    sensitive: bool,
+    op: Option<String>,
+) -> CmdResult<String> {
+    let op = op.unwrap_or_default();
+    if caption.chars().count() > 500 {
+        return Err(UiError::invalid(
+            "a story caption is at most 500 characters",
+        ));
+    }
+    let name = std::path::Path::new(&file.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    media_progress(&app, &op, "preparing", 0, 1, &name);
+    let (bytes, mime, _) = read_media(&file.path).await?;
+    if !mime.starts_with("image/") && !mime.starts_with("video/") {
+        return Err(UiError::invalid("a story is a picture or a video"));
+    }
+    let prepared = crate::media::prepare(bytes, mime, &file.client);
+    let ttl = ttl_hours.unwrap_or(24).clamp(1, 48) * 3600;
+
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    media_progress(&app, &op, "uploading", 0, 1, &name);
+    let media = one
+        .feed()
+        .upload_media_with(
+            &prepared.bytes,
+            &prepared.mime,
+            &prepared.kind,
+            &prepared.meta,
+        )
+        .await?;
+    media_progress(&app, &op, "publishing", 1, 1, "");
+    let id = one
+        .feed()
+        .post_story(caption.trim(), vec![media], ttl, sensitive)
+        .await?;
+    one.save()?;
+    media_progress(&app, &op, "published", 1, 1, "");
+    Ok(id)
+}
+
+/// Unexpired stories from the people we follow, and our own.
+#[tauri::command]
+pub async fn stories_active(state: S<'_>) -> CmdResult<Vec<hashgram_sdk::feed::Story>> {
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    let mut authors = one.feed().follows();
+    authors.insert(one.address().to_owned());
+    Ok(one.feed().active_stories(&authors)?)
+}
+
+/// One author's unexpired stories, oldest first.
+#[tauri::command]
+pub async fn stories_of(
+    state: S<'_>,
+    address: String,
+) -> CmdResult<Vec<hashgram_sdk::feed::Story>> {
+    let address = address.trim().to_owned();
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    let _ = one.feed().refresh_author(&address, 100).await;
+    Ok(one.feed().stories_of(&address)?)
+}
+
 /// Comments on a post.
 #[tauri::command]
 pub async fn feed_comment(state: S<'_>, post: String, text: String) -> CmdResult<String> {

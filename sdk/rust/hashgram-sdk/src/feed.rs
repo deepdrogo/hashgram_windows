@@ -269,6 +269,67 @@ pub struct MyActivity {
     pub score: u64,
 }
 
+/// How long a story stays on active surfaces unless the author says less.
+pub const STORY_DEFAULT_SECS: u64 = 24 * 3600;
+
+/// The longest a story may live, which the protocol itself enforces
+/// (`hashgram_proto::limits::MAX_STORY_SECS`). Anything larger is refused
+/// by every node, so the client clamps rather than signs a doomed event.
+pub const STORY_MAX_SECS: u64 = 48 * 3600;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// A story, as a viewer needs it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Story {
+    /// Hex event id.
+    pub id: String,
+    /// Author address.
+    pub author: String,
+    /// Caption, possibly empty.
+    pub caption: String,
+    /// Media (cid hex, mime, size). A story always has at least one.
+    pub media: Vec<(String, String, u64)>,
+    /// When it was signed (s).
+    pub created_at: u64,
+    /// When active surfaces stop showing it (s).
+    pub expires_at: u64,
+    /// Author-marked sensitive.
+    pub sensitive: bool,
+}
+
+impl Story {
+    /// Reads a story from its event, or `None` if it is not one, carries no
+    /// media, or has already expired at `now`.
+    fn from_event(ev: &pb::SocialEvent, now: u64) -> Option<Self> {
+        if ev.r#type != "STORY_CREATE" || ev.media.is_empty() {
+            return None;
+        }
+        let s = pb::StoryCreate::decode(ev.payload.as_slice()).ok()?;
+        if s.expires_at <= now {
+            return None;
+        }
+        Some(Self {
+            id: hex::encode(&ev.id),
+            author: ev.author.clone(),
+            caption: s.caption,
+            media: ev
+                .media
+                .iter()
+                .map(|m| (hex::encode(&m.cid), m.mime.clone(), m.size))
+                .collect(),
+            created_at: ev.timestamp,
+            expires_at: s.expires_at,
+            sensitive: s.sensitive,
+        })
+    }
+}
+
 /// What a client needs to lay media out before the bytes arrive.
 ///
 /// Sizes and durations are the author's claim, like the MIME type: a client
@@ -593,6 +654,70 @@ impl<'a> Feed<'a> {
             vec![],
         )
         .await
+    }
+
+    /// Publishes a story: media that active surfaces stop showing after
+    /// `ttl_secs` (default [`STORY_DEFAULT_SECS`], protocol maximum
+    /// [`STORY_MAX_SECS`]).
+    ///
+    /// Read `docs/STORIES.md` before changing this. "Expires" means clients
+    /// and indexes stop serving it; it does not mean the bytes are gone
+    /// from every machine that saw them, and the app must never say it does.
+    pub async fn post_story(
+        &mut self,
+        caption: &str,
+        media: Vec<pb::MediaReference>,
+        ttl_secs: u64,
+        sensitive: bool,
+    ) -> Result<String, SdkError> {
+        if media.is_empty() {
+            return Err(SdkError::Invalid("a story needs a picture or video".into()));
+        }
+        let ttl = ttl_secs.clamp(60, STORY_MAX_SECS);
+        // The node checks `expires_at` against the event's own timestamp,
+        // which `Social::build` stamps a moment from now. A second of slack
+        // keeps a story from being refused for expiring in its own past.
+        let expires_at = now_secs().saturating_add(ttl);
+        self.publish(
+            "STORY_CREATE",
+            &pb::StoryCreate {
+                caption: caption.to_owned(),
+                expires_at,
+                sensitive,
+            },
+            media,
+        )
+        .await
+    }
+
+    /// Stories from `authors` that have not expired, newest author first.
+    ///
+    /// Expiry is applied on read from the event's own signed `expires_at`,
+    /// so a node that still serves an old story does not put it back on
+    /// screen.
+    pub fn active_stories(&self, authors: &BTreeSet<String>) -> Result<Vec<Story>, SdkError> {
+        let now = now_secs();
+        let (events, _) = self.cached_events()?;
+        let blocked = self.blocked_authors();
+        let mut out: Vec<Story> = events
+            .iter()
+            .filter(|e| e.r#type == "STORY_CREATE")
+            .filter(|e| authors.is_empty() || authors.contains(&e.author))
+            .filter(|e| !blocked.contains(&e.author))
+            .filter_map(|e| Story::from_event(e, now))
+            .collect();
+        out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(out)
+    }
+
+    /// One author's unexpired stories, oldest first — the order a viewer
+    /// steps through them.
+    pub fn stories_of(&self, author: &str) -> Result<Vec<Story>, SdkError> {
+        let mut set = BTreeSet::new();
+        set.insert(author.to_owned());
+        let mut out = self.active_stories(&set)?;
+        out.reverse();
+        Ok(out)
     }
 
     /// Follow / unfollow (public).
@@ -1790,6 +1915,92 @@ impl<'a> Feed<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn story_event(author: &str, created: u64, expires: u64, media: bool) -> pb::SocialEvent {
+        pb::SocialEvent {
+            id: vec![created as u8; 32],
+            r#type: "STORY_CREATE".into(),
+            author: author.into(),
+            timestamp: created,
+            payload: pb::StoryCreate {
+                caption: "hello".into(),
+                expires_at: expires,
+                sensitive: false,
+            }
+            .encode_to_vec(),
+            media: if media {
+                vec![pb::MediaReference {
+                    cid: vec![7; 32],
+                    mime: "image/jpeg".into(),
+                    size: 1024,
+                    kind: "image".into(),
+                    ..Default::default()
+                }]
+            } else {
+                Vec::new()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_story_is_active_until_the_expiry_its_author_signed() {
+        let t0 = 1_800_000_000;
+        let day = 24 * 3600;
+        let ev = story_event("hash1alice", t0, t0 + day, true);
+
+        // T0: visible.
+        assert!(Story::from_event(&ev, t0).is_some());
+        // One second before the deadline: still visible.
+        assert!(Story::from_event(&ev, t0 + day - 1).is_some());
+        // At the deadline and after it: gone from active surfaces.
+        assert!(Story::from_event(&ev, t0 + day).is_none());
+        assert!(Story::from_event(&ev, t0 + day + 1).is_none());
+        assert!(Story::from_event(&ev, t0 + 10 * day).is_none());
+    }
+
+    #[test]
+    fn expiry_is_read_from_the_event_not_from_when_it_arrived() {
+        // A node serving an old story does not put it back on screen: the
+        // filter looks at the signed field, not at delivery time.
+        let t0 = 1_800_000_000;
+        let stale = story_event("hash1alice", t0 - 90_000, t0 - 3_600, true);
+        assert!(Story::from_event(&stale, t0).is_none());
+    }
+
+    #[test]
+    fn a_story_without_media_is_not_a_story() {
+        let t0 = 1_800_000_000;
+        assert!(Story::from_event(&story_event("hash1alice", t0, t0 + 3600, false), t0).is_none());
+    }
+
+    #[test]
+    fn only_story_events_become_stories() {
+        let mut ev = story_event("hash1alice", 1_800_000_000, 1_800_003_600, true);
+        ev.r#type = "POST_CREATE".into();
+        assert!(Story::from_event(&ev, 1_800_000_000).is_none());
+    }
+
+    #[test]
+    fn a_tampered_payload_yields_no_story() {
+        // Signature checking happens in `social`; this is the layer below
+        // it refusing to invent fields from bytes it cannot decode.
+        let mut ev = story_event("hash1alice", 1_800_000_000, 1_800_003_600, true);
+        ev.payload = vec![0xff; 12];
+        assert!(Story::from_event(&ev, 1_800_000_000).is_none());
+    }
+
+    #[test]
+    fn the_client_never_asks_for_a_lifetime_the_protocol_refuses() {
+        assert_eq!(STORY_DEFAULT_SECS, 24 * 3600);
+        assert_eq!(STORY_MAX_SECS, hashgram_proto::limits::MAX_STORY_SECS);
+        // What `post_story` does to an out-of-range request.
+        assert_eq!(
+            (10 * 24 * 3600u64).clamp(60, STORY_MAX_SECS),
+            STORY_MAX_SECS
+        );
+        assert_eq!(1u64.clamp(60, STORY_MAX_SECS), 60);
+    }
 
     #[test]
     fn wall_names_are_bounded_and_plain() {

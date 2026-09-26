@@ -429,6 +429,16 @@ export interface FeedItem {
   /** Post replied to, hex id, "" for none. */
   reply_to: string;
 }
+/** A story. `expires_at` is when active surfaces stop showing it. */
+export interface Story {
+  id: string;
+  author: string;
+  caption: string;
+  media: [string, string, number][];
+  created_at: number;
+  expires_at: number;
+  sensitive: boolean;
+}
 export interface PostThread {
   post: FeedItem;
   comments: FeedItem[];
@@ -970,6 +980,10 @@ export const ipc = {
     call<string>("feed_post", { text, hashtags, mediaPaths, sensitive, channel }),
   feedPostMedia: (text: string, hashtags: string[], files: MediaUpload[], sensitive: boolean, channel?: string, op?: string) =>
     call<string>("feed_post_media", { text, hashtags, files, sensitive, channel, op }),
+  storyCreate: (caption: string, file: MediaUpload, ttlHours: number, sensitive: boolean, op?: string) =>
+    call<string>("story_create", { caption, file, ttlHours, sensitive, op }),
+  storiesActive: () => call<Story[]>("stories_active"),
+  storiesOf: (address: string) => call<Story[]>("stories_of", { address }),
   feedComment: (post: string, text: string) => call<string>("feed_comment", { post, text }),
   feedReact: (target: string, reaction: string) => call<string>("feed_react", { target, reaction }),
   feedRepost: (post: string, comment: string) => call<string>("feed_repost", { post, comment }),

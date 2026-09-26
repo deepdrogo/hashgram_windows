@@ -199,6 +199,12 @@ const handlers: Record<string, (a: Args) => unknown> = {
   profile_upload_image: () => "cd".repeat(32),
   profile_timeline: (a) => (a?.tab === "likes" ? [] : (handlers.feed_friends!({}) as unknown[]).slice(0, a?.tab === "media" ? 0 : 2)),
   profile_follow_list: (a) => (a?.which === "followers" ? [] : [ALICE, BOB]),
+  stories_active: () => [
+    { id: "s1", author: ALICE, caption: "Morning on the ridge", media: [["ab".repeat(32), "image/jpeg", 220_000]], created_at: Math.floor(now / 1000) - 3600, expires_at: Math.floor(now / 1000) + 20 * 3600, sensitive: false },
+    { id: "s2", author: BOB, caption: "", media: [["cd".repeat(32), "image/jpeg", 180_000]], created_at: Math.floor(now / 1000) - 7200, expires_at: Math.floor(now / 1000) + 16 * 3600, sensitive: false },
+  ],
+  stories_of: (a) => (handlers.stories_active!({}) as { author: string }[]).filter((s) => s.author === a?.address),
+  story_create: () => "ef".repeat(32),
 };
 
 export function installDevShim() {

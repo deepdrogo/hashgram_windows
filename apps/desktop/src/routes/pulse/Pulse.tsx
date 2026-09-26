@@ -19,6 +19,7 @@ import { store } from "~/lib/store";
 import { rememberTab, recallTab, trackScroll } from "~/lib/uistate";
 import { PostCard, PostView, ComposeDialog, SourceLine, usePages } from "~/routes/feed/Feed";
 import { DiscoveryRail } from "~/components/social/DiscoveryRail";
+import { StoriesRow } from "~/components/social/Stories";
 import { TopicsHome } from "~/routes/topics/Topics";
 
 type Tab = "latest" | "following" | "topics" | "local";
@@ -85,6 +86,9 @@ function PulseBody(props: { tab: Tab; mode: { kind: string; tag?: string }; onCo
       </div>
       <div class="min-h-0 flex-1 overflow-auto" ref={(el) => onCleanup(trackScroll(`scroll:pulse:${tagged() || props.tab}`, el))}>
         <div class="mx-auto max-w-2xl px-4 py-3">
+          <Show when={!tagged() && props.tab !== "topics"}>
+            <StoriesRow />
+          </Show>
           <Show when={tagged()} fallback={<FeedFor tab={props.tab} />}>
             <TagFeed tag={tagged()} />
           </Show>
