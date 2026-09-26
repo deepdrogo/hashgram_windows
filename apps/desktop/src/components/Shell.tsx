@@ -1,32 +1,54 @@
-// The application frame: left rail (Mail · Drive · Feed · People · Spaces ·
-// Earn · Wallet · Network · Settings), top bar with search and sync state,
-// toasts. Keyboard: Ctrl+K search, Ctrl+L lock, Alt+1..9 sections.
-import { For, Show, createEffect, createSignal, onMount, onCleanup, type ParentProps } from "solid-js";
+// The application frame: left rail (Pulse · Chats · Mail · Drive · Spaces ·
+// Contacts, then Wallet · Earn · Network, then My profile · Settings), top bar
+// with search, theme and sync state, toasts.
+// Keyboard: Ctrl+K search, Ctrl+L lock, Alt+1..9 sections.
+import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup, type ParentProps } from "solid-js";
 import { A, useLocation, useNavigate } from "@solidjs/router";
-import { Mail, HardDrive, Rss, Users, LayoutGrid, Coins, Wallet, Network, Settings, CircleHelp, Search, Lock, Download, X, ShieldAlert, LogOut, Compass, UserCircle } from "lucide-solid";
+import { Mail, HardDrive, Users, LayoutGrid, Coins, Wallet, Network, Settings, CircleHelp, Search, Lock, Download, X, ShieldAlert, LogOut, UserCircle, Activity, MessageSquare, Sun, Moon } from "lucide-solid";
 import { store } from "~/lib/store";
 import { updates } from "~/lib/updates";
 import { ipc } from "~/lib/ipc";
 import { t, type Key } from "~/lib/i18n";
+import { setNavigator } from "~/lib/nav";
 import { CommandPalette } from "./CommandPalette";
 import { PerfPanel } from "./PerfPanel";
 import { SyncIndicator } from "./SyncIndicator";
 import { Kbd, Button } from "./ui";
 import { confirm } from "~/lib/dialogs";
 
-export const NAV: { to: string; key: Key; icon: typeof Mail; accel: string }[] = [
-  { to: "/mail", key: "nav_mail", icon: Mail, accel: "1" },
-  { to: "/drive", key: "nav_drive", icon: HardDrive, accel: "2" },
-  { to: "/hashwall", key: "nav_feed", icon: Rss, accel: "3" },
-  { to: "/explore", key: "nav_explore", icon: Compass, accel: "4" },
-  { to: "/people", key: "nav_people", icon: Users, accel: "5" },
-  { to: "/spaces", key: "nav_spaces", icon: LayoutGrid, accel: "6" },
-  { to: "/earn", key: "nav_earn", icon: Coins, accel: "7" },
-  { to: "/wallet", key: "nav_wallet", icon: Wallet, accel: "8" },
-  { to: "/network", key: "nav_network", icon: Network, accel: "9" },
-  { to: "/me", key: "nav_me", icon: UserCircle, accel: "0" },
-  { to: "/settings", key: "nav_settings", icon: Settings, accel: "" },
+type NavGroup = "social" | "assets" | "you";
+
+export interface NavItem {
+  to: string;
+  key: Key;
+  icon: typeof Mail;
+  accel: string;
+  group: NavGroup;
+  /** Path prefix that marks the item active; defaults to `to`. */
+  match?: string;
+  /** False while a section is still being built: it keeps its place in the
+   *  order but is not shown, so no rail entry leads to an empty screen. */
+  enabled?: boolean;
+}
+
+export const NAV: NavItem[] = [
+  { to: "/pulse", key: "nav_pulse", icon: Activity, accel: "1", group: "social" },
+  { to: "/chats", key: "nav_chats", icon: MessageSquare, accel: "2", group: "social", enabled: false },
+  { to: "/mail", key: "nav_mail", icon: Mail, accel: "3", group: "social" },
+  { to: "/drive", key: "nav_drive", icon: HardDrive, accel: "4", group: "social" },
+  { to: "/spaces", key: "nav_spaces", icon: LayoutGrid, accel: "5", group: "social" },
+  { to: "/contacts", key: "nav_contacts", icon: Users, accel: "6", group: "social" },
+  { to: "/wallet", key: "nav_wallet", icon: Wallet, accel: "7", group: "assets" },
+  { to: "/earn", key: "nav_earn", icon: Coins, accel: "8", group: "assets" },
+  { to: "/network", key: "nav_network", icon: Network, accel: "9", group: "assets" },
+  { to: "/profile/me", key: "nav_profile", icon: UserCircle, accel: "0", group: "you", match: "/profile" },
+  { to: "/settings", key: "nav_settings", icon: Settings, accel: "", group: "you" },
 ];
+
+const GROUPS: NavGroup[] = ["social", "assets", "you"];
+
+/** The rail in the order the user sees it, without the sections still in build. */
+export const visibleNav = () => NAV.filter((n) => n.enabled !== false);
 
 export function Shell(props: ParentProps) {
   const [palette, setPalette] = createSignal(false);
@@ -40,8 +62,12 @@ export function Shell(props: ParentProps) {
     if (!ok) return;
     await ipc.lock();
     await ipc.wipeLocalData("DELETE");
+    // The vault this window was built around no longer exists, so the window
+    // starts over at onboarding. This is the one reload the app performs.
     window.location.reload();
   };
+
+  setNavigator((to) => navigate(to));
 
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -55,7 +81,7 @@ export function Shell(props: ParentProps) {
         e.preventDefault();
         void ipc.lock();
       } else if (e.altKey && /^[0-9]$/.test(e.key)) {
-        const item = NAV.find((n) => n.accel && n.accel === e.key);
+        const item = visibleNav().find((n) => n.accel && n.accel === e.key);
         if (item) {
           e.preventDefault();
           navigate(item.to);
@@ -94,10 +120,11 @@ export function Shell(props: ParentProps) {
   const isActive = (to: string) => location.pathname.startsWith(to);
   const badge = (to: string): number => {
     if (to === "/mail") return (store.counts()["inbox"]?.unread ?? 0) + (store.counts()["requests"]?.total ?? 0);
-    if (to === "/people") return store.requestsIn();
+    if (to === "/contacts") return store.requestsIn();
     if (to === "/wallet") return store.pendingTx();
     return 0;
   };
+  const light = createMemo(() => store.resolvedTheme() === "light");
 
   return (
     <div class="flex h-full flex-col">
@@ -133,29 +160,38 @@ export function Shell(props: ParentProps) {
             <Logo size={16} />
             <span class="text-[13px] font-semibold tracking-tight">{t("app_name")}</span>
           </div>
-          <ul class="flex-1 space-y-px px-2 pt-1">
-            <For each={NAV}>
-              {(item) => (
-                <li>
-                  <A
-                    href={item.to}
-                    class={`row flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] ${isActive(item.to) ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"}`}
-                    aria-current={isActive(item.to) ? "page" : undefined}
-                    title={item.accel ? `${t(item.key)} (Alt+${item.accel})` : t(item.key)}
-                    data-nav={item.key}
-                  >
-                    <item.icon size={15} aria-hidden="true" class={isActive(item.to) ? "text-brand" : ""} />
-                    <span class="flex-1">{t(item.key)}</span>
-                    <Show when={badge(item.to) > 0}>
-                      <span class="badge-strong tnum" title={String(badge(item.to))}>
-                        {badge(item.to) > 99 ? "99+" : badge(item.to)}
-                      </span>
-                    </Show>
-                  </A>
-                </li>
+          <div class="flex-1 overflow-y-auto px-2 pt-1">
+            <For each={GROUPS}>
+              {(group, i) => (
+                <ul class={`space-y-px ${i() > 0 ? "mt-3 border-t border-border pt-3" : ""}`}>
+                  <For each={visibleNav().filter((n) => n.group === group)}>
+                    {(item) => {
+                      const active = () => isActive(item.match ?? item.to);
+                      return (
+                        <li>
+                          <A
+                            href={item.to}
+                            class={`row flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] ${active() ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"}`}
+                            aria-current={active() ? "page" : undefined}
+                            title={item.accel ? `${t(item.key)} (Alt+${item.accel})` : t(item.key)}
+                            data-nav={item.key}
+                          >
+                            <item.icon size={15} aria-hidden="true" class={active() ? "text-brand" : ""} />
+                            <span class="flex-1">{t(item.key)}</span>
+                            <Show when={badge(item.to) > 0}>
+                              <span class="badge-strong tnum" title={String(badge(item.to))}>
+                                {badge(item.to) > 99 ? "99+" : badge(item.to)}
+                              </span>
+                            </Show>
+                          </A>
+                        </li>
+                      );
+                    }}
+                  </For>
+                </ul>
               )}
             </For>
-          </ul>
+          </div>
           <div class="space-y-px px-2 pb-2">
             <A href="/help" class={`row flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] ${isActive("/help") ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"}`}>
               <CircleHelp size={15} aria-hidden="true" />
@@ -169,7 +205,7 @@ export function Shell(props: ParentProps) {
             </button>
             <button type="button" class="row flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] text-muted hover:text-fg" onClick={() => void signOut()}>
               <LogOut size={15} aria-hidden="true" />
-              <span class="flex-1 text-left">Sign out</span>
+              <span class="flex-1 text-left">{t("sign_out")}</span>
             </button>
           </div>
         </nav>
@@ -186,6 +222,15 @@ export function Shell(props: ParentProps) {
             </button>
             <span class="flex-1" />
             <SyncIndicator />
+            <button
+              type="button"
+              class="btn-ghost btn-icon-sm"
+              title={light() ? t("theme_switch_to_dark") : t("theme_switch_to_light")}
+              aria-label={light() ? t("theme_switch_to_dark") : t("theme_switch_to_light")}
+              onClick={() => void store.setTheme(light() ? "dark" : "light")}
+            >
+              {light() ? <Moon size={14} /> : <Sun size={14} />}
+            </button>
             <button type="button" class="btn-ghost btn-icon-sm" title={`${t("lock")} (Ctrl+L)`} aria-label={t("lock")} onClick={() => void ipc.lock()}>
               <Lock size={14} />
             </button>

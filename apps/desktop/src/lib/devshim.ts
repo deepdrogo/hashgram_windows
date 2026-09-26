@@ -172,6 +172,7 @@ const handlers: Record<string, (a: Args) => unknown> = {
   sync_now: () => undefined,
   leases_list: () => [],
   tx_has_pending: () => false,
+  settings_set: () => undefined,
 };
 
 export function installDevShim() {

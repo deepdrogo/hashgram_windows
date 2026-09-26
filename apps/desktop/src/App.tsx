@@ -128,32 +128,43 @@ export function App() {
             </Shell>
           )}
         >
-          <Route path="/" component={() => <Navigate href="/mail/inbox" />} />
+          <Route path="/" component={() => <Navigate href="/pulse" />} />
+          <Route path="/pulse/:tab?/:id?" component={Feed} />
           <Route path="/mail/:folder?/:id?" component={MailRoute} />
           <Route path="/drive/:parent?" component={Drive} />
-          <Route path="/hashwall/:tab?/:id?" component={Feed} />
-          <Route path="/feed/:tab?/:id?" component={FeedRedirect} />
           <Route path="/explore/:section?/:arg?" component={Explore} />
-          <Route path="/me" component={Me} />
-          <Route path="/people/:address?" component={People} />
+          <Route path="/profile/me" component={Me} />
+          <Route path="/contacts/:address?" component={People} />
           <Route path="/spaces/:id?/:tab?" component={Spaces} />
           <Route path="/earn/:tab?" component={Earn} />
           <Route path="/wallet/:tab?" component={Wallet} />
           <Route path="/network" component={Network} />
           <Route path="/settings/:tab?" component={Settings} />
           <Route path="/help/:slug?" component={Help} />
-          <Route path="*" component={() => <Navigate href="/mail/inbox" />} />
+          {/* Links, bookmarks and deep links minted before the rename. */}
+          <Route path="/hashwall/:tab?/:id?" component={PulseRedirect} />
+          <Route path="/feed/:tab?/:id?" component={PulseRedirect} />
+          <Route path="/people/:address?" component={ContactsRedirect} />
+          <Route path="/profile/:address" component={ContactsRedirect} />
+          <Route path="/me" component={() => <Navigate href="/profile/me" />} />
+          <Route path="*" component={() => <Navigate href="/pulse" />} />
         </HashRouter>
       </Match>
     </Switch>
   );
 }
 
-/** `/feed/…` → `/hashwall/…`, same tab and post. */
-function FeedRedirect() {
+/** `/feed/…` and `/hashwall/…` → `/pulse/…`, same tab and post. */
+function PulseRedirect() {
   const params = useParams<{ tab?: string; id?: string }>();
-  const target = () => `/hashwall${params.tab ? `/${params.tab}` : ""}${params.id ? `/${params.id}` : ""}`;
+  const target = () => `/pulse${params.tab ? `/${params.tab}` : ""}${params.id ? `/${params.id}` : ""}`;
   return <Navigate href={target()} />;
+}
+
+/** `/people/…` → `/contacts/…`, same person. */
+function ContactsRedirect() {
+  const params = useParams<{ address?: string }>();
+  return <Navigate href={`/contacts${params.address ? `/${params.address}` : ""}`} />;
 }
 
 /** hashgram:// links: mail/<id>, space/<id>, drive/<id>, user/<addr|@name>, wall/<id>, post/<id>, tag/<name>. */
@@ -167,12 +178,12 @@ function DeepLinks() {
       if (head === "mail" && arg) navigate(`/mail/inbox/${arg}`);
       else if (head === "space" && arg) navigate(`/spaces/${arg}`);
       else if (head === "drive" && arg) navigate(`/drive/?select=${arg}`);
-      else if (head === "user" && arg) navigate(arg.startsWith("hash1") ? `/people/${arg}` : `/people?q=${encodeURIComponent(arg)}`);
-      else if (head === "wall" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/hashwall/walls/${arg.toLowerCase()}`);
-      else if (head === "post" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/hashwall/friends/${arg.toLowerCase()}`);
+      else if (head === "user" && arg) navigate(arg.startsWith("hash1") ? `/contacts/${arg}` : `/contacts?q=${encodeURIComponent(arg)}`);
+      else if (head === "wall" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/pulse/walls/${arg.toLowerCase()}`);
+      else if (head === "post" && /^[0-9a-f]{64}$/i.test(arg)) navigate(`/pulse/post/${arg.toLowerCase()}`);
       else if (head === "tag" && arg) navigate(`/explore/posts/${encodeURIComponent(arg.replace(/^#/, ""))}`);
-      else if (/^hash1/.test(rest)) navigate(`/people/${rest}`);
-      else if (rest.startsWith("@")) navigate(`/people?q=${encodeURIComponent(rest)}`);
+      else if (/^hash1/.test(rest)) navigate(`/contacts/${rest}`);
+      else if (rest.startsWith("@")) navigate(`/contacts?q=${encodeURIComponent(rest)}`);
       else store.toast(`Unrecognised link: ${url}`, "error");
     });
   });

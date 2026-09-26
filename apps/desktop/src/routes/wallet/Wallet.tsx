@@ -10,6 +10,7 @@ import { OfflineBanner, ErrorState } from "~/components/States";
 import { Mono } from "~/components/identity";
 import { ipc, errText, type TxPreview, type MsgSpec, type PendingRow, type UsernameAvailability, type IdentityStatus } from "~/lib/ipc";
 import { store } from "~/lib/store";
+import { go } from "~/lib/nav";
 import { t } from "~/lib/i18n";
 import { formatHash, parseAmount, isHashAddress, formatTime, truncateMiddle, bps } from "~/lib/format";
 import { copyText } from "~/lib/clipboard";
@@ -511,7 +512,7 @@ function UsernamesTab() {
           <Show when={!registered()}>
             <Notice strong title="Register this PC first">
               Usernames are on-chain records. Receive a small amount of HASH and complete the one-time identity registration in Wallet → Devices first.
-              <Button class="mt-2" size="sm" variant="secondary" onClick={() => { window.location.hash = "/wallet/devices"; }}>
+              <Button class="mt-2" size="sm" variant="secondary" onClick={() => go("/wallet/devices")}>
                 Open Devices
               </Button>
             </Notice>

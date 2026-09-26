@@ -119,10 +119,10 @@ export function MeRoute() {
                   <section class="mt-4">
                     <h2 class="mb-2 flex items-center gap-2 text-sm font-medium">
                       <Megaphone size={14} /> My walls
-                      <Button variant="ghost" size="sm" class="ml-auto" onClick={() => navigate("/hashwall/walls")}>Manage</Button>
+                      <Button variant="ghost" size="sm" class="ml-auto" onClick={() => navigate("/pulse/walls")}>Manage</Button>
                     </h2>
                     <Show when={p().walls.length} fallback={<p class="text-xs text-muted">You have not pinned or opened a wall yet.</p>}>
-                      <For each={p().walls}>{(w) => <WallCard w={w} onOpen={() => navigate(`/hashwall/walls/${w.id}`)} />}</For>
+                      <For each={p().walls}>{(w) => <WallCard w={w} onOpen={() => navigate(`/pulse/walls/${w.id}`)} />}</For>
                     </Show>
                     <Show when={p().activity.walls_posted.length}>
                       <p class="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted">
@@ -158,13 +158,13 @@ export function MeRoute() {
                                           <span class="tnum text-[11px] text-muted" title={formatMs(it.timestamp * 1000)}>{shortWhen(it.timestamp * 1000)}</span>
                                         </span>
                                         <Show when={postText(it)}>
-                                          <button type="button" class="mt-0.5 block max-w-full truncate text-left hover:underline" onClick={() => navigate(`/hashwall/post/${it.kind === "COMMENT" ? target(it) || it.id : it.id}`)}>
+                                          <button type="button" class="mt-0.5 block max-w-full truncate text-left hover:underline" onClick={() => navigate(`/pulse/post/${it.kind === "COMMENT" ? target(it) || it.id : it.id}`)}>
                                             {postText(it)}
                                           </button>
                                         </Show>
                                         <Show when={!postText(it) && target(it)}>
-                                          <Show when={target(it).startsWith("hash1")} fallback={<button type="button" class="mt-0.5 block text-left text-xs text-muted hover:underline" onClick={() => navigate(`/hashwall/post/${target(it)}`)}>on post {target(it).slice(0, 12)}…</button>}>
-                                            <button type="button" class="mt-0.5 block text-left text-xs text-muted hover:underline" onClick={() => navigate(`/people/${target(it)}`)}><Mono text={target(it)} head={12} tail={6} /></button>
+                                          <Show when={target(it).startsWith("hash1")} fallback={<button type="button" class="mt-0.5 block text-left text-xs text-muted hover:underline" onClick={() => navigate(`/pulse/post/${target(it)}`)}>on post {target(it).slice(0, 12)}…</button>}>
+                                            <button type="button" class="mt-0.5 block text-left text-xs text-muted hover:underline" onClick={() => navigate(`/contacts/${target(it)}`)}><Mono text={target(it)} head={12} tail={6} /></button>
                                           </Show>
                                         </Show>
                                       </span>

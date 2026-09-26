@@ -10,7 +10,7 @@ import { ipc, type MailSummary, type EntryView, type ContactRecord } from "~/lib
 import { store } from "~/lib/store";
 import { t } from "~/lib/i18n";
 import { handle, shortWhen, formatBytes, isHashAddress } from "~/lib/format";
-import { NAV } from "./Shell";
+import { visibleNav } from "./Shell";
 import { Kbd } from "./ui";
 
 type Row =
@@ -53,10 +53,10 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
     const lower = query.toLowerCase();
     if (!query) {
       out.push({ kind: "cmd", id: "compose", label: t("mail_compose"), hint: "c", run: () => navigate("/mail?compose=1") });
-      for (const n of NAV) out.push({ kind: "cmd", id: n.to, label: t(n.key), hint: n.accel ? `Alt+${n.accel}` : undefined, run: () => navigate(n.to) });
+      for (const n of visibleNav()) out.push({ kind: "cmd", id: n.to, label: t(n.key), hint: n.accel ? `Alt+${n.accel}` : undefined, run: () => navigate(n.to) });
       return out;
     }
-    for (const n of NAV) if (t(n.key).toLowerCase().includes(lower)) out.push({ kind: "cmd", id: n.to, label: t(n.key), run: () => navigate(n.to) });
+    for (const n of visibleNav()) if (t(n.key).toLowerCase().includes(lower)) out.push({ kind: "cmd", id: n.to, label: t(n.key), run: () => navigate(n.to) });
     if (t("mail_compose").toLowerCase().includes(lower)) out.push({ kind: "cmd", id: "compose", label: t("mail_compose"), run: () => navigate("/mail?compose=1") });
     const r = results();
     for (const m of r?.mail ?? []) out.push({ kind: "mail", id: m.id, m });
@@ -80,10 +80,10 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
         navigate(`/drive/${row.e.parent_id}?select=${row.e.id}`);
         break;
       case "person":
-        navigate(`/people/${row.c.address}`);
+        navigate(`/contacts/${row.c.address}`);
         break;
       case "lookup":
-        navigate(`/people?q=${encodeURIComponent(row.q)}`);
+        navigate(`/contacts?q=${encodeURIComponent(row.q)}`);
         break;
     }
   };

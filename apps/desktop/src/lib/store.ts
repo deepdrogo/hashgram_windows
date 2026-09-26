@@ -2,6 +2,8 @@
 import { createSignal, createRoot } from "solid-js";
 import { ipc, on, errText, type AppStatus, type Settings, type SyncStatus, type SyncPhase, type FolderCounts, type SyncEvent, type IdentityStatus } from "./ipc";
 import { setLocale } from "./i18n";
+import { go } from "./nav";
+import { clearOnLock } from "./uistate";
 
 export interface Toast {
   id: number;
@@ -24,6 +26,7 @@ function createStore() {
   const [pendingTx, setPendingTx] = createSignal<number>(0);
   const [balance, setBalance] = createSignal<string | null>(null);
   const [identity, setIdentity] = createSignal<IdentityStatus | null>(null);
+  const [resolvedTheme, setResolvedTheme] = createSignal<"dark" | "light">("dark");
   // A monotonically increasing tick per area; screens re-fetch when it changes.
   const [ticks, setTicks] = createSignal<Record<Refresh, number>>({ mail: 0, drive: 0, people: 0, feed: 0, circles: 0, spaces: 0, wallet: 0, network: 0 });
   let toastId = 0;
@@ -50,7 +53,25 @@ function createStore() {
     html.dataset.theme = resolved;
     html.dataset.density = s?.appearance.density ?? "comfortable";
     html.dataset.reducedMotion = s?.appearance.reduced_motion ? "true" : "false";
+    setResolvedTheme(resolved);
     setLocale(s?.appearance.language === "ka" ? "ka" : "en");
+  };
+
+  /** The header switch: applies immediately, then persists. */
+  const setTheme = async (theme: "dark" | "light" | "system") => {
+    const current = settings();
+    if (!current) return;
+    const next = structuredClone(current);
+    next.appearance.theme = theme;
+    setSettings(next);
+    applyAppearance(next);
+    try {
+      await ipc.settingsSet(next);
+    } catch (e) {
+      setSettings(current);
+      applyAppearance(current);
+      toast(errText(e), "error");
+    }
   };
 
   const refreshStatus = async () => {
@@ -153,9 +174,7 @@ function createStore() {
           registrationReadyNotified = true;
           toast("HASH received — this PC is ready for identity registration.", "info", {
             label: "Finish setup",
-            run: () => {
-              window.location.hash = "/wallet/devices";
-            },
+            run: () => go("/wallet/devices"),
           });
         }
         break;
@@ -191,6 +210,7 @@ function createStore() {
       setIdentity(null);
       registrationReadyNotified = false;
       setPhase("Offline");
+      clearOnLock();
       void refreshStatus();
     });
     await on("session:unlocked", () => {
@@ -234,8 +254,10 @@ function createStore() {
     pendingTx,
     balance,
     identity,
+    resolvedTheme,
     ticks,
     setLocked,
+    setTheme,
     toast,
     dismissToast,
     bump,

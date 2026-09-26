@@ -83,7 +83,7 @@ export function PeopleRoute() {
           </Show>
           <Show when={resolved()}>
             {(r) => (
-              <button type="button" class="row flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left" onClick={() => navigate(`/people/${r().address}`)}>
+              <button type="button" class="row flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left" onClick={() => navigate(`/contacts/${r().address}`)}>
                 <Avatar address={r().address} />
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-[13px] font-medium">{handle(r().address, r().username, r().display_name)}</span>
@@ -97,7 +97,7 @@ export function PeopleRoute() {
             )}
           </Show>
           <Show when={(local() ?? []).length}>
-            <For each={local() ?? []}>{(c) => <ContactRow c={c} onOpen={() => navigate(`/people/${c.address}`)} />}</For>
+            <For each={local() ?? []}>{(c) => <ContactRow c={c} onOpen={() => navigate(`/contacts/${c.address}`)} />}</For>
           </Show>
           <Tabs
             class="px-2"
@@ -120,7 +120,7 @@ export function PeopleRoute() {
                   {(c) => (
                     <ContactRow
                       c={c}
-                      onOpen={() => navigate(`/people/${c.address}`)}
+                      onOpen={() => navigate(`/contacts/${c.address}`)}
                       actions={
                         tab() === "incoming" ? (
                           <>
@@ -138,7 +138,7 @@ export function PeopleRoute() {
                 </For>
                 <Show when={tab() === "incoming" && (outgoing() ?? []).length}>
                   <p class="px-3 pt-3 text-[11px] uppercase tracking-wide text-muted">Sent, awaiting answer</p>
-                  <For each={outgoing() ?? []}>{(c) => <ContactRow c={c} onOpen={() => navigate(`/people/${c.address}`)} />}</For>
+                  <For each={outgoing() ?? []}>{(c) => <ContactRow c={c} onOpen={() => navigate(`/contacts/${c.address}`)} />}</For>
                 </Show>
               </Show>
             </Show>

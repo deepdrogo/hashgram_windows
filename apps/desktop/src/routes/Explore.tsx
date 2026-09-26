@@ -81,7 +81,7 @@ export function ExploreRoute() {
                     </div>
                     <Show when={section() === "walls"}>
                       <Show when={d().walls.length} fallback={<Empty title="No active walls" icon={<Megaphone size={24} />}>Open the first one from Hashwall → Walls.</Empty>}>
-                        <For each={d().walls}>{(w) => <WallCard w={w} onOpen={() => navigate(`/hashwall/walls/${w.id}`)} />}</For>
+                        <For each={d().walls}>{(w) => <WallCard w={w} onOpen={() => navigate(`/pulse/walls/${w.id}`)} />}</For>
                       </Show>
                     </Show>
                     <Show when={section() === "people"}>
@@ -91,10 +91,10 @@ export function ExploreRoute() {
                             {(a, i) => (
                               <li class="flex items-center gap-3 px-3 py-2 text-[13px]">
                                 <span class="tnum w-6 text-right text-xs text-muted">{i() + 1}</span>
-                                <button type="button" onClick={() => navigate(`/people/${a.author}`)}>
+                                <button type="button" onClick={() => navigate(`/contacts/${a.author}`)}>
                                   <PersonAvatar address={a.author} size={28} />
                                 </button>
-                                <button type="button" class="min-w-0 flex-1 text-left hover:underline" onClick={() => navigate(`/people/${a.author}`)}>
+                                <button type="button" class="min-w-0 flex-1 text-left hover:underline" onClick={() => navigate(`/contacts/${a.author}`)}>
                                   <Who address={a.author} />
                                   <span class="block text-[11px] text-muted">active {shortWhen(a.last_active * 1000)}</span>
                                 </button>
@@ -179,7 +179,7 @@ function ExplorePosts(props: { tag: string; onTag: (tag: string) => void }) {
             </Empty>
           </Show>
         }>
-          {(it) => <PostCard it={it} onOpen={() => navigate(`/hashwall/post/${it.id}`)} />}
+          {(it) => <PostCard it={it} onOpen={() => navigate(`/pulse/post/${it.id}`)} />}
         </For>
         <div ref={pages.sentinel} class="flex items-center justify-center py-3 text-xs text-muted">
           <Show when={pages.loading()}><span class="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" /></Show>
@@ -231,12 +231,12 @@ function TopHolders() {
                     {(x) => (
                       <li class={`flex items-center gap-3 px-3 py-2 text-[13px] ${x.address === me() ? "bg-surface-2" : ""}`}>
                         <span class="tnum w-8 text-right text-xs text-muted">#{x.rank}</span>
-                        <button type="button" onClick={() => navigate(`/people/${x.address}`)}>
+                        <button type="button" onClick={() => navigate(`/contacts/${x.address}`)}>
                           <PersonAvatar address={x.address} size={24} />
                         </button>
                         <span class="min-w-0 flex-1">
                           <Show when={x.username} fallback={<Mono text={x.address} head={12} tail={6} copy />}>
-                            <button type="button" class="font-medium hover:underline" onClick={() => navigate(`/people/${x.address}`)}>@{x.username}</button>
+                            <button type="button" class="font-medium hover:underline" onClick={() => navigate(`/contacts/${x.address}`)}>@{x.username}</button>
                             <span class="block"><Mono text={x.address} head={12} tail={6} copy class="text-[11px] text-muted" /></span>
                           </Show>
                         </span>

@@ -13,6 +13,7 @@ import { OfflineBanner, ErrorState } from "~/components/States";
 import { Who, PersonAvatar } from "~/components/identity";
 import { ipc, errText, type FeedItem, type CircleInfo, type CircleItemView, type MergedItem, type PollInput, type WallInfo, type ExplorePage } from "~/lib/ipc";
 import { store } from "~/lib/store";
+import { go } from "~/lib/nav";
 import { t } from "~/lib/i18n";
 import { formatMs, shortWhen, splitRecipients } from "~/lib/format";
 import { pickFile, confirm } from "~/lib/dialogs";
@@ -130,7 +131,7 @@ export function FeedRoute() {
   const navigate = useNavigate();
   const tab = (): Tab => (params.tab as Tab) || "friends";
   const [compose, setCompose] = createSignal<false | { wall?: string }>(false);
-  // Under /hashwall/walls/<id> the id is a wall; anywhere else it is a post.
+  // Under /pulse/walls/<id> the id is a wall; anywhere else it is a post.
   const wallId = () => (tab() === "walls" && params.id && WALL_ID.test(params.id) ? params.id : null);
   const postId = () => (params.id && !wallId() ? params.id : null);
 
@@ -155,7 +156,7 @@ export function FeedRoute() {
               <Tabs
                 class="flex-1 border-b-0"
                 value={tab()}
-                onChange={(v) => navigate(`/hashwall/${v}`)}
+                onChange={(v) => navigate(`/pulse/${v}`)}
                 tabs={[
                   { id: "friends", label: t("feed_friends") },
                   { id: "following", label: t("feed_following") },
@@ -184,7 +185,7 @@ export function FeedRoute() {
                       <>
                         <Show when={r().kind === "public"}>
                           <Show when={(r().items as FeedItem[]).length} fallback={<Empty title={t("nothing_here")}>{tab() === "friends" ? "Posts from your contacts appear here. Find people in Explore." : "Follow people from their profile to see their posts here."}</Empty>}>
-                            <For each={r().items as FeedItem[]}>{(it) => <PostCard it={it} onOpen={() => navigate(`/hashwall/${tab()}/${it.id}`)} />}</For>
+                            <For each={r().items as FeedItem[]}>{(it) => <PostCard it={it} onOpen={() => navigate(`/pulse/${tab()}/${it.id}`)} />}</For>
                           </Show>
                         </Show>
                         <Show when={r().kind === "walls"}>
@@ -203,10 +204,10 @@ export function FeedRoute() {
             </div>
           </div>
         }>
-          {(id) => <WallView id={id()} onBack={() => navigate("/hashwall/walls")} onCompose={() => setCompose({ wall: id() })} />}
+          {(id) => <WallView id={id()} onBack={() => navigate("/pulse/walls")} onCompose={() => setCompose({ wall: id() })} />}
         </Show>
       }>
-        {(id) => <PostView id={id()} onBack={() => (window.history.length > 1 ? window.history.back() : navigate(`/hashwall/${tab() === "post" ? "friends" : tab()}`))} />}
+        {(id) => <PostView id={id()} onBack={() => (window.history.length > 1 ? window.history.back() : navigate(`/pulse/${tab() === "post" ? "friends" : tab()}`))} />}
       </Show>
       <ComposeDialog open={!!compose()} onClose={() => setCompose(false)} defaultCircle={tab() === "circles"} defaultWall={(compose() || {}).wall} />
     </div>
@@ -221,7 +222,7 @@ export function WallChip(props: { id: string }) {
     (id) => ipc.wallsInfo(id).catch(() => null),
   );
   return (
-    <button type="button" class="badge inline-flex items-center gap-1 hover:border-brand" title="Open wall" onClick={(e) => { e.stopPropagation(); navigate(`/hashwall/walls/${props.id}`); }}>
+    <button type="button" class="badge inline-flex items-center gap-1 hover:border-brand" title="Open wall" onClick={(e) => { e.stopPropagation(); navigate(`/pulse/walls/${props.id}`); }}>
       <Megaphone size={10} /> {info()?.name ?? `${props.id.slice(0, 8)}…`}
     </button>
   );
@@ -247,10 +248,10 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
   return (
     <article class="card mb-2 p-3 text-[13px]" data-post={props.it.id}>
       <div class="flex items-center gap-2">
-        <button type="button" class="shrink-0" title="Open profile" onClick={() => navigate(`/people/${props.it.author}`)}>
+        <button type="button" class="shrink-0" title="Open profile" onClick={() => navigate(`/contacts/${props.it.author}`)}>
           <PersonAvatar address={props.it.author} size={24} />
         </button>
-        <button type="button" class="min-w-0 font-medium hover:underline" title="Open profile" onClick={() => navigate(`/people/${props.it.author}`)}>
+        <button type="button" class="min-w-0 font-medium hover:underline" title="Open profile" onClick={() => navigate(`/contacts/${props.it.author}`)}>
           <Who address={props.it.author} />
         </button>
         <Show when={props.it.kind === "REPOST"}>
@@ -418,16 +419,16 @@ function WallsHome(props: { walls: WallInfo[]; onChanged: () => void }) {
           <Hash size={12} /> Find walls
         </Button>
         <span class="flex-1" />
-        <Input class="h-7 w-64" placeholder="Open a wall by id or link…" value={open()} onInput={(e) => setOpen(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") { const m = open().trim().toLowerCase().match(/[0-9a-f]{64}/); if (m) navigate(`/hashwall/walls/${m[0]}`); else store.toast("That is not a wall id or link", "error"); } }} />
+        <Input class="h-7 w-64" placeholder="Open a wall by id or link…" value={open()} onInput={(e) => setOpen(e.currentTarget.value)} onKeyDown={(e) => { if (e.key === "Enter") { const m = open().trim().toLowerCase().match(/[0-9a-f]{64}/); if (m) navigate(`/pulse/walls/${m[0]}`); else store.toast("That is not a wall id or link", "error"); } }} />
       </div>
       <Show when={props.walls.length} fallback={
         <Empty title="No walls pinned yet" icon={<Megaphone size={24} />}>
           A wall is a topic — a protest, a profession, a town, a project. Open one and everyone on the network can write on it, or find active walls in Explore.
         </Empty>
       }>
-        <For each={props.walls}>{(w) => <WallCard w={w} onOpen={() => navigate(`/hashwall/walls/${w.id}`)} />}</For>
+        <For each={props.walls}>{(w) => <WallCard w={w} onOpen={() => navigate(`/pulse/walls/${w.id}`)} />}</For>
       </Show>
-      <CreateWallDialog open={create()} onClose={() => { setCreate(false); props.onChanged(); }} onCreated={(w) => navigate(`/hashwall/walls/${w.id}`)} />
+      <CreateWallDialog open={create()} onClose={() => { setCreate(false); props.onChanged(); }} onCreated={(w) => navigate(`/pulse/walls/${w.id}`)} />
     </div>
   );
 }
@@ -565,7 +566,7 @@ function WallView(props: { id: string; onBack: () => void; onCompose: () => void
       <SourceLine page={pages.source()} />
       <Show when={!pages.error()} fallback={<ErrorState error={pages.error()} onRetry={() => void pages.reload()} />}>
         <For each={pages.items()} fallback={<Show when={!pages.loading()}><Empty title="Nothing on this wall yet">{canPost() ? "Be the first to write here." : "The creator has not posted yet."}</Empty></Show>}>
-          {(it) => <PostCard it={it} hideWall onOpen={() => navigate(`/hashwall/post/${it.id}`)} />}
+          {(it) => <PostCard it={it} hideWall onOpen={() => navigate(`/pulse/post/${it.id}`)} />}
         </For>
         <div ref={pages.sentinel} class="flex items-center justify-center py-3 text-xs text-muted">
           <Show when={pages.loading()}><span class="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" /></Show>
@@ -950,7 +951,7 @@ function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircl
         <Show when={!registered()}>
           <Notice strong title="Finish identity setup">
             Nodes accept signed posts only from an active device. Receive at least 0.01 HASH, then register this PC once in Wallet → Devices.
-            <Button class="mt-2" size="sm" onClick={() => { props.onClose(); window.location.hash = "/wallet/devices"; }}>
+            <Button class="mt-2" size="sm" onClick={() => { props.onClose(); go("/wallet/devices"); }}>
               Open Wallet → Devices
             </Button>
           </Notice>
