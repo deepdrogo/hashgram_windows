@@ -20,4 +20,16 @@ ignore = [
   # proc-macro-error2). Compile-time only; no runtime exposure.
   "RUSTSEC-2024-0436",
   "RUSTSEC-2026-0173",
+  # rsa 0.9 (via sqlx-mysql, which arrives with the indexer's sqlx and is
+  # never linked into a node or the desktop app): the Marvin timing attack
+  # on PKCS#1 v1.5 decryption. No fixed release exists. Hashgram signs with
+  # ed25519 and secp256k1 and decrypts with XChaCha20-Poly1305; no RSA
+  # private key exists anywhere in the project, so there is no key for the
+  # sidechannel to recover. Remove when rsa ships a constant-time release.
+  "RUSTSEC-2023-0071",
+  # glib 0.18 (via the GTK stack that webkit2gtk pulls in on Linux builds
+  # of the Tauri crate): unsoundness in VariantStrIter. Windows is the only
+  # shipped target and does not compile that path. Remove when the Tauri
+  # Linux stack moves to glib 0.20.
+  "RUSTSEC-2024-0429",
 ]

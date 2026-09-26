@@ -272,7 +272,10 @@ pub async fn node_overview(state: S<'_>) -> CmdResult<NodeOverview> {
         .unwrap_or("unknown")
         .to_owned();
     let node_id = if nm::config_path().exists() {
-        tauri::async_runtime::spawn_blocking(nm::node_id).await.ok().and_then(Result::ok)
+        tauri::async_runtime::spawn_blocking(nm::node_id)
+            .await
+            .ok()
+            .and_then(Result::ok)
     } else {
         None
     };
@@ -281,10 +284,15 @@ pub async fn node_overview(state: S<'_>) -> CmdResult<NodeOverview> {
             let mut g = state.one.lock().await;
             match g.as_mut() {
                 Some(one) => {
-                    let p = one.provider().status(Some(op)).await.ok().map(|status| EarnStatus {
-                        sentence: lifecycle_sentence(status.lifecycle),
-                        status,
-                    });
+                    let p = one
+                        .provider()
+                        .status(Some(op))
+                        .await
+                        .ok()
+                        .map(|status| EarnStatus {
+                            sentence: lifecycle_sentence(status.lifecycle),
+                            status,
+                        });
                     let b = one.wallet().balance(Some(op)).await.ok().map(|b| b.uhash);
                     (p, b)
                 }
@@ -371,7 +379,8 @@ pub struct ColdAddress {
 /// Generates a cold reward address.
 #[tauri::command]
 pub fn node_generate_cold_address() -> CmdResult<ColdAddress> {
-    let (mnemonic, w) = hashgram_sdk::Wallet::generate().map_err(|e| UiError::internal(e.to_string()))?;
+    let (mnemonic, w) =
+        hashgram_sdk::Wallet::generate().map_err(|e| UiError::internal(e.to_string()))?;
     Ok(ColdAddress {
         words: mnemonic.split_whitespace().map(str::to_owned).collect(),
         address: w.address().to_string(),

@@ -110,8 +110,12 @@ impl Db {
     /// Reads a sealed UI value.
     pub fn sealed_get(&self, db_key: &DbKey, key: &str) -> Result<Option<Vec<u8>>, String> {
         let sealed: Option<Vec<u8>> = self.with(|c| {
-            c.query_row("SELECT sealed FROM ui_sealed WHERE key = ?1", params![key], |r| r.get(0))
-                .optional()
+            c.query_row(
+                "SELECT sealed FROM ui_sealed WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()
         })?;
         match sealed {
             Some(s) => Ok(Some(crate::crypto::open(db_key, key.as_bytes(), &s)?)),
@@ -132,7 +136,13 @@ impl Db {
     }
 
     /// Updates a transaction's state.
-    pub fn pending_update(&self, hash: &str, state: &str, height: u64, raw_log: &str) -> Result<(), String> {
+    pub fn pending_update(
+        &self,
+        hash: &str,
+        state: &str,
+        height: u64,
+        raw_log: &str,
+    ) -> Result<(), String> {
         self.with(|c| {
             c.execute(
                 "UPDATE pending_tx SET state = ?2, height = ?3, raw_log = ?4 WHERE hash = ?1",
@@ -235,7 +245,8 @@ mod tests {
             .unwrap();
         assert_eq!(mode.to_lowercase(), "wal");
         let key = crate::crypto::generate_key().unwrap();
-        db.sealed_put(&key, "mail/order", br#"{"name":"Very Secret Friend"}"#).unwrap();
+        db.sealed_put(&key, "mail/order", br#"{"name":"Very Secret Friend"}"#)
+            .unwrap();
         assert_eq!(
             db.sealed_get(&key, "mail/order").unwrap().unwrap(),
             br#"{"name":"Very Secret Friend"}"#

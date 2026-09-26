@@ -130,7 +130,9 @@ mod tests {
     use super::*;
 
     fn png(w: u32, h: u32) -> Vec<u8> {
-        let img = image::RgbImage::from_fn(w, h, |x, y| image::Rgb([(x % 255) as u8, (y % 255) as u8, 128]));
+        let img = image::RgbImage::from_fn(w, h, |x, y| {
+            image::Rgb([(x % 255) as u8, (y % 255) as u8, 128])
+        });
         let mut out = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgb8(img)
             .write_to(&mut out, image::ImageFormat::Png)
@@ -143,7 +145,10 @@ mod tests {
         let p = prepare(png(800, 450), "image/png".into(), &ClientMeta::default());
         assert_eq!(p.kind, "image");
         assert_eq!((p.meta.width, p.meta.height), (800, 450));
-        assert!(p.meta.thumbnail.is_some(), "a wide picture gets a thumbnail");
+        assert!(
+            p.meta.thumbnail.is_some(),
+            "a wide picture gets a thumbnail"
+        );
     }
 
     #[test]
@@ -175,6 +180,9 @@ mod tests {
             poster_base64: crate::util::base64_encode(b"not a picture"),
             ..Default::default()
         };
-        assert!(prepare(vec![0u8; 8], "video/mp4".into(), &client).meta.thumbnail.is_none());
+        assert!(prepare(vec![0u8; 8], "video/mp4".into(), &client)
+            .meta
+            .thumbnail
+            .is_none());
     }
 }

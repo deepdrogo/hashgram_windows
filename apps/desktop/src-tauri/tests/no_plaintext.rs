@@ -138,29 +138,31 @@ fn no_secret_is_ever_written_in_the_clear() {
     std::fs::write(paths.cache().join("blob.bin"), &ct).unwrap();
     // The manifest key travels in the vault, sealed with it.
     let manifest_key_hex = hex::encode([0x42u8; 32]);
-    account
-        .contents
-        .extra
-        .insert(
-            hashgram_sdk::drive::VAULT_DRIVE_KEYRING.to_owned(),
-            serde_json::to_string(&serde_json::json!({
-                "drive_id": hex::encode([1u8; 16]),
-                "key": manifest_key_hex,
-                "base_nonce": hex::encode([2u8; 24]),
-                "manifest_cid": "",
-                "manifest_ref": null,
-                "revision": 1
-            }))
-            .unwrap(),
-        );
+    account.contents.extra.insert(
+        hashgram_sdk::drive::VAULT_DRIVE_KEYRING.to_owned(),
+        serde_json::to_string(&serde_json::json!({
+            "drive_id": hex::encode([1u8; 16]),
+            "key": manifest_key_hex,
+            "base_nonce": hex::encode([2u8; 24]),
+            "manifest_cid": "",
+            "manifest_ref": null,
+            "revision": 1
+        }))
+        .unwrap(),
+    );
     account.save().unwrap();
     drop(store);
 
     // 4. The UI cache with a sealed value, and settings.
     let db = Db::open(&home.join("ui-cache.db")).unwrap();
-    db.sealed_put(&db_key, "mail/order", format!("{{\"last\":\"{SUBJECT}\"}}").as_bytes())
+    db.sealed_put(
+        &db_key,
+        "mail/order",
+        format!("{{\"last\":\"{SUBJECT}\"}}").as_bytes(),
+    )
+    .unwrap();
+    db.pending_put("ABCD", "Send 1 HASH to hash1…", "pending")
         .unwrap();
-    db.pending_put("ABCD", "Send 1 HASH to hash1…", "pending").unwrap();
     db.search_note("@alice").unwrap();
     drop(db);
     let settings = hashgram_desktop_lib::settings::Settings::default();
@@ -169,19 +171,28 @@ fn no_secret_is_ever_written_in_the_clear() {
     // 5. Scan every file.
     let mut files = Vec::new();
     files_under(&home, &mut files);
-    assert!(files.len() >= 4, "expected vault, store, db and settings; got {files:?}");
+    assert!(
+        files.len() >= 4,
+        "expected vault, store, db and settings; got {files:?}"
+    );
     let needles: Vec<(&str, Vec<u8>)> = vec![
         ("mnemonic", MNEMONIC.as_bytes().to_vec()),
         ("mnemonic tail", b"abandon abandon art".to_vec()),
         ("wallet secret hex", wallet_secret_hex.as_bytes().to_vec()),
-        ("wallet secret raw", account.wallet().unwrap().secret_bytes().to_vec()),
+        (
+            "wallet secret raw",
+            account.wallet().unwrap().secret_bytes().to_vec(),
+        ),
         ("db key hex", crypto::key_to_hex(&db_key).into_bytes()),
         ("db key raw", db_key.as_slice().to_vec()),
         ("root seed", account.root().unwrap().secret_bytes().to_vec()),
         ("device seed", device_seed.to_vec()),
         ("device seed hex", hex::encode(device_seed).into_bytes()),
         ("drive object key", object_key.clone()),
-        ("drive object key hex", hex::encode(&object_key).into_bytes()),
+        (
+            "drive object key hex",
+            hex::encode(&object_key).into_bytes(),
+        ),
         ("manifest key hex", manifest_key_hex.into_bytes()),
         ("mail subject", SUBJECT.as_bytes().to_vec()),
         ("mail body", BODY.as_bytes().to_vec()),
@@ -193,7 +204,11 @@ fn no_secret_is_ever_written_in_the_clear() {
     for f in &files {
         let bytes = std::fs::read(f).unwrap();
         for (what, needle) in &needles {
-            assert!(!contains(&bytes, needle), "{what} found in the clear in {}", f.display());
+            assert!(
+                !contains(&bytes, needle),
+                "{what} found in the clear in {}",
+                f.display()
+            );
         }
     }
     assert!(std::fs::metadata(paths.vault()).unwrap().len() > 200);

@@ -287,7 +287,9 @@ impl<'a> Sync<'a> {
                 if self.one.link.peers().await.is_empty() {
                     return Err(e);
                 }
-                self.emit(SyncEvent::Warning(format!("mailbox not synced this round: {e}")));
+                self.emit(SyncEvent::Warning(format!(
+                    "mailbox not synced this round: {e}"
+                )));
             }
         }
 

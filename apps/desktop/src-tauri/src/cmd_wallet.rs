@@ -50,10 +50,12 @@ pub struct WalletOverview {
 }
 
 fn s_u64(v: &serde_json::Value) -> Option<u64> {
-    v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 fn s_i64(v: &serde_json::Value) -> Option<i64> {
-    v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    v.as_i64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
 /// Overview.
@@ -74,45 +76,65 @@ pub async fn wallet_overview(state: S<'_>) -> CmdResult<WalletOverview> {
         .chain
         .query(&format!("cosmos/auth/v1beta1/accounts/{address}"))
         .await;
-    let (account_exists, account_number, sequence, vesting_type, original_vesting, vesting_end, vesting_start) =
-        match acct {
-            Ok(v) => {
-                let a = v.get("account").cloned().unwrap_or_default();
-                let ty = a.get("@type").and_then(|t| t.as_str()).unwrap_or("").to_owned();
-                let base = a
-                    .get("base_vesting_account")
-                    .and_then(|v| v.get("base_account"))
-                    .or_else(|| a.get("base_account"))
-                    .unwrap_or(&a);
-                let bva = a.get("base_vesting_account");
-                let ov = bva
-                    .and_then(|v| v.get("original_vesting"))
-                    .and_then(|v| v.as_array())
-                    .and_then(|arr| arr.iter().find(|c| c.get("denom").and_then(|d| d.as_str()) == Some("uhash")))
-                    .and_then(|c| c.get("amount"))
-                    .and_then(|x| x.as_str())
-                    .map(str::to_owned);
-                (
-                    true,
-                    base.get("account_number").and_then(s_u64),
-                    base.get("sequence").and_then(s_u64),
-                    if ty.contains("Vesting") { Some(ty) } else { None },
-                    ov,
-                    bva.and_then(|v| v.get("end_time")).and_then(s_i64),
-                    a.get("start_time").and_then(s_i64),
-                )
-            }
-            Err(hashgram_sdk::chain::ClientError::Gateway { status: 404, .. })
-            | Err(hashgram_sdk::chain::ClientError::NoAccount(_)) => (false, None, None, None, None, None, None),
-            Err(e) => {
-                let s = e.to_string();
-                if s.contains("not found") || s.contains("404") {
-                    (false, None, None, None, None, None, None)
+    let (
+        account_exists,
+        account_number,
+        sequence,
+        vesting_type,
+        original_vesting,
+        vesting_end,
+        vesting_start,
+    ) = match acct {
+        Ok(v) => {
+            let a = v.get("account").cloned().unwrap_or_default();
+            let ty = a
+                .get("@type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let base = a
+                .get("base_vesting_account")
+                .and_then(|v| v.get("base_account"))
+                .or_else(|| a.get("base_account"))
+                .unwrap_or(&a);
+            let bva = a.get("base_vesting_account");
+            let ov = bva
+                .and_then(|v| v.get("original_vesting"))
+                .and_then(|v| v.as_array())
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|c| c.get("denom").and_then(|d| d.as_str()) == Some("uhash"))
+                })
+                .and_then(|c| c.get("amount"))
+                .and_then(|x| x.as_str())
+                .map(str::to_owned);
+            (
+                true,
+                base.get("account_number").and_then(s_u64),
+                base.get("sequence").and_then(s_u64),
+                if ty.contains("Vesting") {
+                    Some(ty)
                 } else {
-                    return Err(hashgram_sdk::SdkError::from(e).into());
-                }
+                    None
+                },
+                ov,
+                bva.and_then(|v| v.get("end_time")).and_then(s_i64),
+                a.get("start_time").and_then(s_i64),
+            )
+        }
+        Err(hashgram_sdk::chain::ClientError::Gateway { status: 404, .. })
+        | Err(hashgram_sdk::chain::ClientError::NoAccount(_)) => {
+            (false, None, None, None, None, None, None)
+        }
+        Err(e) => {
+            let s = e.to_string();
+            if s.contains("not found") || s.contains("404") {
+                (false, None, None, None, None, None, None)
+            } else {
+                return Err(hashgram_sdk::SdkError::from(e).into());
             }
-        };
+        }
+    };
     let username = one.people().my_username().await.unwrap_or_default();
     Ok(WalletOverview {
         address,
@@ -156,7 +178,13 @@ pub struct TxSubmitted {
 }
 
 /// Records a submitted transaction and starts watching it.
-pub async fn track_tx(state: &Arc<AppState>, app: &AppHandle, hash: &str, summary: &str, height: u64) {
+pub async fn track_tx(
+    state: &Arc<AppState>,
+    app: &AppHandle,
+    hash: &str,
+    summary: &str,
+    height: u64,
+) {
     let st = if height > 0 { "committed" } else { "pending" };
     let _ = state.db.pending_put(hash, summary, st);
     if st == "pending" {
@@ -164,7 +192,10 @@ pub async fn track_tx(state: &Arc<AppState>, app: &AppHandle, hash: &str, summar
     } else {
         let _ = state.db.pending_update(hash, st, height, "");
     }
-    let _ = app.emit("tx:update", serde_json::json!({ "hash": hash, "state": st, "height": height }));
+    let _ = app.emit(
+        "tx:update",
+        serde_json::json!({ "hash": hash, "state": st, "height": height }),
+    );
 }
 
 /// Polls pending transactions once; called by the sync loop.
@@ -199,7 +230,11 @@ pub async fn tx_preview(state: S<'_>, spec: MsgSpec) -> CmdResult<TxPreview> {
     let one = AppState::unlocked(&mut g)?;
     let wallet = one.account.wallet()?;
     let built = spec.build(one.address()).map_err(UiError::invalid)?;
-    let fee = one.chain.fee_preview(&wallet, built.msgs, "").await.map_err(hashgram_sdk::SdkError::from)?;
+    let fee = one
+        .chain
+        .fee_preview(&wallet, built.msgs, "")
+        .await
+        .map_err(hashgram_sdk::SdkError::from)?;
     Ok(TxPreview {
         summary: built.summary,
         warnings: built.warnings,
@@ -213,7 +248,12 @@ pub async fn tx_preview(state: S<'_>, spec: MsgSpec) -> CmdResult<TxPreview> {
 /// Signs and broadcasts any transaction intent; inclusion is tracked in the
 /// background (`tx:update` events).
 #[tauri::command]
-pub async fn tx_submit(state: S<'_>, app: AppHandle, spec: MsgSpec, memo: String) -> CmdResult<TxSubmitted> {
+pub async fn tx_submit(
+    state: S<'_>,
+    app: AppHandle,
+    spec: MsgSpec,
+    memo: String,
+) -> CmdResult<TxSubmitted> {
     if memo.len() > 256 {
         return Err(UiError::invalid("memo is too long"));
     }
@@ -270,7 +310,13 @@ pub async fn wallet_preview_send(state: S<'_>, to: String, amount: String) -> Cm
 
 /// Sends HASH.
 #[tauri::command]
-pub async fn wallet_send(state: S<'_>, app: AppHandle, to: String, amount: String, memo: String) -> CmdResult<TxSubmitted> {
+pub async fn wallet_send(
+    state: S<'_>,
+    app: AppHandle,
+    to: String,
+    amount: String,
+    memo: String,
+) -> CmdResult<TxSubmitted> {
     let uhash = parse_amount(&amount)?;
     if uhash == 0 {
         return Err(UiError::invalid("amount must be more than 0"));
@@ -289,7 +335,12 @@ pub async fn wallet_send(state: S<'_>, app: AppHandle, to: String, amount: Strin
 
 /// Delegates.
 #[tauri::command]
-pub async fn wallet_stake(state: S<'_>, app: AppHandle, validator: String, amount: String) -> CmdResult<TxSubmitted> {
+pub async fn wallet_stake(
+    state: S<'_>,
+    app: AppHandle,
+    validator: String,
+    amount: String,
+) -> CmdResult<TxSubmitted> {
     let uhash = parse_amount(&amount)?;
     tx_submit(
         state,
@@ -305,7 +356,12 @@ pub async fn wallet_stake(state: S<'_>, app: AppHandle, validator: String, amoun
 
 /// Undelegates.
 #[tauri::command]
-pub async fn wallet_unstake(state: S<'_>, app: AppHandle, validator: String, amount: String) -> CmdResult<TxSubmitted> {
+pub async fn wallet_unstake(
+    state: S<'_>,
+    app: AppHandle,
+    validator: String,
+    amount: String,
+) -> CmdResult<TxSubmitted> {
     let uhash = parse_amount(&amount)?;
     tx_submit(
         state,
@@ -321,7 +377,11 @@ pub async fn wallet_unstake(state: S<'_>, app: AppHandle, validator: String, amo
 
 /// Withdraws rewards.
 #[tauri::command]
-pub async fn wallet_withdraw_rewards(state: S<'_>, app: AppHandle, validator: String) -> CmdResult<TxSubmitted> {
+pub async fn wallet_withdraw_rewards(
+    state: S<'_>,
+    app: AppHandle,
+    validator: String,
+) -> CmdResult<TxSubmitted> {
     tx_submit(
         state,
         app,
@@ -350,7 +410,10 @@ pub struct UsernameAvailability {
 
 /// Live availability check.
 #[tauri::command]
-pub async fn wallet_username_availability(state: S<'_>, name: String) -> CmdResult<UsernameAvailability> {
+pub async fn wallet_username_availability(
+    state: S<'_>,
+    name: String,
+) -> CmdResult<UsernameAvailability> {
     let n = name.trim().trim_start_matches('@').to_lowercase();
     if n.is_empty() {
         return Ok(UsernameAvailability {
@@ -360,7 +423,10 @@ pub async fn wallet_username_availability(state: S<'_>, name: String) -> CmdResu
             conflicting_name: String::new(),
         });
     }
-    if !n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.') {
+    if !n
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
         return Ok(UsernameAvailability {
             available: false,
             normalized: n,
@@ -373,7 +439,10 @@ pub async fn wallet_username_availability(state: S<'_>, name: String) -> CmdResu
     let v = one.wallet().username_availability(&n).await?;
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_owned();
     Ok(UsernameAvailability {
-        available: v.get("available").and_then(|a| a.as_bool()).unwrap_or(false),
+        available: v
+            .get("available")
+            .and_then(|a| a.as_bool())
+            .unwrap_or(false),
         normalized: s("normalized"),
         reason: s("reason"),
         conflicting_name: s("conflicting_name"),
@@ -382,14 +451,34 @@ pub async fn wallet_username_availability(state: S<'_>, name: String) -> CmdResu
 
 /// Registers a username (1 HASH).
 #[tauri::command]
-pub async fn wallet_register_username(state: S<'_>, app: AppHandle, name: String) -> CmdResult<TxSubmitted> {
-    tx_submit(state, app, MsgSpec::RegisterUsername { name }, "hashgram one: username".into()).await
+pub async fn wallet_register_username(
+    state: S<'_>,
+    app: AppHandle,
+    name: String,
+) -> CmdResult<TxSubmitted> {
+    tx_submit(
+        state,
+        app,
+        MsgSpec::RegisterUsername { name },
+        "hashgram one: username".into(),
+    )
+    .await
 }
 
 /// Renews a username.
 #[tauri::command]
-pub async fn wallet_renew_username(state: S<'_>, app: AppHandle, name: String) -> CmdResult<TxSubmitted> {
-    tx_submit(state, app, MsgSpec::RenewUsername { name }, "hashgram one: renew".into()).await
+pub async fn wallet_renew_username(
+    state: S<'_>,
+    app: AppHandle,
+    name: String,
+) -> CmdResult<TxSubmitted> {
+    tx_submit(
+        state,
+        app,
+        MsgSpec::RenewUsername { name },
+        "hashgram one: renew".into(),
+    )
+    .await
 }
 
 /// Our delegations (raw staking module answer).
@@ -408,7 +497,9 @@ pub async fn wallet_rewards(state: S<'_>) -> CmdResult<serde_json::Value> {
     let me = one.address().to_owned();
     Ok(one
         .chain
-        .query(&format!("cosmos/distribution/v1beta1/delegators/{me}/rewards"))
+        .query(&format!(
+            "cosmos/distribution/v1beta1/delegators/{me}/rewards"
+        ))
         .await
         .map_err(hashgram_sdk::SdkError::from)?)
 }
@@ -421,7 +512,9 @@ pub async fn wallet_unbonding(state: S<'_>) -> CmdResult<serde_json::Value> {
     let me = one.address().to_owned();
     Ok(one
         .chain
-        .query(&format!("cosmos/staking/v1beta1/delegators/{me}/unbonding_delegations"))
+        .query(&format!(
+            "cosmos/staking/v1beta1/delegators/{me}/unbonding_delegations"
+        ))
         .await
         .map_err(hashgram_sdk::SdkError::from)?)
 }
@@ -431,7 +524,10 @@ pub async fn wallet_unbonding(state: S<'_>) -> CmdResult<serde_json::Value> {
 pub async fn wallet_history(state: S<'_>, limit: Option<u32>) -> CmdResult<serde_json::Value> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.wallet().history(limit.unwrap_or(50).clamp(1, 200)).await?)
+    Ok(one
+        .wallet()
+        .history(limit.unwrap_or(50).clamp(1, 200))
+        .await?)
 }
 
 /// Transaction by hash.
@@ -474,7 +570,11 @@ pub async fn chain_query(state: S<'_>, path: String) -> CmdResult<serde_json::Va
     }
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.chain.query(&path).await.map_err(hashgram_sdk::SdkError::from)?)
+    Ok(one
+        .chain
+        .query(&path)
+        .await
+        .map_err(hashgram_sdk::SdkError::from)?)
 }
 
 /// A QR code as an SVG string (receive screen).

@@ -93,7 +93,10 @@ pub async fn network_overview(state: S<'_>) -> CmdResult<NetworkOverview> {
         match g.as_mut() {
             Some(one) => {
                 let o: Option<Overview> = one.network_api().overview().await.ok();
-                (o.as_ref().and_then(|o| o.height), o.and_then(|o| o.verification))
+                (
+                    o.as_ref().and_then(|o| o.height),
+                    o.and_then(|o| o.verification),
+                )
             }
             None => (None, None),
         }
@@ -107,7 +110,10 @@ pub async fn network_overview(state: S<'_>) -> CmdResult<NetworkOverview> {
         network_id: identity.network_id.clone(),
         chain_id: identity.chain_id.clone(),
         genesis_hash: identity.genesis_hash.clone(),
-        store_peers: peers.iter().filter(|p| p.roles.iter().any(|r| r == "store")).count(),
+        store_peers: peers
+            .iter()
+            .filter(|p| p.roles.iter().any(|r| r == "store"))
+            .count(),
         relay_peers: peers
             .iter()
             .filter(|p| p.roles.iter().any(|r| r == "relay" || r == "bootstrap"))
@@ -142,7 +148,11 @@ pub async fn network_supply(state: S<'_>) -> CmdResult<serde_json::Value> {
 /// A leaderboard from the configured indexer: `holders` | `validators` |
 /// `providers` | `earners`. `None` when no indexer is configured.
 #[tauri::command]
-pub async fn network_top(state: S<'_>, what: String, limit: Option<u32>) -> CmdResult<Option<serde_json::Value>> {
+pub async fn network_top(
+    state: S<'_>,
+    what: String,
+    limit: Option<u32>,
+) -> CmdResult<Option<serde_json::Value>> {
     let indexer = state.settings.read().await.indexer().map(str::to_owned);
     let Some(base) = indexer else { return Ok(None) };
     let limit = limit.unwrap_or(25).clamp(1, 100);
@@ -154,8 +164,11 @@ pub async fn network_top(state: S<'_>, what: String, limit: Option<u32>) -> CmdR
         "validators" => n.top_validators(Some(&base), limit).await?,
         "providers" => n.top_providers(Some(&base), limit).await?,
         "earners" => {
-            n.indexer(Some(&base), &format!("/v1/leaderboards/earners?limit={limit}"))
-                .await?
+            n.indexer(
+                Some(&base),
+                &format!("/v1/leaderboards/earners?limit={limit}"),
+            )
+            .await?
         }
         other => return Err(UiError::invalid(format!("unknown leaderboard {other}"))),
     })
@@ -223,7 +236,11 @@ pub async fn diagnostics_export(state: S<'_>, app: AppHandle) -> CmdResult<Strin
                     "  {} roles={} operator={}\n",
                     p.peer,
                     p.roles.join(","),
-                    if p.operator.is_empty() { "-" } else { &p.operator }
+                    if p.operator.is_empty() {
+                        "-"
+                    } else {
+                        &p.operator
+                    }
                 ));
             }
             out.push_str("\nrejected:\n");
@@ -249,8 +266,14 @@ pub async fn diagnostics_export(state: S<'_>, app: AppHandle) -> CmdResult<Strin
                 "drive: {} files, {} folders, {} bytes, revision {} (committed {}), dirty {}\n",
                 u.files, u.folders, u.bytes, u.revision, u.committed_revision, u.dirty
             ));
-            out.push_str(&format!("spaces: {}\n", one.spaces().list().map(|s| s.len()).unwrap_or(0)));
-            out.push_str(&format!("circles: {}\n", one.circles().list().map(|s| s.len()).unwrap_or(0)));
+            out.push_str(&format!(
+                "spaces: {}\n",
+                one.spaces().list().map(|s| s.len()).unwrap_or(0)
+            ));
+            out.push_str(&format!(
+                "circles: {}\n",
+                one.circles().list().map(|s| s.len()).unwrap_or(0)
+            ));
         }
     }
     out.push_str(&format!(

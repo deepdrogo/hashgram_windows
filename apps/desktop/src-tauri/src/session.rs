@@ -98,7 +98,9 @@ pub fn spawn_link(app: AppHandle, state: Arc<AppState>) {
             }
             let settings = state.settings.read().await.clone();
             let result = match config(&settings, Duration::from_secs(8)) {
-                Ok(cfg) => HashgramOne::connect_link(&cfg).await.map_err(|e| e.to_string()),
+                Ok(cfg) => HashgramOne::connect_link(&cfg)
+                    .await
+                    .map_err(|e| e.to_string()),
                 Err(e) => Err(e.message),
             };
             match result {
@@ -164,7 +166,14 @@ pub async fn reattach_link(state: &Arc<AppState>) {
     }
     let settings = state.settings.read().await.clone();
     let chain_api = settings.network.chain_api.trim().to_owned();
-    match one.replace_link(link, if chain_api.is_empty() { None } else { Some(&chain_api) }) {
+    match one.replace_link(
+        link,
+        if chain_api.is_empty() {
+            None
+        } else {
+            Some(&chain_api)
+        },
+    ) {
         Ok(()) => tracing::info!("session re-attached to the network link"),
         Err(e) => tracing::warn!(error = %e, "could not re-attach the session to the link"),
     }
@@ -496,9 +505,7 @@ pub fn spawn_housekeeping(app: AppHandle, state: Arc<AppState>) {
                         Some(l) => {
                             let peers = l.peers().await.len();
                             let has_store = !l.peers_with_role("store").await.is_empty();
-                            let tr = l
-                                .transport_rejections_within(Duration::from_secs(15))
-                                .await;
+                            let tr = l.transport_rejections_within(Duration::from_secs(15)).await;
                             (peers, has_store, tr)
                         }
                         None => (0, false, 0),
@@ -535,6 +542,17 @@ pub fn spawn_housekeeping(app: AppHandle, state: Arc<AppState>) {
     });
 }
 
+/// Opens a vault by passphrase on a blocking thread (Argon2id).
+pub async fn open_account(passphrase: Zeroizing<String>) -> CmdResult<Account> {
+    let vault = paths::vault_path();
+    if !vault.exists() {
+        return Err(UiError::not_found("no vault on this PC"));
+    }
+    tauri::async_runtime::spawn_blocking(move || Account::open(&vault, &passphrase, kdf()))
+        .await
+        .map_err(|e| UiError::internal(e.to_string()))?
+        .map_err(UiError::from)
+}
 #[cfg(test)]
 mod tests {
     use super::link_needs_restart;
@@ -564,16 +582,4 @@ mod tests {
         // With a peer still connected the fast path does not apply.
         assert!(!link_needs_restart_with(&mut checks, 1, false, 5));
     }
-}
-
-/// Opens a vault by passphrase on a blocking thread (Argon2id).
-pub async fn open_account(passphrase: Zeroizing<String>) -> CmdResult<Account> {
-    let vault = paths::vault_path();
-    if !vault.exists() {
-        return Err(UiError::not_found("no vault on this PC"));
-    }
-    tauri::async_runtime::spawn_blocking(move || Account::open(&vault, &passphrase, kdf()))
-        .await
-        .map_err(|e| UiError::internal(e.to_string()))?
-        .map_err(UiError::from)
 }

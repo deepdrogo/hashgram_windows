@@ -379,7 +379,12 @@ fn xml_escape(s: &str) -> String {
 }
 
 /// The Task Scheduler definition for the per-user logon task.
-fn task_xml(wrapper: &std::path::Path, arguments: &str, home: &std::path::Path, user: &str) -> String {
+fn task_xml(
+    wrapper: &std::path::Path,
+    arguments: &str,
+    home: &std::path::Path,
+    user: &str,
+) -> String {
     let user_el = if user.is_empty() {
         String::new()
     } else {
@@ -562,21 +567,28 @@ mod tests {
         let wrapper = PathBuf::from(
             r"C:\Users\someone with a long name\AppData\Local\Hashgram One\hashgram-node-service.exe",
         );
-        let home = PathBuf::from(r"C:\Users\someone with a long name\AppData\Local\Hashgram\data\node");
+        let home =
+            PathBuf::from(r"C:\Users\someone with a long name\AppData\Local\Hashgram\data\node");
         let args = format!(
             "--node \"{}\" --home \"{}\" --config \"{}\"",
             r"C:\Users\someone with a long name\AppData\Local\Hashgram One\hashgram-node.exe & co",
             home.display(),
             home.join("node.toml").display()
         );
-        assert!(args.len() + wrapper.display().to_string().len() > 261, "the case that broke /TR");
+        assert!(
+            args.len() + wrapper.display().to_string().len() > 261,
+            "the case that broke /TR"
+        );
         let xml = task_xml(&wrapper, &args, &home, r"PC\someone");
         assert!(xml.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
         assert!(xml.contains("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"));
         assert!(xml.contains("<UserId>PC\\someone</UserId>"));
         assert!(xml.contains("&amp; co"), "ampersands are escaped: {xml}");
         assert!(xml.contains("&quot;--home&quot;") || xml.contains("--home &quot;"));
-        assert!(!xml.contains("<Arguments>--node \"C:"), "quotes must be escaped inside XML");
+        assert!(
+            !xml.contains("<Arguments>--node \"C:"),
+            "quotes must be escaped inside XML"
+        );
         let d = std::env::temp_dir().join(format!("hg-task-{}.xml", std::process::id()));
         write_utf16(&d, &xml).unwrap();
         let bytes = std::fs::read(&d).unwrap();

@@ -282,9 +282,9 @@ impl<'a> People<'a> {
             .filter(|e| e.r#type == "PROFILE_UPDATE")
             .max_by_key(|e| (e.timestamp, e.sequence))
         {
-            if let Ok(p) = <hashgram_proto::pb::ProfileUpdate as prost::Message>::decode(
-                ev.payload.as_slice(),
-            ) {
+            if let Ok(p) =
+                <hashgram_proto::pb::ProfileUpdate as prost::Message>::decode(ev.payload.as_slice())
+            {
                 prof.display_name = p.display_name;
                 prof.bio = p.bio;
                 prof.avatar_cid = hex::encode(&p.avatar_cid);

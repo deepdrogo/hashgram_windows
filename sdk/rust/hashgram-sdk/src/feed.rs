@@ -1104,7 +1104,12 @@ impl<'a> Feed<'a> {
         let mut last: Option<SdkError> = None;
         for rp in capable.iter().take(EXPLORE_ATTEMPTS) {
             match s
-                .fetch_from(&self.one.link, &self.one.network, rp.peer.peer, query.clone())
+                .fetch_from(
+                    &self.one.link,
+                    &self.one.network,
+                    rp.peer.peer,
+                    query.clone(),
+                )
                 .await
             {
                 Ok(r) => {
@@ -1279,10 +1284,12 @@ impl<'a> Feed<'a> {
             }
             in_window += 1;
             active.insert(&ev.author);
-            let a = authors.entry(ev.author.clone()).or_insert_with(|| AuthorActivity {
-                author: ev.author.clone(),
-                ..Default::default()
-            });
+            let a = authors
+                .entry(ev.author.clone())
+                .or_insert_with(|| AuthorActivity {
+                    author: ev.author.clone(),
+                    ..Default::default()
+                });
             a.last_active = a.last_active.max(ev.timestamp);
             match ev.r#type.as_str() {
                 "POST_CREATE" | "REEL_CREATE" => {
@@ -1299,9 +1306,11 @@ impl<'a> Feed<'a> {
                             e.2 = e.2.max(ev.timestamp);
                         }
                         if !p.channel.is_empty() {
-                            let e = wall_posts
-                                .entry(hex::encode(&p.channel))
-                                .or_insert((0, BTreeSet::new(), 0));
+                            let e = wall_posts.entry(hex::encode(&p.channel)).or_insert((
+                                0,
+                                BTreeSet::new(),
+                                0,
+                            ));
                             e.0 += 1;
                             e.1.insert(ev.author.clone());
                             e.2 = e.2.max(ev.timestamp);
@@ -1315,7 +1324,10 @@ impl<'a> Feed<'a> {
                             if owner != ev.author {
                                 authors
                                     .entry(owner.clone())
-                                    .or_insert_with(|| AuthorActivity { author: owner, ..Default::default() })
+                                    .or_insert_with(|| AuthorActivity {
+                                        author: owner,
+                                        ..Default::default()
+                                    })
                                     .comments_received += 1;
                             }
                         }
@@ -1327,7 +1339,10 @@ impl<'a> Feed<'a> {
                             if owner != ev.author {
                                 authors
                                     .entry(owner.clone())
-                                    .or_insert_with(|| AuthorActivity { author: owner, ..Default::default() })
+                                    .or_insert_with(|| AuthorActivity {
+                                        author: owner,
+                                        ..Default::default()
+                                    })
                                     .reactions_received += 1;
                             }
                         }
@@ -1338,7 +1353,10 @@ impl<'a> Feed<'a> {
         }
         // Walls we know by description only (digest cache) count too.
         for (k, w) in self.one.store.scan::<WallInfo>(NS_WALLS)? {
-            if k.starts_with(b"info/") && !walls.contains_key(&w.id) && !blocked.contains(&w.creator) {
+            if k.starts_with(b"info/")
+                && !walls.contains_key(&w.id)
+                && !blocked.contains(&w.creator)
+            {
                 walls.insert(w.id.clone(), w);
             }
         }
@@ -1354,15 +1372,17 @@ impl<'a> Feed<'a> {
                 w
             })
             .collect();
-        walls.sort_by(|a, b| b.last_post.max(b.created_at).cmp(&a.last_post.max(a.created_at)));
+        walls.sort_by(|a, b| {
+            b.last_post
+                .max(b.created_at)
+                .cmp(&a.last_post.max(a.created_at))
+        });
         walls.truncate(limit);
         let mut top_authors: Vec<AuthorActivity> = authors
             .into_values()
             .filter(|a| a.posts + a.comments + a.reactions_received + a.comments_received > 0)
             .collect();
-        top_authors.sort_by(|a, b| {
-            (b.posts, b.comments, b.reactions_received).cmp(&(a.posts, a.comments, a.reactions_received))
-        });
+        top_authors.sort_by_key(|a| std::cmp::Reverse((a.posts, a.comments, a.reactions_received)));
         top_authors.truncate(limit);
         let mut top_hashtags: Vec<HashtagActivity> = tags
             .into_iter()
@@ -1373,7 +1393,7 @@ impl<'a> Feed<'a> {
                 last_used: last,
             })
             .collect();
-        top_hashtags.sort_by(|a, b| (b.posts, b.authors).cmp(&(a.posts, a.authors)));
+        top_hashtags.sort_by_key(|h| std::cmp::Reverse((h.posts, h.authors)));
         top_hashtags.truncate(limit);
         Ok(Digest {
             window_secs,
@@ -1442,10 +1462,10 @@ impl<'a> Feed<'a> {
                     // Remember what the network told us about walls so a
                     // wall page can open without another round-trip.
                     for w in &walls {
-                        let _ = self
-                            .one
-                            .store
-                            .put(NS_WALLS, format!("info/{}", w.id).as_bytes(), w);
+                        let _ =
+                            self.one
+                                .store
+                                .put(NS_WALLS, format!("info/{}", w.id).as_bytes(), w);
                     }
                     return Ok(Digest {
                         window_secs: d.window_secs,
@@ -1503,7 +1523,10 @@ impl<'a> Feed<'a> {
     /// reaction and repost a node holds for it, verified and cached, then
     /// assembled like [`Self::thread`]. Works for posts found in Explore
     /// that this device never cached.
-    pub async fn thread_fetch(&mut self, post_id_hex: &str) -> Result<Option<PostThread>, SdkError> {
+    pub async fn thread_fetch(
+        &mut self,
+        post_id_hex: &str,
+    ) -> Result<Option<PostThread>, SdkError> {
         let pid = hex32("post", post_id_hex)?;
         let s = self.social()?;
         let cached: Option<pb::SocialEvent> = self.one.store.get(NS_EVENTS, &pid)?;

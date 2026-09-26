@@ -68,12 +68,21 @@ pub async fn spaces_members(state: S<'_>, space: String) -> CmdResult<Vec<Member
 
 /// Content page (posts, comments, announcements), newest first.
 #[tauri::command]
-pub async fn spaces_content(state: S<'_>, space: String, before_ms: Option<u64>, limit: Option<usize>) -> CmdResult<Vec<SpaceContentView>> {
+pub async fn spaces_content(
+    state: S<'_>,
+    space: String,
+    before_ms: Option<u64>,
+    limit: Option<usize>,
+) -> CmdResult<Vec<SpaceContentView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one
         .spaces()
-        .content(&space, before_ms.unwrap_or(0), limit.unwrap_or(100).clamp(1, 500))?
+        .content(
+            &space,
+            before_ms.unwrap_or(0),
+            limit.unwrap_or(100).clamp(1, 500),
+        )?
         .iter()
         .map(SpaceContentView::from)
         .collect())
@@ -84,15 +93,27 @@ pub async fn spaces_content(state: S<'_>, space: String, before_ms: Option<u64>,
 pub async fn spaces_drive(state: S<'_>, space: String) -> CmdResult<Vec<SpaceSharedEntryView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.spaces().drive_entries(&space)?.iter().map(SpaceSharedEntryView::from).collect())
+    Ok(one
+        .spaces()
+        .drive_entries(&space)?
+        .iter()
+        .map(SpaceSharedEntryView::from)
+        .collect())
 }
 
 /// Invites (address or name resolved here) with a role.
 #[tauri::command]
-pub async fn spaces_invite(state: S<'_>, space: String, member: String, role: String) -> CmdResult<()> {
+pub async fn spaces_invite(
+    state: S<'_>,
+    space: String,
+    member: String,
+    role: String,
+) -> CmdResult<()> {
     let role = role_of(&role)?;
     if role == app::SpaceRole::Owner {
-        return Err(UiError::invalid("ownership is transferred with a role change, not an invite"));
+        return Err(UiError::invalid(
+            "ownership is transferred with a role change, not an invite",
+        ));
     }
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
@@ -104,17 +125,29 @@ pub async fn spaces_invite(state: S<'_>, space: String, member: String, role: St
 
 /// Removes a member (or leaves when it is us).
 #[tauri::command]
-pub async fn spaces_remove(state: S<'_>, space: String, address: String, reason: String) -> CmdResult<()> {
+pub async fn spaces_remove(
+    state: S<'_>,
+    space: String,
+    address: String,
+    reason: String,
+) -> CmdResult<()> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    one.spaces().remove(&space, address.trim(), reason.trim()).await?;
+    one.spaces()
+        .remove(&space, address.trim(), reason.trim())
+        .await?;
     one.save()?;
     Ok(())
 }
 
 /// Changes a role (`owner` transfers ownership).
 #[tauri::command]
-pub async fn spaces_set_role(state: S<'_>, space: String, address: String, role: String) -> CmdResult<String> {
+pub async fn spaces_set_role(
+    state: S<'_>,
+    space: String,
+    address: String,
+    role: String,
+) -> CmdResult<String> {
     let role = role_of(&role)?;
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
@@ -125,23 +158,39 @@ pub async fn spaces_set_role(state: S<'_>, space: String, address: String, role:
 
 /// Updates name / description.
 #[tauri::command]
-pub async fn spaces_set_info(state: S<'_>, space: String, name: String, description: String) -> CmdResult<String> {
+pub async fn spaces_set_info(
+    state: S<'_>,
+    space: String,
+    name: String,
+    description: String,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let id = one.spaces().set_info(&space, name.trim(), description.trim()).await?;
+    let id = one
+        .spaces()
+        .set_info(&space, name.trim(), description.trim())
+        .await?;
     one.save()?;
     Ok(id)
 }
 
 /// Announcement (Admin+).
 #[tauri::command]
-pub async fn spaces_announce(state: S<'_>, space: String, title: String, text: String) -> CmdResult<String> {
+pub async fn spaces_announce(
+    state: S<'_>,
+    space: String,
+    title: String,
+    text: String,
+) -> CmdResult<String> {
     if title.trim().is_empty() && text.trim().is_empty() {
         return Err(UiError::invalid("write a title or a text"));
     }
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let id = one.spaces().announce(&space, title.trim(), text.trim(), Vec::new()).await?;
+    let id = one
+        .spaces()
+        .announce(&space, title.trim(), text.trim(), Vec::new())
+        .await?;
     one.save()?;
     Ok(id)
 }
@@ -154,14 +203,22 @@ pub async fn spaces_post(state: S<'_>, space: String, text: String) -> CmdResult
     }
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let id = one.spaces().post(&space, text.trim(), Vec::new(), Vec::new()).await?;
+    let id = one
+        .spaces()
+        .post(&space, text.trim(), Vec::new(), Vec::new())
+        .await?;
     one.save()?;
     Ok(id)
 }
 
 /// Comment (Member+).
 #[tauri::command]
-pub async fn spaces_comment(state: S<'_>, space: String, post: String, text: String) -> CmdResult<String> {
+pub async fn spaces_comment(
+    state: S<'_>,
+    space: String,
+    post: String,
+    text: String,
+) -> CmdResult<String> {
     if text.trim().is_empty() {
         return Err(UiError::invalid("write something"));
     }
@@ -174,10 +231,19 @@ pub async fn spaces_comment(state: S<'_>, space: String, post: String, text: Str
 
 /// Shares one of our Drive entries into the Space drive.
 #[tauri::command]
-pub async fn spaces_share_drive(state: S<'_>, space: String, entry: String, path: String, live: bool) -> CmdResult<String> {
+pub async fn spaces_share_drive(
+    state: S<'_>,
+    space: String,
+    entry: String,
+    path: String,
+    live: bool,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let id = one.spaces().share_drive(&space, &entry, path.trim().trim_matches('/'), live).await?;
+    let id = one
+        .spaces()
+        .share_drive(&space, &entry, path.trim().trim_matches('/'), live)
+        .await?;
     one.save()?;
     Ok(id)
 }
@@ -194,18 +260,30 @@ pub async fn spaces_unshare_drive(state: S<'_>, space: String, share: String) ->
 
 /// Mail to every member.
 #[tauri::command]
-pub async fn spaces_mail(state: S<'_>, space: String, subject: String, body: String) -> CmdResult<String> {
+pub async fn spaces_mail(
+    state: S<'_>,
+    space: String,
+    subject: String,
+    body: String,
+) -> CmdResult<String> {
     if subject.trim().is_empty() && body.trim().is_empty() {
         return Err(UiError::invalid("write a subject or a body"));
     }
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let id = one.spaces().mail(&space, subject.trim(), body.trim()).await?;
+    let id = one
+        .spaces()
+        .mail(&space, subject.trim(), body.trim())
+        .await?;
     one.save()?;
     Ok(id)
 }
 
-fn space_cap(one: &mut hashgram_sdk::HashgramOne, space: &str, share: &str) -> CmdResult<app::DriveCapability> {
+fn space_cap(
+    one: &mut hashgram_sdk::HashgramOne,
+    space: &str,
+    share: &str,
+) -> CmdResult<app::DriveCapability> {
     let st = one.spaces().state(space)?;
     if let Some(e) = st.drive.get(share) {
         return Ok(e.capability.clone());
@@ -223,7 +301,12 @@ fn space_cap(one: &mut hashgram_sdk::HashgramOne, space: &str, share: &str) -> C
 
 /// Downloads a Space drive file (by share id) to `out_path`.
 #[tauri::command]
-pub async fn spaces_drive_download(state: S<'_>, space: String, share: String, out_path: String) -> CmdResult<u64> {
+pub async fn spaces_drive_download(
+    state: S<'_>,
+    space: String,
+    share: String,
+    out_path: String,
+) -> CmdResult<u64> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let cap = space_cap(one, &space, &share)?;
@@ -235,7 +318,12 @@ pub async fn spaces_drive_download(state: S<'_>, space: String, share: String, o
 
 /// Opens a Space drive file with the default application.
 #[tauri::command]
-pub async fn spaces_drive_open(state: S<'_>, app: tauri::AppHandle, space: String, share: String) -> CmdResult<String> {
+pub async fn spaces_drive_open(
+    state: S<'_>,
+    app: tauri::AppHandle,
+    space: String,
+    share: String,
+) -> CmdResult<String> {
     let (name, bytes) = {
         let mut g = state.one.lock().await;
         let one = AppState::unlocked(&mut g)?;
@@ -243,15 +331,32 @@ pub async fn spaces_drive_open(state: S<'_>, app: tauri::AppHandle, space: Strin
         if cap.folder {
             return Err(UiError::invalid("open the folder and open its files"));
         }
-        (cap.name.clone(), one.drive().download_capability(&cap).await?)
+        (
+            cap.name.clone(),
+            one.drive().download_capability(&cap).await?,
+        )
     };
     let dir = crate::paths::tmp_dir().join("space");
     std::fs::create_dir_all(&dir)?;
     let safe: String = name
         .chars()
-        .map(|c| if c.is_control() || "\\/:*?\"<>|".contains(c) { '_' } else { c })
+        .map(|c| {
+            if c.is_control() || "\\/:*?\"<>|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
-    let p = dir.join(format!("{}-{}", &share[..share.len().min(8)], if safe.trim().is_empty() { "file".to_owned() } else { safe }));
+    let p = dir.join(format!(
+        "{}-{}",
+        &share[..share.len().min(8)],
+        if safe.trim().is_empty() {
+            "file".to_owned()
+        } else {
+            safe
+        }
+    ));
     tokio::fs::write(&p, &bytes).await?;
     crate::util::open_path(&app, &p)?;
     Ok(p.display().to_string())
@@ -259,7 +364,12 @@ pub async fn spaces_drive_open(state: S<'_>, app: tauri::AppHandle, space: Strin
 
 /// Saves a Space drive file into our own Drive.
 #[tauri::command]
-pub async fn spaces_drive_save(state: S<'_>, space: String, share: String, parent: String) -> CmdResult<String> {
+pub async fn spaces_drive_save(
+    state: S<'_>,
+    space: String,
+    share: String,
+    parent: String,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let cap = space_cap(one, &space, &share)?;
@@ -268,10 +378,18 @@ pub async fn spaces_drive_save(state: S<'_>, space: String, share: String, paren
 
 /// Lists the entries of a Space folder share.
 #[tauri::command]
-pub async fn spaces_drive_folder_list(state: S<'_>, space: String, share: String) -> CmdResult<Vec<crate::views::FolderEntryView>> {
+pub async fn spaces_drive_folder_list(
+    state: S<'_>,
+    space: String,
+    share: String,
+) -> CmdResult<Vec<crate::views::FolderEntryView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let cap = space_cap(one, &space, &share)?;
     let fm = one.drive().shared_folder_entries(&cap).await?;
-    Ok(fm.entries.iter().map(crate::views::FolderEntryView::from).collect())
+    Ok(fm
+        .entries
+        .iter()
+        .map(crate::views::FolderEntryView::from)
+        .collect())
 }

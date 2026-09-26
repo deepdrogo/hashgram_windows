@@ -77,15 +77,26 @@ pub fn leading_zero_bits(d: &[u8]) -> u32 {
 /// Mints a stamp label of at least `bits` for `(recipient, message_id)`,
 /// trying at most `max_iters` nonces. `None` when the budget ran out.
 #[must_use]
-pub fn mint_postage(recipient: &str, message_id: &[u8], bits: u32, max_iters: u64) -> Option<String> {
+pub fn mint_postage(
+    recipient: &str,
+    message_id: &[u8],
+    bits: u32,
+    max_iters: u64,
+) -> Option<String> {
     // A random start so two devices minting for the same message do not
     // duplicate work, and so the nonce reveals nothing about ordering.
     let mut nonce = u64::from_le_bytes(
-        blake3::hash(&[message_id, &std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos().to_le_bytes())
-            .unwrap_or([0; 16])].concat())
-            .as_bytes()[..8]
+        blake3::hash(
+            &[
+                message_id,
+                &std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos().to_le_bytes())
+                    .unwrap_or([0; 16]),
+            ]
+            .concat(),
+        )
+        .as_bytes()[..8]
             .try_into()
             .unwrap_or([0; 8]),
     );

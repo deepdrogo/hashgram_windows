@@ -71,7 +71,11 @@ pub async fn mail_list(
 pub async fn mail_thread(state: S<'_>, thread_id: String) -> CmdResult<Option<ThreadView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.mail().thread(&thread_id)?.as_ref().map(ThreadView::from))
+    Ok(one
+        .mail()
+        .thread(&thread_id)?
+        .as_ref()
+        .map(ThreadView::from))
 }
 
 /// One message.
@@ -84,7 +88,11 @@ pub async fn mail_get(state: S<'_>, id: String) -> CmdResult<Option<MailView>> {
 
 /// Full-text search (bounded scan in the SDK).
 #[tauri::command]
-pub async fn mail_search(state: S<'_>, q: String, limit: Option<usize>) -> CmdResult<Vec<MailSummary>> {
+pub async fn mail_search(
+    state: S<'_>,
+    q: String,
+    limit: Option<usize>,
+) -> CmdResult<Vec<MailSummary>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one.mail().search(&q, clamp_limit(limit))?)
@@ -219,7 +227,11 @@ pub struct RecipientResolution {
     pub error: String,
 }
 
-async fn resolve_one(one: &mut HashgramOne, input: &str, gateway_configured: bool) -> RecipientResolution {
+async fn resolve_one(
+    one: &mut HashgramOne,
+    input: &str,
+    gateway_configured: bool,
+) -> RecipientResolution {
     let mut r = RecipientResolution {
         input: input.to_owned(),
         kind: "invalid",
@@ -265,8 +277,18 @@ async fn resolve_one(one: &mut HashgramOne, input: &str, gateway_configured: boo
 /// Resolves typed recipients (addresses, `@names`, `name@hashgram.io`,
 /// external e-mail) for the composer's chips.
 #[tauri::command]
-pub async fn mail_resolve_recipients(state: S<'_>, inputs: Vec<String>) -> CmdResult<Vec<RecipientResolution>> {
-    let gateway = !state.settings.read().await.network.gateway_address.trim().is_empty();
+pub async fn mail_resolve_recipients(
+    state: S<'_>,
+    inputs: Vec<String>,
+) -> CmdResult<Vec<RecipientResolution>> {
+    let gateway = !state
+        .settings
+        .read()
+        .await
+        .network
+        .gateway_address
+        .trim()
+        .is_empty();
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let mut out = Vec::with_capacity(inputs.len());
@@ -383,7 +405,11 @@ pub async fn mail_draft_new(
 
 /// Saves the typed fields of a draft (attachments are kept).
 #[tauri::command]
-pub async fn mail_draft_save(state: S<'_>, id: String, fields: DraftFields) -> CmdResult<DraftView> {
+pub async fn mail_draft_save(
+    state: S<'_>,
+    id: String,
+    fields: DraftFields,
+) -> CmdResult<DraftView> {
     if fields.subject.len() > m::MAX_SUBJECT {
         return Err(UiError::invalid("subject too long"));
     }
@@ -440,7 +466,11 @@ pub async fn mail_draft_delete(state: S<'_>, id: String) -> CmdResult<bool> {
 /// Small files ride inline; larger ones become encrypted blobs on store
 /// nodes, so this needs the network.
 #[tauri::command]
-pub async fn mail_attach_file(state: S<'_>, draft_id: String, path: String) -> CmdResult<DraftView> {
+pub async fn mail_attach_file(
+    state: S<'_>,
+    draft_id: String,
+    path: String,
+) -> CmdResult<DraftView> {
     let p = std::path::PathBuf::from(&path);
     let name = p
         .file_name()
@@ -449,10 +479,14 @@ pub async fn mail_attach_file(state: S<'_>, draft_id: String, path: String) -> C
         .to_owned();
     let meta = std::fs::metadata(&p)?;
     if meta.len() > 256 * 1024 * 1024 {
-        return Err(UiError::invalid("attachments over 256 MiB: share the file from Drive instead"));
+        return Err(UiError::invalid(
+            "attachments over 256 MiB: share the file from Drive instead",
+        ));
     }
     let bytes = tokio::fs::read(&p).await?;
-    let mime = mime_guess::from_path(&p).first_or_octet_stream().to_string();
+    let mime = mime_guess::from_path(&p)
+        .first_or_octet_stream()
+        .to_string();
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let mut rec = load_draft(one, &draft_id)?;
@@ -476,7 +510,8 @@ pub async fn mail_attach_bytes(
     mime: String,
     base64: String,
 ) -> CmdResult<DraftView> {
-    let bytes = crate::util::base64_decode(&base64).ok_or_else(|| UiError::invalid("bad base64"))?;
+    let bytes =
+        crate::util::base64_decode(&base64).ok_or_else(|| UiError::invalid("bad base64"))?;
     if bytes.len() > 8 * 1024 * 1024 {
         return Err(UiError::invalid("use the file picker for files over 8 MiB"));
     }
@@ -487,11 +522,16 @@ pub async fn mail_attach_bytes(
         return Err(UiError::invalid("64 attachments at most"));
     }
     let mime = if mime.trim().is_empty() {
-        mime_guess::from_path(&name).first_or_octet_stream().to_string()
+        mime_guess::from_path(&name)
+            .first_or_octet_stream()
+            .to_string()
     } else {
         mime
     };
-    let a = one.mail().make_attachment(name.trim(), &mime, &bytes).await?;
+    let a = one
+        .mail()
+        .make_attachment(name.trim(), &mime, &bytes)
+        .await?;
     rec.attachments.push(a);
     rec.updated_at_ms = now_ms();
     one.mail().save_draft(&draft_id, &rec)?;
@@ -518,12 +558,17 @@ pub async fn mail_attach_drive(
         }
     }
     if recipients.is_empty() {
-        return Err(UiError::invalid("add at least one Hashgram recipient before attaching from Drive"));
+        return Err(UiError::invalid(
+            "add at least one Hashgram recipient before attaching from Drive",
+        ));
     }
     if rec.attachments.len() >= m::MAX_ATTACHMENTS {
         return Err(UiError::invalid("64 attachments at most"));
     }
-    let a = one.mail().attach_from_drive(&entry_id, &recipients, live).await?;
+    let a = one
+        .mail()
+        .attach_from_drive(&entry_id, &recipients, live)
+        .await?;
     rec.attachments.push(a);
     rec.updated_at_ms = now_ms();
     one.mail().save_draft(&draft_id, &rec)?;
@@ -533,7 +578,11 @@ pub async fn mail_attach_drive(
 
 /// Removes an attachment from a draft.
 #[tauri::command]
-pub async fn mail_draft_remove_attachment(state: S<'_>, draft_id: String, index: usize) -> CmdResult<DraftView> {
+pub async fn mail_draft_remove_attachment(
+    state: S<'_>,
+    draft_id: String,
+    index: usize,
+) -> CmdResult<DraftView> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let mut rec = load_draft(one, &draft_id)?;
@@ -570,7 +619,14 @@ pub async fn mail_send(
     draft_id: String,
     options: Option<SendOptions>,
 ) -> CmdResult<String> {
-    let gateway_setting = state.settings.read().await.network.gateway_address.trim().to_owned();
+    let gateway_setting = state
+        .settings
+        .read()
+        .await
+        .network
+        .gateway_address
+        .trim()
+        .to_owned();
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let mut rec = load_draft(one, &draft_id)?;
@@ -625,7 +681,9 @@ pub async fn mail_send(
             ));
         }
         let mut gw = one.mail().resolve_recipients(&[gateway_setting]).await?;
-        let gw = gw.pop().ok_or_else(|| UiError::invalid("gateway not resolved"))?;
+        let gw = gw
+            .pop()
+            .ok_or_else(|| UiError::invalid("gateway not resolved"))?;
         if !to.iter().any(|a| a.address == gw.address) {
             to.push(gw);
         }
@@ -689,7 +747,13 @@ fn attachment_of(one: &mut HashgramOne, id: &str, index: usize) -> CmdResult<app
 fn safe_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if c.is_control() || "\\/:*?\"<>|".contains(c) { '_' } else { c })
+        .map(|c| {
+            if c.is_control() || "\\/:*?\"<>|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let t = cleaned.trim().trim_matches('.');
     if t.is_empty() {
@@ -702,7 +766,12 @@ fn safe_name(name: &str) -> String {
 /// Decrypts an attachment and writes it to `path` (chosen with the save
 /// dialog by the webview).
 #[tauri::command]
-pub async fn mail_attachment_save(state: S<'_>, id: String, index: usize, path: String) -> CmdResult<u64> {
+pub async fn mail_attachment_save(
+    state: S<'_>,
+    id: String,
+    index: usize,
+    path: String,
+) -> CmdResult<u64> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let a = attachment_of(one, &id, index)?;
@@ -715,7 +784,12 @@ pub async fn mail_attachment_save(state: S<'_>, id: String, index: usize, path: 
 /// Decrypts an attachment to the scratch folder and opens it with the
 /// default application. The scratch folder is wiped at lock and at start.
 #[tauri::command]
-pub async fn mail_attachment_open(state: S<'_>, app: AppHandle, id: String, index: usize) -> CmdResult<String> {
+pub async fn mail_attachment_open(
+    state: S<'_>,
+    app: AppHandle,
+    id: String,
+    index: usize,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let a = attachment_of(one, &id, index)?;
@@ -748,7 +822,10 @@ pub async fn mail_attachment_preview(state: S<'_>, id: String, index: usize) -> 
 pub async fn mail_attachments(state: S<'_>, id: String) -> CmdResult<Vec<AttachmentView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let rec = one.mail().get(&id)?.ok_or_else(|| UiError::not_found("mail"))?;
+    let rec = one
+        .mail()
+        .get(&id)?
+        .ok_or_else(|| UiError::not_found("mail"))?;
     Ok(rec
         .message
         .attachments

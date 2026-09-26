@@ -119,14 +119,28 @@ pub async fn people_list(state: S<'_>, which: String) -> CmdResult<Vec<ContactRe
         "following" => p
             .all()
             .into_iter()
-            .filter(|r| r.states.iter().any(|s| s == hashgram_sdk::protocol::people::FOLLOWING))
+            .filter(|r| {
+                r.states
+                    .iter()
+                    .any(|s| s == hashgram_sdk::protocol::people::FOLLOWING)
+            })
             .collect(),
         other => return Err(UiError::invalid(format!("unknown list {other}"))),
     };
     v.sort_by(|a, b| {
-        let ka = if a.display_name.is_empty() { &a.username } else { &a.display_name };
-        let kb = if b.display_name.is_empty() { &b.username } else { &b.display_name };
-        ka.to_lowercase().cmp(&kb.to_lowercase()).then_with(|| a.address.cmp(&b.address))
+        let ka = if a.display_name.is_empty() {
+            &a.username
+        } else {
+            &a.display_name
+        };
+        let kb = if b.display_name.is_empty() {
+            &b.username
+        } else {
+            &b.display_name
+        };
+        ka.to_lowercase()
+            .cmp(&kb.to_lowercase())
+            .then_with(|| a.address.cmp(&b.address))
     });
     Ok(v)
 }
@@ -158,10 +172,17 @@ pub async fn people_my_display_name(state: S<'_>) -> CmdResult<String> {
 
 /// Sends our card to a contact (optionally disclosing the wallet address).
 #[tauri::command]
-pub async fn people_send_card(state: S<'_>, address: String, bio: String, disclose_wallet: bool) -> CmdResult<()> {
+pub async fn people_send_card(
+    state: S<'_>,
+    address: String,
+    bio: String,
+    disclose_wallet: bool,
+) -> CmdResult<()> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    one.people().send_card(address.trim(), bio.trim(), disclose_wallet).await?;
+    one.people()
+        .send_card(address.trim(), bio.trim(), disclose_wallet)
+        .await?;
     one.save()?;
     Ok(())
 }
@@ -171,7 +192,11 @@ pub async fn people_send_card(state: S<'_>, address: String, bio: String, disclo
 pub async fn people_card_of(state: S<'_>, address: String) -> CmdResult<Option<CardView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.people().card_of(address.trim())?.as_ref().map(CardView::from))
+    Ok(one
+        .people()
+        .card_of(address.trim())?
+        .as_ref()
+        .map(CardView::from))
 }
 
 /// Username of an address (cached).

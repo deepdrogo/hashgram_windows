@@ -322,10 +322,7 @@ impl<'a> Network<'a> {
                 .await
                 .unwrap_or_default();
             // Basis points of the scanned total; integer on purpose.
-            let share_bps = amt
-                .saturating_mul(10_000)
-                .checked_div(total)
-                .unwrap_or(0) as u32;
+            let share_bps = amt.saturating_mul(10_000).checked_div(total).unwrap_or(0) as u32;
             holders.push(Holder {
                 rank: (i + 1) as u32,
                 address,

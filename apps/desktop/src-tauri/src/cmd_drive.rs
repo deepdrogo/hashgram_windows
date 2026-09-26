@@ -17,7 +17,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::{CmdResult, UiError};
 use crate::state::AppState;
-use crate::views::{CapabilityView, FolderEntryView, ShareRecordView, SharedWithMeView, VersionView};
+use crate::views::{
+    CapabilityView, FolderEntryView, ShareRecordView, SharedWithMeView, VersionView,
+};
 
 type S<'a> = State<'a, Arc<AppState>>;
 
@@ -78,7 +80,11 @@ pub async fn drive_starred(state: S<'_>) -> CmdResult<Vec<EntryView>> {
 
 /// Name search.
 #[tauri::command]
-pub async fn drive_search(state: S<'_>, q: String, limit: Option<usize>) -> CmdResult<Vec<EntryView>> {
+pub async fn drive_search(
+    state: S<'_>,
+    q: String,
+    limit: Option<usize>,
+) -> CmdResult<Vec<EntryView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one.drive().search(&q, limit.unwrap_or(100).clamp(1, 500)))
@@ -97,7 +103,12 @@ pub async fn drive_entry(state: S<'_>, id: String) -> CmdResult<Option<EntryView
 pub async fn drive_versions(state: S<'_>, id: String) -> CmdResult<Vec<VersionView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.drive().versions(&id)?.iter().map(VersionView::from).collect())
+    Ok(one
+        .drive()
+        .versions(&id)?
+        .iter()
+        .map(VersionView::from)
+        .collect())
 }
 
 /// Usage.
@@ -119,7 +130,9 @@ pub async fn drive_resolve_path(state: S<'_>, path: String) -> CmdResult<Option<
 fn check_name(name: &str) -> CmdResult<String> {
     let n = name.trim();
     if n.is_empty() || n.len() > 255 || n.contains('/') || n.contains('\\') {
-        return Err(UiError::invalid("a name is 1–255 characters without slashes"));
+        return Err(UiError::invalid(
+            "a name is 1–255 characters without slashes",
+        ));
     }
     Ok(n.to_owned())
 }
@@ -151,14 +164,22 @@ async fn read_capped(path: &str) -> CmdResult<(String, String, Vec<u8>)> {
         .and_then(|n| n.to_str())
         .unwrap_or("file")
         .to_owned();
-    let mime = mime_guess::from_path(&p).first_or_octet_stream().to_string();
+    let mime = mime_guess::from_path(&p)
+        .first_or_octet_stream()
+        .to_string();
     let bytes = tokio::fs::read(&p).await?;
     Ok((name, mime, bytes))
 }
 
 /// Uploads a file from disk into a folder. Progress on `drive:progress`.
 #[tauri::command]
-pub async fn drive_upload(state: S<'_>, app: AppHandle, parent: String, path: String, op: Option<String>) -> CmdResult<String> {
+pub async fn drive_upload(
+    state: S<'_>,
+    app: AppHandle,
+    parent: String,
+    path: String,
+    op: Option<String>,
+) -> CmdResult<String> {
     let op = op.unwrap_or_default();
     progress(&app, &op, "reading", 0, 0, "");
     let (name, mime, bytes) = match read_capped(&path).await {
@@ -196,12 +217,17 @@ pub async fn drive_upload_bytes(
     base64: String,
 ) -> CmdResult<String> {
     let name = check_name(&name)?;
-    let bytes = crate::util::base64_decode(&base64).ok_or_else(|| UiError::invalid("bad base64"))?;
+    let bytes =
+        crate::util::base64_decode(&base64).ok_or_else(|| UiError::invalid("bad base64"))?;
     if bytes.len() > 32 * 1024 * 1024 {
-        return Err(UiError::invalid("use the file picker for files over 32 MiB"));
+        return Err(UiError::invalid(
+            "use the file picker for files over 32 MiB",
+        ));
     }
     let mime = if mime.trim().is_empty() {
-        mime_guess::from_path(&name).first_or_octet_stream().to_string()
+        mime_guess::from_path(&name)
+            .first_or_octet_stream()
+            .to_string()
     } else {
         mime
     };
@@ -214,14 +240,25 @@ pub async fn drive_upload_bytes(
 
 /// Replaces a file's content with a new version from disk.
 #[tauri::command]
-pub async fn drive_update(state: S<'_>, app: AppHandle, id: String, path: String, note: Option<String>, op: Option<String>) -> CmdResult<u64> {
+pub async fn drive_update(
+    state: S<'_>,
+    app: AppHandle,
+    id: String,
+    path: String,
+    note: Option<String>,
+    op: Option<String>,
+) -> CmdResult<u64> {
     let op = op.unwrap_or_default();
     let (_, _, bytes) = read_capped(&path).await?;
     let total = bytes.len() as u64;
     progress(&app, &op, "uploading", 0, total, "");
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    match one.drive().update(&id, &bytes, note.as_deref().unwrap_or("")).await {
+    match one
+        .drive()
+        .update(&id, &bytes, note.as_deref().unwrap_or(""))
+        .await
+    {
         Ok(no) => {
             let _ = one.save();
             progress(&app, &op, "done", total, total, "");
@@ -249,7 +286,12 @@ pub async fn drive_download(state: S<'_>, id: String, out_path: String) -> CmdRe
 
 /// Downloads a specific version to `out_path`.
 #[tauri::command]
-pub async fn drive_download_version(state: S<'_>, id: String, version_no: u64, out_path: String) -> CmdResult<u64> {
+pub async fn drive_download_version(
+    state: S<'_>,
+    id: String,
+    version_no: u64,
+    out_path: String,
+) -> CmdResult<u64> {
     let bytes = {
         let mut g = state.one.lock().await;
         let one = AppState::unlocked(&mut g)?;
@@ -264,9 +306,19 @@ fn scratch(id: &str, name: &str) -> CmdResult<std::path::PathBuf> {
     std::fs::create_dir_all(&dir)?;
     let safe: String = name
         .chars()
-        .map(|c| if c.is_control() || "\\/:*?\"<>|".contains(c) { '_' } else { c })
+        .map(|c| {
+            if c.is_control() || "\\/:*?\"<>|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
-    Ok(dir.join(if safe.trim().is_empty() { "file".to_owned() } else { safe }))
+    Ok(dir.join(if safe.trim().is_empty() {
+        "file".to_owned()
+    } else {
+        safe
+    }))
 }
 
 /// Decrypts to the scratch folder and opens with the default application.
@@ -275,7 +327,10 @@ pub async fn drive_open(state: S<'_>, app: AppHandle, id: String) -> CmdResult<S
     let (name, bytes) = {
         let mut g = state.one.lock().await;
         let one = AppState::unlocked(&mut g)?;
-        let e = one.drive().entry(&id)?.ok_or_else(|| UiError::not_found("entry"))?;
+        let e = one
+            .drive()
+            .entry(&id)?
+            .ok_or_else(|| UiError::not_found("entry"))?;
         (e.name, one.drive().download(&id).await?)
     };
     let p = scratch(&id, &name)?;
@@ -289,7 +344,10 @@ pub async fn drive_open(state: S<'_>, app: AppHandle, id: String) -> CmdResult<S
 pub async fn drive_preview(state: S<'_>, id: String) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    let e = one.drive().entry(&id)?.ok_or_else(|| UiError::not_found("entry"))?;
+    let e = one
+        .drive()
+        .entry(&id)?
+        .ok_or_else(|| UiError::not_found("entry"))?;
     if !e.mime.starts_with("image/") || e.size > 8 * 1024 * 1024 {
         return Err(UiError::invalid("preview only for images up to 8 MiB"));
     }
@@ -318,7 +376,12 @@ pub async fn drive_move(state: S<'_>, id: String, new_parent: String) -> CmdResu
 
 /// Copy (no re-upload).
 #[tauri::command]
-pub async fn drive_copy(state: S<'_>, id: String, new_parent: String, name: String) -> CmdResult<String> {
+pub async fn drive_copy(
+    state: S<'_>,
+    id: String,
+    new_parent: String,
+    name: String,
+) -> CmdResult<String> {
     let name = check_name(&name)?;
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
@@ -461,14 +524,22 @@ pub async fn drive_revoke(state: S<'_>, share_id: String) -> CmdResult<()> {
 
 /// Shares we granted (optionally for one entry).
 #[tauri::command]
-pub async fn drive_shares(state: S<'_>, entry_id: Option<String>) -> CmdResult<Vec<ShareRecordView>> {
+pub async fn drive_shares(
+    state: S<'_>,
+    entry_id: Option<String>,
+) -> CmdResult<Vec<ShareRecordView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     Ok(one
         .drive()
         .shares()
         .iter()
-        .filter(|s| entry_id.as_ref().map(|e| hex::encode(&s.entry_id) == *e).unwrap_or(true))
+        .filter(|s| {
+            entry_id
+                .as_ref()
+                .map(|e| hex::encode(&s.entry_id) == *e)
+                .unwrap_or(true)
+        })
         .map(ShareRecordView::from)
         .collect())
 }
@@ -478,7 +549,12 @@ pub async fn drive_shares(state: S<'_>, entry_id: Option<String>) -> CmdResult<V
 pub async fn drive_shared_with_me(state: S<'_>) -> CmdResult<Vec<SharedWithMeView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
-    Ok(one.drive().shared_with_me()?.iter().map(SharedWithMeView::from).collect())
+    Ok(one
+        .drive()
+        .shared_with_me()?
+        .iter()
+        .map(SharedWithMeView::from)
+        .collect())
 }
 
 fn shared_cap(one: &mut HashgramOne, share_id: &str) -> CmdResult<app::DriveCapability> {
@@ -492,13 +568,19 @@ fn shared_cap(one: &mut HashgramOne, share_id: &str) -> CmdResult<app::DriveCapa
 
 /// Downloads a shared file to `out_path`.
 #[tauri::command]
-pub async fn drive_shared_download(state: S<'_>, share_id: String, out_path: String) -> CmdResult<u64> {
+pub async fn drive_shared_download(
+    state: S<'_>,
+    share_id: String,
+    out_path: String,
+) -> CmdResult<u64> {
     let bytes = {
         let mut g = state.one.lock().await;
         let one = AppState::unlocked(&mut g)?;
         let cap = shared_cap(one, &share_id)?;
         if cap.folder {
-            return Err(UiError::invalid("open the folder share and download its files"));
+            return Err(UiError::invalid(
+                "open the folder share and download its files",
+            ));
         }
         one.drive().download_capability(&cap).await?
     };
@@ -508,7 +590,11 @@ pub async fn drive_shared_download(state: S<'_>, share_id: String, out_path: Str
 
 /// Opens a shared file with the default application.
 #[tauri::command]
-pub async fn drive_shared_open(state: S<'_>, app: AppHandle, share_id: String) -> CmdResult<String> {
+pub async fn drive_shared_open(
+    state: S<'_>,
+    app: AppHandle,
+    share_id: String,
+) -> CmdResult<String> {
     let (name, bytes) = {
         let mut g = state.one.lock().await;
         let one = AppState::unlocked(&mut g)?;
@@ -516,7 +602,10 @@ pub async fn drive_shared_open(state: S<'_>, app: AppHandle, share_id: String) -
         if cap.folder {
             return Err(UiError::invalid("open the folder share and open its files"));
         }
-        (cap.name.clone(), one.drive().download_capability(&cap).await?)
+        (
+            cap.name.clone(),
+            one.drive().download_capability(&cap).await?,
+        )
     };
     let p = scratch(&share_id, &name)?;
     tokio::fs::write(&p, &bytes).await?;
@@ -526,7 +615,11 @@ pub async fn drive_shared_open(state: S<'_>, app: AppHandle, share_id: String) -
 
 /// Saves a shared file into our Drive (no re-upload).
 #[tauri::command]
-pub async fn drive_shared_save(state: S<'_>, share_id: String, parent: String) -> CmdResult<String> {
+pub async fn drive_shared_save(
+    state: S<'_>,
+    share_id: String,
+    parent: String,
+) -> CmdResult<String> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let cap = shared_cap(one, &share_id)?;
@@ -536,7 +629,10 @@ pub async fn drive_shared_save(state: S<'_>, share_id: String, parent: String) -
 
 /// Lists a shared folder's entries.
 #[tauri::command]
-pub async fn drive_shared_folder_list(state: S<'_>, share_id: String) -> CmdResult<Vec<FolderEntryView>> {
+pub async fn drive_shared_folder_list(
+    state: S<'_>,
+    share_id: String,
+) -> CmdResult<Vec<FolderEntryView>> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     let cap = shared_cap(one, &share_id)?;
@@ -575,7 +671,11 @@ pub async fn drive_shared_folder_download(
 /// Capabilities referenced from a Space or Circle post (by share id inside
 /// the Space state) can be opened the same way; resolved by the Spaces
 /// module.
-pub(crate) async fn download_cap_to(one: &mut HashgramOne, cap: &app::DriveCapability, out_path: &str) -> CmdResult<u64> {
+pub(crate) async fn download_cap_to(
+    one: &mut HashgramOne,
+    cap: &app::DriveCapability,
+    out_path: &str,
+) -> CmdResult<u64> {
     let bytes = one.drive().download_capability(cap).await?;
     tokio::fs::write(out_path, &bytes).await?;
     Ok(bytes.len() as u64)

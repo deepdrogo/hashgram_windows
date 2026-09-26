@@ -223,7 +223,11 @@ impl HashgramOne {
     /// opened the vault before its link was up, or that reconnected). The
     /// chain client is rebuilt over the new link unless a REST gateway is
     /// configured. Local state is untouched.
-    pub fn replace_link(&mut self, link: Arc<Link>, chain_api: Option<&str>) -> Result<(), SdkError> {
+    pub fn replace_link(
+        &mut self,
+        link: Arc<Link>,
+        chain_api: Option<&str>,
+    ) -> Result<(), SdkError> {
         self.chain = match chain_api {
             Some(url) if !url.is_empty() => ChainClient::new(url, &self.network.chain_id)?,
             _ => crate::chain_client_over_link(link.clone(), &self.network.chain_id),

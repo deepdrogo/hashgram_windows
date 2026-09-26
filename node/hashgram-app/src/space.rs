@@ -468,7 +468,9 @@ impl State {
         // Create is the exception: it is the first event and has no
         // predecessor we could be missing.
         if e.sequence > last + 1 && !matches!(e.body, Some(B::Create(_))) {
-            return Err(Rejected::Pending("earlier events from this actor not seen yet"));
+            return Err(Rejected::Pending(
+                "earlier events from this actor not seen yet",
+            ));
         }
         let actor_role = self.role_of(&e.actor);
         let forbid = |action: &'static str| Rejected::Forbidden {
@@ -1096,6 +1098,10 @@ mod tests {
         ));
         reader2.apply(&net(), &events[0], OWNER).unwrap();
         assert_eq!(reader2.role_of(ALICE), pb::SpaceRole::Member);
-        assert_eq!(reader2.content.len(), 1, "announcement applied after the gap filled");
+        assert_eq!(
+            reader2.content.len(),
+            1,
+            "announcement applied after the gap filled"
+        );
     }
 }

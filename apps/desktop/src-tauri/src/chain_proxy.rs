@@ -33,13 +33,26 @@ async fn client(st: &AppState) -> Result<hashgram_sdk::ChainClient, String> {
     let identity = crate::session::network_identity(&settings).map_err(|e| e.message)?;
     let chain_api = settings.network.chain_api.trim().to_owned();
     if !chain_api.is_empty() {
-        return hashgram_sdk::ChainClient::new(&chain_api, &identity.chain_id).map_err(|e| e.to_string());
+        return hashgram_sdk::ChainClient::new(&chain_api, &identity.chain_id)
+            .map_err(|e| e.to_string());
     }
-    let link = st.link.read().await.clone().ok_or_else(|| "network link not up".to_owned())?;
-    Ok(hashgram_sdk::chain_client_over_link(link, &identity.chain_id))
+    let link = st
+        .link
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "network link not up".to_owned())?;
+    Ok(hashgram_sdk::chain_client_over_link(
+        link,
+        &identity.chain_id,
+    ))
 }
 
-async fn read(State(st): State<Arc<AppState>>, Path(path): Path<String>, RawQuery(q): RawQuery) -> Response {
+async fn read(
+    State(st): State<Arc<AppState>>,
+    Path(path): Path<String>,
+    RawQuery(q): RawQuery,
+) -> Response {
     let full = match q {
         Some(q) if !q.is_empty() => format!("{path}?{q}"),
         _ => path,
@@ -57,7 +70,8 @@ async fn read(State(st): State<Arc<AppState>>, Path(path): Path<String>, RawQuer
                 .insert("content-type", HeaderValue::from_static("application/json"));
             if r.height > 0 {
                 if let Ok(v) = HeaderValue::from_str(&r.height.to_string()) {
-                    resp.headers_mut().insert("grpc-metadata-x-cosmos-block-height", v);
+                    resp.headers_mut()
+                        .insert("grpc-metadata-x-cosmos-block-height", v);
                 }
             }
             if let Some(v) = client.verification() {
@@ -124,14 +138,19 @@ pub async fn serve(state: Arc<AppState>) {
         .route("/cosmos/tx/v1beta1/simulate", post(unsupported))
         .route(
             "/cosmos/tx/v1beta1/txs",
-            post(broadcast).get(|s, q| async move { read(s, Path("cosmos/tx/v1beta1/txs".to_owned()), q).await }),
+            post(broadcast).get(|s, q| async move {
+                read(s, Path("cosmos/tx/v1beta1/txs".to_owned()), q).await
+            }),
         )
         .route("/{*path}", get(read))
         .with_state(state);
     let addr = format!("127.0.0.1:{PORT}");
     match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => {
-            tracing::info!(addr, "loopback chain gateway listening (for a node on this PC)");
+            tracing::info!(
+                addr,
+                "loopback chain gateway listening (for a node on this PC)"
+            );
             if let Err(e) = axum::serve(l, router).await {
                 tracing::warn!(error = %e, "loopback chain gateway stopped");
             }

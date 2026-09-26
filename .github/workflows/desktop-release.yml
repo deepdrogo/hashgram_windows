@@ -6,9 +6,12 @@ name: Desktop release (Windows)
 # self-updates from <repo>/releases/latest/download/latest.json.
 #
 # Release procedure (owner):
-#   1. bump "version" in apps/desktop/src-tauri/tauri.conf.json and apps/desktop/package.json
-#   2. commit, then:  git tag vX.Y.Z && git push origin main vX.Y.Z
-#   3. this workflow builds, signs and uploads; installed apps pick it up.
+#   1. bump "version" in apps/desktop/src-tauri/tauri.conf.json,
+#      apps/desktop/package.json and apps/desktop/src-tauri/Cargo.toml
+#   2. run `cargo check -p hashgram-desktop` so node/Cargo.lock records the
+#      new version — `cargo build --locked` in CI refuses a stale lock
+#   3. commit all four, then:  git tag vX.Y.Z && git push origin <branch> vX.Y.Z
+#   4. this workflow builds, signs and uploads; installed apps pick it up.
 #
 # A tag whose release already carries latest.json (published by hand) is left
 # untouched so a local, tested build is never silently replaced.
@@ -57,13 +60,20 @@ jobs:
               Write-Host "::error::tag $tag does not match tauri.conf.json version $($conf.version)"
               exit 1
             }
+            # A tag with no release yet is the normal case, and `gh` says so
+            # with exit code 1. Swallow it: pwsh ends a step with the last
+            # native exit code, so leaving it set failed every first-time tag
+            # here and skipped the entire build.
             $assets = gh release view $tag --json assets --jq '.assets[].name' 2>$null
-            if ($LASTEXITCODE -eq 0 -and ($assets -split "`n") -contains "latest.json") {
+            $exists = ($LASTEXITCODE -eq 0)
+            $global:LASTEXITCODE = 0
+            if ($exists -and ($assets -split "`n") -contains "latest.json") {
               Write-Host "release $tag already has latest.json; nothing to do"
               $skip = "true"
             }
           }
           "skip=$skip" >> $env:GITHUB_OUTPUT
+          exit 0
 
       - uses: pnpm/action-setup@v4
         if: steps.guard.outputs.skip != 'true'
@@ -141,7 +151,9 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           gh release view $tag *> $null
-          if ($LASTEXITCODE -ne 0) {
+          $exists = ($LASTEXITCODE -eq 0)
+          $global:LASTEXITCODE = 0
+          if (-not $exists) {
             gh release create $tag --title "Hashgram One for Windows $tag" --notes-file dist/desktop/RELEASE_NOTES.txt --verify-tag
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }

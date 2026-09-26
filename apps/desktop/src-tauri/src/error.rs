@@ -216,7 +216,8 @@ mod tests {
         let e: UiError = SdkError::Unsupported("mail v9".into()).into();
         assert_eq!(e.code, "unsupported");
         assert!(e.message.contains("update"));
-        let e: UiError = SdkError::Chain(hashgram_sdk::chain::ClientError::NoAccount("hash1x".into())).into();
+        let e: UiError =
+            SdkError::Chain(hashgram_sdk::chain::ClientError::NoAccount("hash1x".into())).into();
         assert_eq!(e.code, "no_funds");
         let e: UiError = SdkError::Delivery("bcc x: timeout".into()).into();
         assert_eq!(e.code, "delivery");

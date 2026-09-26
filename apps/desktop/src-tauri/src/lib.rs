@@ -16,8 +16,7 @@
         clippy::unwrap_used,
         clippy::expect_used,
         clippy::indexing_slicing,
-        clippy::panic,
-        clippy::integer_division
+        clippy::panic
     )
 )]
 // Unit conversions for display (bytes → MiB, ms → s) truncate on purpose;
@@ -72,7 +71,10 @@ pub struct DeepLink {
     pub url: String,
 }
 
-fn init_logging(perf: Arc<perf::PerfStore>, level: &str) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+fn init_logging(
+    perf: Arc<perf::PerfStore>,
+    level: &str,
+) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::new(format!(
             "{level},libp2p_gossipsub=warn,libp2p_kad=warn,libp2p_swarm=warn,quinn=warn,quinn_udp=error,hyper=warn,hickory_proto=warn,hickory_resolver=warn"
@@ -118,7 +120,13 @@ fn init_logging(perf: Arc<perf::PerfStore>, level: &str) -> Option<tracing_appen
     guard
 }
 
-fn build_state() -> Result<(Arc<AppState>, Option<tracing_appender::non_blocking::WorkerGuard>), String> {
+fn build_state() -> Result<
+    (
+        Arc<AppState>,
+        Option<tracing_appender::non_blocking::WorkerGuard>,
+    ),
+    String,
+> {
     let data = paths::ensure_dirs().map_err(|e| e.to_string())?;
     let settings = settings::Settings::load(&paths::settings_path());
     let perf = Arc::new(perf::PerfStore::default());
@@ -528,7 +536,10 @@ pub fn run() {
             session::spawn_housekeeping(handle, state.clone());
             tauri::async_runtime::spawn(chain_proxy::serve(state.clone()));
             #[cfg(debug_assertions)]
-            if std::env::var("HASHGRAM_DEVTOOLS").map(|v| v == "1").unwrap_or(false) {
+            if std::env::var("HASHGRAM_DEVTOOLS")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+            {
                 if let Some(w) = app.get_webview_window("main") {
                     w.open_devtools();
                 }

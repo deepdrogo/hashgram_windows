@@ -314,11 +314,19 @@ impl Settings {
     /// Validates the parts a user can mistype.
     pub fn validate(&self) -> Result<(), String> {
         let u = self.network.indexer_url.trim();
-        if !u.is_empty() && !(u.starts_with("https://") || u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost")) {
+        if !u.is_empty()
+            && !(u.starts_with("https://")
+                || u.starts_with("http://127.0.0.1")
+                || u.starts_with("http://localhost"))
+        {
             return Err("indexer URL must be https:// (plain http only on this PC)".into());
         }
         let c = self.network.chain_api.trim();
-        if !c.is_empty() && !(c.starts_with("https://") || c.starts_with("http://127.0.0.1") || c.starts_with("http://localhost")) {
+        if !c.is_empty()
+            && !(c.starts_with("https://")
+                || c.starts_with("http://127.0.0.1")
+                || c.starts_with("http://localhost"))
+        {
             return Err("chain API must be https:// (plain http only on this PC)".into());
         }
         if self.network.kind == NetworkKind::Devnet {

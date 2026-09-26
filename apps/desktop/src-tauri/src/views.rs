@@ -241,7 +241,9 @@ impl AttachmentView {
     #[must_use]
     pub fn of(index: usize, a: &app::MailAttachment) -> Self {
         let (kind, live, share_id, version_no, folder) = match &a.source {
-            Some(app::mail_attachment::Source::InlineData(_)) => ("inline", false, String::new(), 0, false),
+            Some(app::mail_attachment::Source::InlineData(_)) => {
+                ("inline", false, String::new(), 0, false)
+            }
             Some(app::mail_attachment::Source::Blob(_)) => ("blob", false, String::new(), 0, false),
             Some(app::mail_attachment::Source::Drive(c)) => (
                 "drive",
@@ -721,8 +723,13 @@ impl SpaceStateView {
     /// Maps a state for `me`.
     #[must_use]
     pub fn of(s: &State, me: &str) -> Self {
-        let mut drive: Vec<SpaceSharedEntryView> = s.drive.values().map(SpaceSharedEntryView::from).collect();
-        drive.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.capability.name.cmp(&b.capability.name)));
+        let mut drive: Vec<SpaceSharedEntryView> =
+            s.drive.values().map(SpaceSharedEntryView::from).collect();
+        drive.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then_with(|| a.capability.name.cmp(&b.capability.name))
+        });
         Self {
             space_id: s.space_id.clone(),
             name: s.name.clone(),
@@ -863,10 +870,21 @@ mod tests {
 
     fn forbidden(json: &str) {
         let j = json.to_ascii_lowercase();
-        for word in ["\"key\"", "nonce", "seed", "secret", "mnemonic", "base_nonce", "manifest_key"] {
+        for word in [
+            "\"key\"",
+            "nonce",
+            "seed",
+            "secret",
+            "mnemonic",
+            "base_nonce",
+            "manifest_key",
+        ] {
             assert!(!j.contains(word), "{word} leaked: {json}");
         }
-        assert!(!j.contains(&hex::encode([0xAAu8; 32])), "object key bytes leaked");
+        assert!(
+            !j.contains(&hex::encode([0xAAu8; 32])),
+            "object key bytes leaked"
+        );
     }
 
     #[test]

@@ -72,7 +72,12 @@ impl Drop for Devnet {
 async fn wait_http(url: &str, tries: u32) -> bool {
     let c = reqwest::Client::new();
     for _ in 0..tries {
-        if c.get(url).send().await.map(|r| r.status().is_success()).unwrap_or(false) {
+        if c.get(url)
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+        {
             return true;
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -84,7 +89,11 @@ async fn start_devnet() -> Option<Devnet> {
     let gw = exe("mock-gateway");
     let nd = exe("hashgram-node");
     if !gw.exists() || !nd.exists() {
-        eprintln!("devnet binaries missing ({} / {}); skipping", gw.display(), nd.display());
+        eprintln!(
+            "devnet binaries missing ({} / {}); skipping",
+            gw.display(),
+            nd.display()
+        );
         return None;
     }
     let dir = std::env::temp_dir().join(format!("hg-desktop-devnet-{}", std::process::id()));
@@ -97,10 +106,18 @@ async fn start_devnet() -> Option<Devnet> {
         .spawn()
         .expect("mock-gateway");
     assert!(
-        wait_http(&format!("http://127.0.0.1:{GW_PORT}/cosmos/base/tendermint/v1beta1/node_info"), 40).await,
+        wait_http(
+            &format!("http://127.0.0.1:{GW_PORT}/cosmos/base/tendermint/v1beta1/node_info"),
+            40
+        )
+        .await,
         "gateway did not start"
     );
-    let home = dir.join("node/data").display().to_string().replace('\\', "/");
+    let home = dir
+        .join("node/data")
+        .display()
+        .to_string()
+        .replace('\\', "/");
     std::fs::write(
         dir.join("node/network.json"),
         format!("{{\"network_id\":\"hashgram-devnet\",\"genesis_hash\":\"{GENESIS}\"}}"),
@@ -132,7 +149,10 @@ async fn start_devnet() -> Option<Devnet> {
         .stderr(Stdio::null())
         .spawn()
         .expect("hashgram-node");
-    assert!(wait_http(&format!("http://127.0.0.1:{API_PORT}/v1/status"), 80).await, "node did not start");
+    assert!(
+        wait_http(&format!("http://127.0.0.1:{API_PORT}/v1/status"), 80).await,
+        "node did not start"
+    );
     let status: serde_json::Value = reqwest::get(format!("http://127.0.0.1:{API_PORT}/v1/status"))
         .await
         .unwrap()
@@ -152,7 +172,9 @@ fn config(home: &Path, peer: &str) -> Config {
     Config {
         paths: Paths::new(home),
         network: NetworkIdentity::devnet(GENESIS),
-        bootstrap: vec![format!("/ip4/127.0.0.1/tcp/{NODE_PORT}/p2p/{peer}").parse().unwrap()],
+        bootstrap: vec![format!("/ip4/127.0.0.1/tcp/{NODE_PORT}/p2p/{peer}")
+            .parse()
+            .unwrap()],
         chain_api: Some(format!("http://127.0.0.1:{GW_PORT}")),
         kdf: KdfCost::light(),
         connect_wait: Duration::from_secs(10),
@@ -184,7 +206,15 @@ async fn register(one: &mut HashgramOne, username: &str) {
 
 fn forbidden(json: &str) {
     let j = json.to_ascii_lowercase();
-    for word in ["\"key\":", "\"nonce\"", "\"seed\"", "\"secret\"", "\"mnemonic\"", "base_nonce", "manifest_key"] {
+    for word in [
+        "\"key\":",
+        "\"nonce\"",
+        "\"seed\"",
+        "\"secret\"",
+        "\"mnemonic\"",
+        "base_nonce",
+        "manifest_key",
+    ] {
         assert!(!j.contains(word), "{word} leaked into a view: {json}");
     }
 }
@@ -192,10 +222,15 @@ fn forbidden(json: &str) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_backends_exchange_mail_drive_and_space_through_views() {
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
         .with_test_writer()
         .try_init();
-    let Some(net) = start_devnet().await else { return };
+    let Some(net) = start_devnet().await else {
+        return;
+    };
     let peer = net.peer.clone();
     let alice_home = net.dir.join("alice");
     let bob_home = net.dir.join("bob");
@@ -203,14 +238,34 @@ async fn two_backends_exchange_mail_drive_and_space_through_views() {
     std::fs::create_dir_all(&bob_home).unwrap();
 
     // Accounts exactly as onboarding creates them.
-    let (a_acct, _m) = Account::create(&Paths::new(&alice_home).vault(), "alice-pass-1234", "alice-1", KdfCost::light()).unwrap();
-    let (b_acct, _m) = Account::create(&Paths::new(&bob_home).vault(), "bob-pass-12345", "bob-1", KdfCost::light()).unwrap();
+    let (a_acct, _m) = Account::create(
+        &Paths::new(&alice_home).vault(),
+        "alice-pass-1234",
+        "alice-1",
+        KdfCost::light(),
+    )
+    .unwrap();
+    let (b_acct, _m) = Account::create(
+        &Paths::new(&bob_home).vault(),
+        "bob-pass-12345",
+        "bob-1",
+        KdfCost::light(),
+    )
+    .unwrap();
 
     // The desktop's session: one link per process, facade over it.
-    let a_link = HashgramOne::connect_link(&config(&alice_home, &peer)).await.unwrap();
-    let mut alice = HashgramOne::with_link(config(&alice_home, &peer), a_acct, a_link).await.unwrap();
-    let b_link = HashgramOne::connect_link(&config(&bob_home, &peer)).await.unwrap();
-    let mut bob = HashgramOne::with_link(config(&bob_home, &peer), b_acct, b_link).await.unwrap();
+    let a_link = HashgramOne::connect_link(&config(&alice_home, &peer))
+        .await
+        .unwrap();
+    let mut alice = HashgramOne::with_link(config(&alice_home, &peer), a_acct, a_link)
+        .await
+        .unwrap();
+    let b_link = HashgramOne::connect_link(&config(&bob_home, &peer))
+        .await
+        .unwrap();
+    let mut bob = HashgramOne::with_link(config(&bob_home, &peer), b_acct, b_link)
+        .await
+        .unwrap();
     assert!(!alice.link.peers().await.is_empty(), "alice sees the node");
     assert!(!bob.link.peers().await.is_empty(), "bob sees the node");
     register(&mut alice, "alice").await;
@@ -235,7 +290,11 @@ async fn two_backends_exchange_mail_drive_and_space_through_views() {
     assert!(!alice.drive().usage().dirty);
 
     // Mail A→B with an inline and a live Drive attachment (as mail_send does).
-    let to = alice.mail().resolve_recipients(&["@bob".to_owned()]).await.unwrap();
+    let to = alice
+        .mail()
+        .resolve_recipients(&["@bob".to_owned()])
+        .await
+        .unwrap();
     let inline = alice
         .mail()
         .make_attachment("note.txt", "text/plain", b"inline note")
@@ -277,11 +336,25 @@ async fn two_backends_exchange_mail_drive_and_space_through_views() {
     assert_eq!(view.attachments[1].kind, "drive");
     assert!(view.attachments[1].live);
     // Attachments decrypt on the Rust side only.
-    let a0 = bob.mail().attachment_bytes(&rec.message.attachments[0]).await.unwrap();
+    let a0 = bob
+        .mail()
+        .attachment_bytes(&rec.message.attachments[0])
+        .await
+        .unwrap();
     assert_eq!(a0, b"inline note");
-    let a1 = bob.mail().attachment_bytes(&rec.message.attachments[1]).await.unwrap();
+    let a1 = bob
+        .mail()
+        .attachment_bytes(&rec.message.attachments[1])
+        .await
+        .unwrap();
     assert_eq!(a1, b"contract v1");
-    let shared: Vec<SharedWithMeView> = bob.drive().shared_with_me().unwrap().iter().map(SharedWithMeView::from).collect();
+    let shared: Vec<SharedWithMeView> = bob
+        .drive()
+        .shared_with_me()
+        .unwrap()
+        .iter()
+        .map(SharedWithMeView::from)
+        .collect();
     assert_eq!(shared.len(), 1);
     assert_eq!(shared[0].capability.mode, "live");
     forbidden(&serde_json::to_string(&shared).unwrap());
@@ -304,12 +377,20 @@ async fn two_backends_exchange_mail_drive_and_space_through_views() {
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].subject, "Re: Contract for review");
     let sent = alice.mail().get(&id).unwrap().unwrap();
-    assert!(sent.delivered_to.contains_key(bob.address()), "delivery receipt: {:?}", sent.delivered_to);
+    assert!(
+        sent.delivered_to.contains_key(bob.address()),
+        "delivery receipt: {:?}",
+        sent.delivered_to
+    );
     let thread = alice.mail().thread(&inbox[0].thread_id).unwrap().unwrap();
     assert_eq!(thread.messages.len(), 2);
 
     // Live share update reaches Bob as a newer version.
-    alice.drive().update(&entry, b"contract v2", "").await.unwrap();
+    alice
+        .drive()
+        .update(&entry, b"contract v2", "")
+        .await
+        .unwrap();
     alice.save().unwrap();
     let mut shared = bob.drive().shared_with_me().unwrap();
     for _ in 0..12 {
@@ -324,9 +405,21 @@ async fn two_backends_exchange_mail_drive_and_space_through_views() {
     assert_eq!(shared[0].updates, 1);
 
     // Space: Alice creates, invites Bob as Guest; a Guest may not post.
-    let space = alice.spaces().create("Project X", "the deal").await.unwrap();
-    alice.spaces().invite(&space, bob.address(), app::SpaceRole::Guest).await.unwrap();
-    alice.spaces().announce(&space, "Kick-off", "Monday", Vec::new()).await.unwrap();
+    let space = alice
+        .spaces()
+        .create("Project X", "the deal")
+        .await
+        .unwrap();
+    alice
+        .spaces()
+        .invite(&space, bob.address(), app::SpaceRole::Guest)
+        .await
+        .unwrap();
+    alice
+        .spaces()
+        .announce(&space, "Kick-off", "Monday", Vec::new())
+        .await
+        .unwrap();
     alice.save().unwrap();
     for _ in 0..12 {
         bob.sync().round().await.unwrap();
@@ -342,7 +435,11 @@ async fn two_backends_exchange_mail_drive_and_space_through_views() {
     let sv = SpaceStateView::of(&st, bob.address());
     forbidden(&serde_json::to_string(&sv).unwrap());
     assert_eq!(sv.members.len(), 2);
-    let err = match bob.spaces().post(&space, "hi", Vec::new(), Vec::new()).await {
+    let err = match bob
+        .spaces()
+        .post(&space, "hi", Vec::new(), Vec::new())
+        .await
+    {
         Ok(_) => panic!("a guest must not be able to post"),
         Err(e) => e,
     };
@@ -350,20 +447,34 @@ async fn two_backends_exchange_mail_drive_and_space_through_views() {
     assert_eq!(ui.code, "invalid");
     assert!(ui.message.contains("space rule"), "{}", ui.message);
     // Promote to Member → posting works.
-    alice.spaces().set_role(&space, bob.address(), app::SpaceRole::Member).await.unwrap();
+    alice
+        .spaces()
+        .set_role(&space, bob.address(), app::SpaceRole::Member)
+        .await
+        .unwrap();
     alice.save().unwrap();
     for _ in 0..12 {
         bob.sync().round().await.unwrap();
-        if bob.spaces().state(&space).map(|s| s.role_of(bob.address()) == app::SpaceRole::Member).unwrap_or(false) {
+        if bob
+            .spaces()
+            .state(&space)
+            .map(|s| s.role_of(bob.address()) == app::SpaceRole::Member)
+            .unwrap_or(false)
+        {
             break;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    bob.spaces().post(&space, "hello from bob", Vec::new(), Vec::new()).await.unwrap();
+    bob.spaces()
+        .post(&space, "hello from bob", Vec::new(), Vec::new())
+        .await
+        .unwrap();
     bob.save().unwrap();
     alice.sync().round().await.unwrap();
     let content = alice.spaces().content(&space, 0, 10).unwrap();
-    assert!(content.iter().any(|c| c.kind == "post" && c.actor == bob.address()));
+    assert!(content
+        .iter()
+        .any(|c| c.kind == "post" && c.actor == bob.address()));
 
     // Lock semantics: a dropped facade means every command answers `locked`.
     let mut slot: Option<HashgramOne> = Some(alice);

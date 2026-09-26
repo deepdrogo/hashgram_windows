@@ -97,7 +97,10 @@ pub async fn app_status(state: S<'_>, app: AppHandle) -> CmdResult<AppStatus> {
             NetworkKind::Mainnet => "mainnet".into(),
             NetworkKind::Devnet => "devnet".into(),
         },
-        chain_id: identity.as_ref().map(|i| i.chain_id.clone()).unwrap_or_default(),
+        chain_id: identity
+            .as_ref()
+            .map(|i| i.chain_id.clone())
+            .unwrap_or_default(),
         genesis_hash: identity.map(|i| i.genesis_hash).unwrap_or_default(),
         onboarding_done: settings.onboarding_done,
         hello_available,
@@ -105,9 +108,12 @@ pub async fn app_status(state: S<'_>, app: AppHandle) -> CmdResult<AppStatus> {
         version: app.package_info().version.to_string(),
         commit: COMMIT.to_owned(),
         data_dir: paths::data_dir().display().to_string(),
-        updater_configured: !updater_pubkey.is_empty() && !updater_pubkey.starts_with("REPLACE_WITH"),
+        updater_configured: !updater_pubkey.is_empty()
+            && !updater_pubkey.starts_with("REPLACE_WITH"),
         updater_endpoint,
-        code_signed: option_env!("HASHGRAM_CODESIGNED").map(|v| v == "1").unwrap_or(false),
+        code_signed: option_env!("HASHGRAM_CODESIGNED")
+            .map(|v| v == "1")
+            .unwrap_or(false),
         uptime_ms: state.perf.uptime_ms(),
         link_up: state.link.read().await.is_some(),
         link_error: state.link_error.read().await.clone(),
@@ -127,7 +133,9 @@ fn device_id() -> String {
 
 fn passphrase_ok(p: &str) -> CmdResult<()> {
     if p.chars().count() < 10 {
-        return Err(UiError::invalid("the passphrase needs at least 10 characters"));
+        return Err(UiError::invalid(
+            "the passphrase needs at least 10 characters",
+        ));
     }
     Ok(())
 }
@@ -304,7 +312,9 @@ pub struct BackupInfo {
 pub async fn backup_inspect(path: String) -> CmdResult<BackupInfo> {
     let bytes = std::fs::read(&path)?;
     if bytes.len() > hashgram_sdk::backup::MAX_BACKUP_BYTES {
-        return Err(UiError::invalid("this file is too large to be a Hashgram backup"));
+        return Err(UiError::invalid(
+            "this file is too large to be a Hashgram backup",
+        ));
     }
     let (m, t, p) = hashgram_sdk::backup::inspect_backup(&bytes)?;
     Ok(BackupInfo {
@@ -475,9 +485,11 @@ pub async fn hello_unlock(state: S<'_>, app: AppHandle) -> CmdResult<AccountInfo
         .map_err(|e| UiError::new("hello", e, true))?;
         let entropy = crate::winsec::entropy_from_signature(&sig);
         let pass = Zeroizing::new(
-            crate::winsec::dpapi_unprotect(&blob, &entropy).map_err(|e| UiError::new("hello", e, false))?,
+            crate::winsec::dpapi_unprotect(&blob, &entropy)
+                .map_err(|e| UiError::new("hello", e, false))?,
         );
-        let pass = std::str::from_utf8(&pass).map_err(|_| UiError::internal("corrupt Hello blob"))?;
+        let pass =
+            std::str::from_utf8(&pass).map_err(|_| UiError::internal("corrupt Hello blob"))?;
         Ok(Account::open(&vault, pass, session::kdf())?)
     })
     .await
@@ -651,7 +663,11 @@ pub struct TxSubmitted {
 /// already exists, this PC as a device (`MsgAddDevice`). Only public keys
 /// go on chain. Needs HASH for the fee.
 #[tauri::command]
-pub async fn identity_register(state: S<'_>, app: AppHandle, label: String) -> CmdResult<TxSubmitted> {
+pub async fn identity_register(
+    state: S<'_>,
+    app: AppHandle,
+    label: String,
+) -> CmdResult<TxSubmitted> {
     let label = if label.trim().is_empty() {
         let s = state.settings.read().await.device_label.clone();
         if s.trim().is_empty() {
@@ -668,13 +684,22 @@ pub async fn identity_register(state: S<'_>, app: AppHandle, label: String) -> C
     let existing = account::rotation_count_on_chain(&one.chain, &address).await?;
     let (r, summary) = match existing {
         None => {
-            let r = account::create_identity_on_chain(&one.account, &one.network, &one.chain, &label, "windows")
-                .await?;
+            let r = account::create_identity_on_chain(
+                &one.account,
+                &one.network,
+                &one.chain,
+                &label,
+                "windows",
+            )
+            .await?;
             (r, format!("Create identity with device \"{label}\""))
         }
         Some(_) => {
             let (did, pk) = one.devices().this_device()?;
-            let hash = one.devices().add_on_chain(&did, &pk, &label, "windows").await?;
+            let hash = one
+                .devices()
+                .add_on_chain(&did, &pk, &label, "windows")
+                .await?;
             (
                 hashgram_sdk::chain::TxResult {
                     txhash: hash,
@@ -755,11 +780,17 @@ pub async fn device_add(
 
 /// Revokes a device on chain (wallet key) and removes it from every group.
 #[tauri::command]
-pub async fn device_revoke(state: S<'_>, app: AppHandle, device_id: String) -> CmdResult<TxSubmitted> {
+pub async fn device_revoke(
+    state: S<'_>,
+    app: AppHandle,
+    device_id: String,
+) -> CmdResult<TxSubmitted> {
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
     if one.account.contents.device_id == device_id {
-        return Err(UiError::invalid("revoke this PC from another device, not from itself"));
+        return Err(UiError::invalid(
+            "revoke this PC from another device, not from itself",
+        ));
     }
     let hash = one.devices().revoke_on_chain(&device_id).await?;
     one.save()?;

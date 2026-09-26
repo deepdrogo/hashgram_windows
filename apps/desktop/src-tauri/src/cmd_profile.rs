@@ -33,7 +33,9 @@ async fn read_image(path: &str) -> CmdResult<(Vec<u8>, String)> {
     if meta.len() > MAX_IMAGE_BYTES {
         return Err(UiError::invalid("pick an image under 8 MiB"));
     }
-    let mime = mime_guess::from_path(&p).first_or_octet_stream().to_string();
+    let mime = mime_guess::from_path(&p)
+        .first_or_octet_stream()
+        .to_string();
     if !mime.starts_with("image/") {
         return Err(UiError::invalid("that file is not an image"));
     }
@@ -119,7 +121,9 @@ pub async fn profile_save(
     banner_cid: String,
 ) -> CmdResult<String> {
     if display_name.chars().count() > 128 {
-        return Err(UiError::invalid("the display name is at most 128 characters"));
+        return Err(UiError::invalid(
+            "the display name is at most 128 characters",
+        ));
     }
     if bio.chars().count() > 1000 {
         return Err(UiError::invalid("the bio is at most 1000 characters"));
@@ -134,8 +138,12 @@ pub async fn profile_save(
         }
     }
     let country = country.trim().to_uppercase();
-    if !country.is_empty() && (country.len() != 2 || !country.chars().all(|c| c.is_ascii_alphabetic())) {
-        return Err(UiError::invalid("the country is a two-letter code, or empty"));
+    if !country.is_empty()
+        && (country.len() != 2 || !country.chars().all(|c| c.is_ascii_alphabetic()))
+    {
+        return Err(UiError::invalid(
+            "the country is a two-letter code, or empty",
+        ));
     }
     let hex_or_empty = |s: &str, what: &str| -> CmdResult<String> {
         let s = s.trim().to_ascii_lowercase();
