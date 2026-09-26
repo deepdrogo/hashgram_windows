@@ -4,9 +4,10 @@
 // one page at a time. Composer for public posts (text, media, hashtags,
 // sensitive, optional wall) and Circle posts (circle picker, poll builder).
 // Post view with comments and reactions pulled from the network.
-import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
+// Solid's `on` is aliased: this file also imports the IPC event `on`.
+import { For, Show, createEffect, createMemo, createResource, createSignal, on as onSource, onCleanup, onMount } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
-import { Image as ImageIcon, Send, MessageSquare, Heart, Repeat2, Trash2, Plus, Users, RefreshCw, Vote, Eye, EyeOff, UserPlus, X, Pin, PinOff, Link as LinkIcon, Megaphone, Hash } from "lucide-solid";
+import { Image as ImageIcon, Send, MessageSquare, Heart, Repeat2, Trash2, Plus, Users, RefreshCw, Vote, Eye, EyeOff, UserPlus, X, Pin, PinOff, Link as LinkIcon, Megaphone, Hash, ArrowUp } from "lucide-solid";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Button, Checkbox, Dialog, Field, Input, Notice, Tabs, Textarea, Badge, Empty, Select } from "~/components/ui";
 import { OfflineBanner, ErrorState } from "~/components/States";
@@ -35,18 +36,49 @@ export function hashtags(it: FeedItem): string[] {
 }
 
 /**
- * Pages of a remote timeline (Explore, a wall, a hashtag): loads one page,
- * then the next when the sentinel scrolls into view or on "Load more".
+ * Pages of a remote timeline (Explore, a wall, a hashtag).
+ *
+ * Newest at the top, older below, and — this is the part that took a
+ * rewrite — **the list is never thrown away while somebody is reading it**.
+ *
+ * It used to be. The pager reset its items whenever its key changed, and
+ * the key included the feed tick, which the sync loop raises after every
+ * round that brought anything at all. So a few seconds into scrolling, the
+ * list emptied, a skeleton flashed, the reading position was lost and every
+ * picture on screen was fetched again. The content was arriving correctly;
+ * the screen was being rebuilt underneath it.
+ *
+ * Now two different things are told apart:
+ *
+ *   * **Identity** — which timeline this is (a tag, a wall, a tab). When it
+ *     changes the list really is a different list, so it resets.
+ *   * **Refresh** — the same timeline, new data. The first page is fetched
+ *     again and merged: posts already on screen keep their place and their
+ *     object identity, so Solid does not re-render them and their media is
+ *     not re-fetched. Genuinely new posts go above.
+ *
+ * New posts are only inserted straight away when the top of the list is on
+ * screen. Otherwise they wait behind a count — moving what somebody is
+ * reading is worse than making them click.
+ *
  * Dedups by id because a page boundary may re-serve one second's posts.
  */
-export function usePages(fetchPage: (before: number) => Promise<ExplorePage>, key: () => unknown) {
+export function usePages(
+  fetchPage: (before: number) => Promise<ExplorePage>,
+  identity: () => unknown,
+  refresh?: () => unknown,
+) {
   const [items, setItems] = createSignal<FeedItem[]>([]);
+  const [waiting, setWaiting] = createSignal<FeedItem[]>([]);
   const [next, setNext] = createSignal<number>(0);
   const [done, setDone] = createSignal(false);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<unknown>(null);
   const [source, setSource] = createSignal<ExplorePage | null>(null);
+  const [atTop, setAtTop] = createSignal(true);
   let inflight = false;
+  let lastMerge = 0;
+
   const load = async (reset: boolean) => {
     if (inflight) return;
     if (!reset && done()) return;
@@ -68,13 +100,62 @@ export function usePages(fetchPage: (before: number) => Promise<ExplorePage>, ke
       inflight = false;
     }
   };
-  createEffect(() => {
-    key();
-    setItems([]);
-    setNext(0);
-    setDone(false);
-    void load(true);
-  });
+
+  /**
+   * Re-reads the first page and merges. Never clears the list, never shows
+   * the skeleton, and never reports an error: a failed background refresh
+   * means what is on screen is a little old, which is not worth a red box
+   * over content that is perfectly readable.
+   */
+  const merge = async () => {
+    if (inflight) return;
+    // A sync round can finish every few seconds, and asking a node for the
+    // first page that often costs it work for nothing. A timeline that is
+    // at most fifteen seconds stale reads as live.
+    const now = Date.now();
+    if (now - lastMerge < 15_000) return;
+    lastMerge = now;
+    inflight = true;
+    try {
+      const page = await fetchPage(0);
+      setSource(page);
+      const known = new Set([...items(), ...waiting()].map((i) => i.id));
+      const fresh = page.items.filter((i) => !known.has(i.id));
+      if (!fresh.length) return;
+      if (atTop()) setItems([...fresh, ...items()]);
+      else setWaiting([...fresh, ...waiting()]);
+    } catch {
+      // Keep what is on screen.
+    } finally {
+      inflight = false;
+    }
+  };
+
+  /** Puts the held-back posts at the top of the list. */
+  const showWaiting = () => {
+    const held = waiting();
+    if (!held.length) return;
+    setWaiting([]);
+    setItems([...held, ...items()]);
+  };
+
+  createEffect(
+    onSource(identity, () => {
+      setItems([]);
+      setWaiting([]);
+      setNext(0);
+      setDone(false);
+      void load(true);
+    }),
+  );
+  createEffect(
+    onSource(
+      () => refresh?.(),
+      () => void merge(),
+      { defer: true },
+    ),
+  );
+
   /** Attach to an element at the end of the list to load more when visible. */
   const sentinel = (el: HTMLElement) => {
     const obs = new IntersectionObserver((entries) => {
@@ -83,7 +164,49 @@ export function usePages(fetchPage: (before: number) => Promise<ExplorePage>, ke
     obs.observe(el);
     onCleanup(() => obs.disconnect());
   };
-  return { items, done, loading, error, source, more: () => load(false), reload: () => load(true), sentinel };
+
+  /**
+   * Attach to an element at the very top of the list. Whether it is on
+   * screen is how the pager knows it may insert new posts without moving
+   * anything the reader is looking at — it works with whatever element is
+   * actually scrolling, which a ref passed down from a parent would not.
+   */
+  const topMark = (el: HTMLElement) => {
+    const obs = new IntersectionObserver((entries) => {
+      const visible = entries.some((e) => e.isIntersecting);
+      setAtTop(visible);
+      if (visible) showWaiting();
+    });
+    obs.observe(el);
+    onCleanup(() => obs.disconnect());
+  };
+
+  return {
+    items,
+    done,
+    loading,
+    error,
+    source,
+    waiting: () => waiting().length,
+    showWaiting,
+    more: () => load(false),
+    reload: () => load(true),
+    sentinel,
+    topMark,
+  };
+}
+
+/** The "N new posts" button, shown only when posts are actually waiting. */
+export function NewPosts(props: { count: number; onShow: () => void }) {
+  return (
+    <Show when={props.count}>
+      <div class="sticky top-0 z-10 -mt-1 mb-2 flex justify-center">
+        <button type="button" class="btn-primary btn-sm rounded-full shadow-none" onClick={props.onShow}>
+          <ArrowUp size={12} /> {props.count} new {props.count === 1 ? "post" : "posts"}
+        </button>
+      </div>
+    </Show>
+  );
 }
 
 /** Where a page came from: node distance and operator, never an address. */
@@ -427,7 +550,11 @@ export function WallView(props: { id: string; onBack: () => void; onCompose: () 
     () => props.id,
     (id) => ipc.wallsInfo(id),
   );
-  const pages = usePages((before) => ipc.wallsPage(props.id, before, 20), () => ({ id: props.id, tick: store.ticks().feed }));
+  const pages = usePages(
+    (before) => ipc.wallsPage(props.id, before, 20),
+    () => props.id,
+    () => store.ticks().feed,
+  );
   const me = () => store.status()?.address;
   const canPost = () => !!info() && (info()!.open_posting || info()!.creator === me());
   const link = () => `hashgram://wall/${props.id}`;
@@ -499,8 +626,10 @@ export function WallView(props: { id: string; onBack: () => void; onCompose: () 
           )}
         </Show>
       </Show>
+      <span ref={pages.topMark} aria-hidden="true" />
       <SourceLine page={pages.source()} />
-      <Show when={!pages.error()} fallback={<ErrorState error={pages.error()} onRetry={() => void pages.reload()} />}>
+      <NewPosts count={pages.waiting()} onShow={pages.showWaiting} />
+      <Show when={!pages.error() || pages.items().length} fallback={<ErrorState error={pages.error()} onRetry={() => void pages.reload()} />}>
         <For each={pages.items()} fallback={<Show when={!pages.loading()}><Empty title="Nothing on this wall yet">{canPost() ? "Be the first to write here." : "The creator has not posted yet."}</Empty></Show>}>
           {(it) => <PostCard it={it} hideWall onOpen={() => navigate(`/pulse/post/${it.id}`)} />}
         </For>

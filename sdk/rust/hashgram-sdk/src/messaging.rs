@@ -58,6 +58,10 @@ pub const VAULT_LAST_RESORT_KEY: &str = "mls_last_resort";
 /// comfortably inside [`KEY_PACKAGE_TTL_SECS`] so a store never holds an
 /// expired one for us.
 pub const LAST_RESORT_ROTATE_SECS: u64 = 25 * 24 * 3600;
+/// How the current last-resort key package is built. Raised whenever a
+/// build produced packages other clients reject, so the cached one is
+/// replaced on the next sync instead of after the rotation.
+pub const LAST_RESORT_VERSION: u32 = 2;
 /// How often the one-time key packages at a store node are topped up when
 /// nothing consumed them (a Welcome consumes one; that triggers a refresh
 /// on its own).
@@ -229,6 +233,19 @@ pub struct Messaging {
 struct LastResort {
     key_package: Vec<u8>,
     created_at: u64,
+    /// How the package was built.
+    ///
+    /// The cached package is kept for [`LAST_RESORT_ROTATE_SECS`] — 25
+    /// days — which is exactly how long a *wrong* one would keep being
+    /// handed out after the code that built it was fixed. Version 1
+    /// packages set the last-resort extension without declaring it in the
+    /// leaf capabilities, so every other client refused them with "a key
+    /// package extension is not supported in the leaf's capabilities" and
+    /// nobody could be added to a group. Anything below
+    /// [`LAST_RESORT_VERSION`] is rebuilt at once instead of waiting out
+    /// the rotation.
+    #[serde(default)]
+    version: u32,
 }
 
 impl Messaging {
@@ -385,6 +402,7 @@ impl Messaging {
         if let Some(lr) = &self.last_resort {
             if t.saturating_sub(lr.created_at) < LAST_RESORT_ROTATE_SECS
                 && !lr.key_package.is_empty()
+                && lr.version >= LAST_RESORT_VERSION
             {
                 return Ok(lr.clone());
             }
@@ -392,6 +410,7 @@ impl Messaging {
         let lr = LastResort {
             key_package: self.mls.key_package_last_resort()?,
             created_at: t,
+            version: LAST_RESORT_VERSION,
         };
         self.last_resort = Some(lr.clone());
         Ok(lr)

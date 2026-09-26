@@ -83,22 +83,35 @@ pub struct VerifyStatus {
     pub checked: bool,
 }
 
-/// Reads the governance account address from the chain.
+/// The address payments go to: the governance module account.
+///
+/// Worked out twice, and used only when both agree.
+///
+/// 1. **Derived.** A module account's address is a pure function of its
+///    name, so the app can compute it with no network at all. That is the
+///    candidate — never the answer, because a bug here would send 100,000
+///    HASH somewhere nobody can spend from.
+/// 2. **Confirmed.** The chain is asked what lives at that address, and it
+///    has to answer that it is a module account called `gov`.
+///
+/// If the chain cannot be read, or says something else, there is no
+/// destination and the app does not offer to pay. Refusing to sell a badge
+/// is a much smaller failure than taking the money to a wrong address.
 async fn sink(one: &mut hashgram_sdk::HashgramOne) -> Option<String> {
-    let v = one
+    let derived = hashgram_sdk::chain::wallet::module_address(SINK_MODULE)?;
+    let account = one
         .chain
-        .query(&format!(
-            "cosmos/auth/v1beta1/module_accounts/{SINK_MODULE}"
-        ))
+        .query(&format!("cosmos/auth/v1beta1/accounts/{derived}"))
         .await
         .ok()?;
-    let addr = v
-        .pointer("/account/value/address")
-        .or_else(|| v.pointer("/account/base_account/address"))
-        .or_else(|| v.pointer("/account/address"))?
-        .as_str()?
-        .to_owned();
-    addr.starts_with("hash1").then_some(addr)
+    let text = account.to_string();
+    let is_module = text.contains("ModuleAccount");
+    let is_gov = account
+        .pointer("/account/name")
+        .and_then(serde_json::Value::as_str)
+        == Some(SINK_MODULE);
+    let says_address = text.contains(&derived);
+    (is_module && is_gov && says_address).then_some(derived)
 }
 
 /// The price, the destination and the memo.

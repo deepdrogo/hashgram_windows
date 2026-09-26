@@ -17,7 +17,7 @@ import { OfflineBanner, ErrorState } from "~/components/States";
 import { ipc, errText, type FeedItem, type Profile } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { rememberTab, recallTab, trackScroll } from "~/lib/uistate";
-import { PostCard, PostView, ComposeDialog, SourceLine, usePages } from "~/routes/feed/Feed";
+import { PostCard, PostView, ComposeDialog, SourceLine, usePages, NewPosts } from "~/routes/feed/Feed";
 import { DiscoveryRail } from "~/components/social/DiscoveryRail";
 import { StoriesRow } from "~/components/social/Stories";
 import { TopicsHome } from "~/routes/topics/Topics";
@@ -129,17 +129,25 @@ function FeedFor(props: { tab: Tab }) {
 /** Everything public the nearest node holds, newest first. */
 function LatestFeed() {
   const navigate = useNavigate();
-  const pages = usePages((before) => ipc.hashwallExplore(before, 30), () => store.ticks().feed);
+  // One timeline, refreshed in place: the sync tick is a refresh, not a
+  // different list, so the posts on screen stay where they are.
+  const pages = usePages(
+    (before) => ipc.hashwallExplore(before, 30),
+    () => "latest",
+    () => store.ticks().feed,
+  );
   return (
     <>
+      <span ref={pages.topMark} aria-hidden="true" />
       <SourceLine page={pages.source()} />
-      <Show when={pages.error()}>
+      <NewPosts count={pages.waiting()} onShow={pages.showWaiting} />
+      <Show when={pages.error() && !pages.items().length}>
         <ErrorState error={pages.error()} onRetry={() => void pages.reload()} />
       </Show>
       <Show when={pages.loading() && !pages.items().length}>
         <Skeleton lines={5} />
       </Show>
-      <Show when={!pages.loading() && !pages.items().length}>
+      <Show when={!pages.loading() && !pages.items().length && !pages.error()}>
         <Empty title="Nothing here yet">The nodes you are connected to hold no public posts. Post something, or follow someone.</Empty>
       </Show>
       <For each={pages.items()}>{(it) => <PostCard it={it} onOpen={() => navigate(`/pulse/post/${it.id}`)} />}</For>
@@ -171,78 +179,17 @@ function FollowingFeed() {
   );
 }
 
-/** Latest, kept to authors whose profile says the country the user picked. */
-function LocalFeed() {
-  const navigate = useNavigate();
-  const country = () => (store.settings()?.social?.local_country ?? "").toUpperCase();
-  const pages = usePages((before) => ipc.hashwallExplore(before, 50), () => ({ tick: store.ticks().feed, c: country() }));
-
-  const [countries] = createResource(
-    () => pages.items().map((i) => i.author),
-    async (authors): Promise<Record<string, string>> => {
-      const out: Record<string, string> = {};
-      for (const a of [...new Set(authors)]) {
-        try {
-          const p: Profile = await ipc.peopleProfileCached(a);
-          out[a] = (p.country ?? "").toUpperCase();
-        } catch {
-          out[a] = "";
-        }
-      }
-      return out;
-    },
-  );
-
-  const local = createMemo(() => {
-    const map = countries() ?? {};
-    const c = country();
-    return c ? pages.items().filter((i) => map[i.author] === c) : [];
-  });
-
-  const setCountry = async (v: string) => {
-    const s = store.settings();
-    if (!s) return;
-    const next = structuredClone(s);
-    next.social.local_country = v;
-    try {
-      await ipc.settingsSet(next);
-      await store.refreshSettings();
-    } catch (e) {
-      store.toast(errText(e), "error");
-    }
-  };
-
-  return (
-    <>
-      <div class="mb-3 flex items-center gap-2">
-        <MapPin size={13} class="text-muted" />
-        <span class="text-[13px] text-muted">Show posts from</span>
-        <Select
-          class="w-44"
-          aria-label="Local country"
-          value={country()}
-          onChange={(v) => void setCountry(v)}
-          options={[{ value: "", label: "Choose a country…" }, ...COUNTRIES.map((c) => ({ value: c.code, label: c.name }))]}
-        />
-      </div>
-      <Show when={country()} fallback={<Notice title="Pick a country">Local shows posts by people who put that country on their own profile. Hashgram never works your location out from your connection.</Notice>}>
-        <Show when={!countries.loading} fallback={<Skeleton lines={4} />}>
-          <Show when={local().length} fallback={<Empty title={`Nobody near ${country()} has posted`}>Only people who publish this country on their profile show up here.</Empty>}>
-            <For each={local()}>{(it) => <PostCard it={it} onOpen={() => navigate(`/pulse/post/${it.id}`)} />}</For>
-          </Show>
-        </Show>
-        <MoreLine pages={pages} />
-      </Show>
-    </>
-  );
-}
-
 /** One hashtag's posts. */
 function TagFeed(props: { tag: string }) {
   const navigate = useNavigate();
-  const pages = usePages((before) => ipc.hashwallExplore(before, 30, props.tag), () => ({ t: props.tag, tick: store.ticks().feed }));
+  const pages = usePages(
+    (before) => ipc.hashwallExplore(before, 30, props.tag),
+    () => props.tag,
+    () => store.ticks().feed,
+  );
   return (
     <>
+      <span ref={pages.topMark} aria-hidden="true" />
       <div class="mb-3 flex items-center justify-between">
         <h1 class="text-base font-semibold">#{props.tag}</h1>
         <Button size="sm" variant="secondary" onClick={() => navigate("/pulse/latest")}>
@@ -250,6 +197,7 @@ function TagFeed(props: { tag: string }) {
         </Button>
       </div>
       <SourceLine page={pages.source()} />
+      <NewPosts count={pages.waiting()} onShow={pages.showWaiting} />
       <Show when={pages.loading() && !pages.items().length}>
         <Skeleton lines={4} />
       </Show>
@@ -273,27 +221,3 @@ function MoreLine(props: { pages: ReturnType<typeof usePages> }) {
     </div>
   );
 }
-
-/** Countries the Local tab offers. Codes are ISO 3166-1 alpha-2. */
-const COUNTRIES = [
-  { code: "GE", name: "Georgia" },
-  { code: "AM", name: "Armenia" },
-  { code: "AZ", name: "Azerbaijan" },
-  { code: "TR", name: "Türkiye" },
-  { code: "UA", name: "Ukraine" },
-  { code: "PL", name: "Poland" },
-  { code: "DE", name: "Germany" },
-  { code: "FR", name: "France" },
-  { code: "ES", name: "Spain" },
-  { code: "IT", name: "Italy" },
-  { code: "NL", name: "Netherlands" },
-  { code: "GB", name: "United Kingdom" },
-  { code: "US", name: "United States" },
-  { code: "CA", name: "Canada" },
-  { code: "BR", name: "Brazil" },
-  { code: "IN", name: "India" },
-  { code: "JP", name: "Japan" },
-  { code: "KR", name: "South Korea" },
-  { code: "AE", name: "United Arab Emirates" },
-  { code: "AU", name: "Australia" },
-];

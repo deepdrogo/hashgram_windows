@@ -47,9 +47,12 @@ describe("Pulse", () => {
     expect(code(pulse)).not.toMatch(/\brank(ing|ed)?\b|\bscore\b|recommend|algorithm/i);
   });
 
+  // Local is its own section now, not a tab of Pulse.
   it("Local filters on a country the user picked, not on the connection", () => {
-    expect(pulse).toContain("local_country");
-    expect(flat(pulse)).toMatch(/Nothing infers a location from an IP address/);
+    const local = read("src", "routes", "local", "Local.tsx");
+    expect(local).toContain("local_country");
+    expect(flat(local)).toMatch(/a country here is \*\*self-declared\*\*/);
+    expect(flat(read("src", "lib", "countries.ts"))).toMatch(/Nothing in the app infers a country/);
     for (const f of walk(SRC)) {
       expect(readFileSync(f, "utf8"), f).not.toMatch(/geoip|ipapi|ip-api|Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/i);
     }

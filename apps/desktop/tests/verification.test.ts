@@ -39,9 +39,19 @@ describe("the price and the destination", () => {
     expect(rs).toMatch(/PRICE_UHASH: u128 = 100_000 \* UHASH_PER_HASH/);
   });
 
-  it("the destination is read from the chain, never hard-coded", () => {
+  it("the destination is derived and then confirmed, never hard-coded", () => {
     expect(rs).not.toMatch(/"hash1[0-9a-z]{10,}"/);
-    expect(rs).toMatch(/module_accounts/);
+    // Derived from the module's name — a pure function anyone can repeat…
+    expect(rs).toMatch(/module_address\(SINK_MODULE\)/);
+    // …and then checked against what the chain says lives there.
+    expect(rs).toMatch(/cosmos\/auth\/v1beta1\/accounts\//);
+    expect(rs).toMatch(/is_module && is_gov && says_address/);
+  });
+
+  it("an unconfirmed destination means no payment, and says why", () => {
+    expect(flat(rs)).toMatch(/Refusing to sell a badge is a much smaller failure/);
+    const panel = read("src", "routes", "profile", "Verification.tsx");
+    expect(flat(panel)).toMatch(/could not confirm the destination, so the app will not send anything/);
   });
 
   it("the money does not go to the founder or to us", () => {

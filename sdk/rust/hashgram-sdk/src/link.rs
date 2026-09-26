@@ -306,13 +306,34 @@ impl Link {
             .collect()
     }
 
+    /// Whether a peer can answer anything.
+    ///
+    /// "A client is a swarm with no roles" — including this one. Two
+    /// desktops that meet each other complete the handshake and are
+    /// verified peers, and neither can serve the other: an inbound request
+    /// is refused with "unsupported: this is a client". Asking one is
+    /// always a wasted round trip and a confusing error, so a peer that
+    /// claims no role is never chosen to answer a request.
+    #[must_use]
+    pub fn serves(peer: &KnownPeer) -> bool {
+        !peer.roles.is_empty()
+    }
+
     /// Verified peers ordered nearest first: by measured ping round-trip
     /// (peers not yet measured come last), with store nodes preferred at
     /// equal distance because they hold the public log. This is the whole
     /// notion of "nodes near me" — network distance, not geography; the
     /// client never geolocates anyone.
+    ///
+    /// Only peers that serve something. For the full list, including other
+    /// clients that happen to be connected, use [`Self::peers`].
     pub async fn peers_ranked(&self) -> Vec<RankedPeer> {
-        let known = self.peers().await;
+        let known: Vec<KnownPeer> = self
+            .peers()
+            .await
+            .into_iter()
+            .filter(Self::serves)
+            .collect();
         if known.is_empty() {
             return Vec::new();
         }
@@ -424,9 +445,15 @@ impl Link {
             .collect()
     }
 
-    /// Any verified peer (for queries every node answers).
+    /// Any verified peer that serves something (for queries every node
+    /// answers). Never another client — see [`Self::serves`].
     pub async fn any_peer(&self) -> Option<PeerId> {
-        self.peers.read().await.keys().next().copied()
+        self.peers
+            .read()
+            .await
+            .iter()
+            .find(|(_, i)| !i.roles.is_empty())
+            .map(|(p, _)| *p)
     }
 
     /// Sends a request to a specific peer, unwrapping error bodies.

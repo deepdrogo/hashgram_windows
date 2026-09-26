@@ -104,12 +104,23 @@ export function VerificationPanel() {
             <Show
               when={open()}
               fallback={
-                <div class="mt-2 flex items-center gap-2">
+                <div class="mt-2 flex flex-wrap items-center gap-2">
                   <Button size="sm" variant="secondary" onClick={() => setOpen(true)} disabled={!terms()?.destination}>
                     Buy for 100,000 HASH
                   </Button>
+                  {/* A greyed-out button with no reason is the worst of
+                      both: it looks broken and teaches nothing. */}
+                  <Show when={terms.loading}>
+                    <span class="text-[11px] text-muted">Checking the destination on the chain…</span>
+                  </Show>
                   <Show when={terms() && !terms()?.destination}>
-                    <span class="text-[11px] text-muted">No node answered, so the destination cannot be confirmed. Try again when connected.</span>
+                    <span class="text-[11px] text-muted">
+                      The chain could not confirm the destination, so the app will not send anything. This needs a node that answers chain reads —
+                      check the Network page — and then:
+                    </span>
+                    <Button size="sm" variant="ghost" onClick={() => { forget("verify:terms"); store.bump("feed"); }}>
+                      Try again
+                    </Button>
                   </Show>
                 </div>
               }
