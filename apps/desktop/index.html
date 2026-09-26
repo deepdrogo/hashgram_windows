@@ -3,11 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>Hashgram</title>
     <style>
-      /* Paint black before any script runs: no white flash on cold start. */
-      html, body { background: #000000; color: #ffffff; margin: 0; }
+      /*
+       * Paint black before any script runs: no white flash on cold start.
+       *
+       * Scoped to "no theme chosen yet". This rule is unlayered, and an
+       * unlayered rule beats every rule in a Tailwind @layer whatever the
+       * order — so without the :not() it also painted the window black for
+       * anyone using the light theme, and no token could override it.
+       * The moment the app sets data-theme this stops matching and the
+       * tokens take over.
+       */
+      html:not([data-theme]),
+      html:not([data-theme]) body { background: #000000; color: #ffffff; }
+      html, body { margin: 0; }
     </style>
   </head>
   <body>

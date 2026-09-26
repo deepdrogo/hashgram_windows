@@ -15,7 +15,10 @@
   body,
   #root {
     height: 100%;
-    background: var(--color-bg);
+    /* `background-color`, not the `background` shorthand: the shorthand
+       also resets background-image, which is the same weight fight the
+       no-flash rule in index.html used to win. */
+    background-color: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
     font-size: 13.5px;
