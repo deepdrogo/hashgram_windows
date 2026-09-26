@@ -181,32 +181,41 @@ Full notes for every release: [Releases](https://github.com/deepdrogo/hashgram_w
 
 ## 🖼 Screenshots
 
+Captured from the live **v1.6.1 demo** UI (development shim — synthetic data, no real keys).
+
 <table>
 <tr>
-<td width="50%" align="center"><img src="assets/desktop/pulse.png" alt="Pulse"/><br><sub><b>Pulse</b> — stories, public posts, topics and people</sub></td>
+<td width="50%" align="center"><img src="assets/desktop/pulse.png" alt="Pulse"/><br><sub><b>Pulse</b> — stories, reels, public posts, topics and people</sub></td>
+<td width="50%" align="center"><img src="assets/desktop/reels.png" alt="Reels"/><br><sub><b>Reels</b> — short video from the network, newest first</sub></td>
+</tr>
+<tr>
+<td width="50%" align="center"><img src="assets/desktop/local.png" alt="Local"/><br><sub><b>Local</b> — one country, self-declared, never geolocated</sub></td>
 <td width="50%" align="center"><img src="assets/desktop/chats.png" alt="Chats"/><br><sub><b>Chats</b> — end-to-end encrypted, one-to-one and groups</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="assets/desktop/profile.png" alt="Profile"/><br><sub><b>Profile</b> — cover, username, verified badge and posts</sub></td>
-<td width="50%" align="center"><img src="assets/desktop/local.png" alt="Local"/><br><sub><b>Local</b> — one country, self-declared, never geolocated</sub></td>
+<td width="50%" align="center"><img src="assets/desktop/mail.png" alt="Mail"/><br><sub><b>Mail</b> — encrypted inbox with your @name address</sub></td>
+<td width="50%" align="center"><img src="assets/desktop/drive.png" alt="Drive"/><br><sub><b>Drive</b> — encrypted folders, versions and sharing</sub></td>
 </tr>
 <tr>
 <td width="50%" align="center"><img src="assets/desktop/spaces.png" alt="Spaces"/><br><sub><b>Spaces</b> — private, role-based workspaces</sub></td>
-<td width="50%" align="center"><img src="assets/desktop/mail.png" alt="Mail"/><br><sub><b>Mail</b> — encrypted inbox with your @name address</sub></td>
+<td width="50%" align="center"><img src="assets/desktop/profile.png" alt="Profile"/><br><sub><b>Profile</b> — cover, username, verified badge and posts</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="assets/desktop/drive.png" alt="Drive"/><br><sub><b>Drive</b> — encrypted folders, versions and sharing</sub></td>
 <td width="50%" align="center"><img src="assets/desktop/wallet.png" alt="Wallet"/><br><sub><b>Wallet</b> — HASH, staking, usernames and devices</sub></td>
+<td width="50%" align="center"><img src="assets/desktop/network.png" alt="Network"/><br><sub><b>Network</b> — peers, chain, supply and transaction explorer</sub></td>
 </tr>
 <tr>
-<td width="50%" align="center"><img src="assets/desktop/network.png" alt="Network"/><br><sub><b>Network</b> — peers, chain, supply and transaction explorer</sub></td>
 <td width="50%" align="center"><img src="assets/desktop/earn.png" alt="Earn"/><br><sub><b>Earn</b> — run a node and earn from useful work</sub></td>
+<td width="50%" align="center"><img src="assets/desktop/settings.png" alt="Settings"/><br><sub><b>Settings</b> — network, security, devices and appearance</sub></td>
 </tr>
 </table>
 
 > Screenshots are rendered from the application's built-in development data shim.
 > They show the real 1.6.1 interface without exposing any real identity, message,
 > wallet or network credential.
+>
+> Regenerate: `pnpm dev` in `apps/desktop`, then
+> `node apps/desktop/scripts/capture-desktop-screens.mjs`.
 
 ---
 

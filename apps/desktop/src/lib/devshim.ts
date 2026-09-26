@@ -77,7 +77,7 @@ const handlers: Record<string, (a: Args) => unknown> = {
   unlock: () => ({ address: ME, device_id: "home-pc-1a2b", has_wallet_key: true, has_root_key: true }),
   lock: () => undefined,
   wipe_local_data: () => undefined,
-  app_status: () => ({ vault_exists: mode !== "onboarding", unlocked: mode === "app", address: ME, network: "mainnet", chain_id: "hashgram-1", genesis_hash: "e322bc2319f6e0173286fa526dab5a8ff8ad0797c7b80dd03e7c9d98621d5e4d", onboarding_done: true, hello_available: true, hello_enabled: false, version: "0.3.0-dev", commit: "devshim", data_dir: "C:\\Users\\you\\AppData\\Local\\Hashgram\\data", updater_configured: false, updater_endpoint: "", code_signed: false, uptime_ms: 1200, link_up: true, link_error: null }),
+  app_status: () => ({ vault_exists: mode !== "onboarding", unlocked: mode === "app", address: ME, network: "mainnet", chain_id: "hashgram-1", genesis_hash: "e322bc2319f6e0173286fa526dab5a8ff8ad0797c7b80dd03e7c9d98621d5e4d", onboarding_done: true, hello_available: true, hello_enabled: false, version: "1.6.1-demo", commit: "devshim", data_dir: "C:\\Users\\you\\AppData\\Local\\Hashgram\\data", updater_configured: false, updater_endpoint: "", code_signed: false, uptime_ms: 1200, link_up: true, link_error: null }),
   settings_get: () => ({ network: { kind: "mainnet", devnet_genesis_hash: "", bootstrap: [], chain_api: "", indexer_url: "", gateway_address: "" }, security: { auto_lock_minutes: 15, hello_enabled: false, clipboard_clear_secs: 30 }, appearance: { theme, reduced_motion: false, density: "comfortable", language: new URLSearchParams(location.search).get("lang") ?? "en" }, notifications: { mail: true, requests: true, spaces: true, circles: true }, social: { local_country: "GE", who_can_chat: "everyone" }, mail: { threaded: true, mark_read_after_secs: 0 }, updates: { auto_check: false, channel: "stable" }, advanced: { log_level: "info" }, start_with_windows: false, onboarding_done: true, device_label: "Home PC" }),
   sync_status: () => ({ phase: "Idle", last_ok_ms: now - 12_000, rounds: 42, last_error: null, peers: 1, balance_uhash: "12500000" }),
   mail_counts: () => ({ inbox: { total: 3, unread: 1 }, requests: { total: 1, unread: 1 }, sent: { total: 1, unread: 0 }, drafts: { total: 0, unread: 0 }, archive: { total: 0, unread: 0 }, spam: { total: 0, unread: 0 }, trash: { total: 0, unread: 0 } }),
@@ -100,17 +100,99 @@ const handlers: Record<string, (a: Args) => unknown> = {
   people_username_of: (a) => ({ [ALICE]: "alice", [BOB]: "bob", [CAROL]: "carol", [ME]: "me" })[String(a?.address)] ?? "",
   people_list: (a) => (a?.which === "incoming" ? contacts.filter((c) => c.states.includes("pending_in")) : a?.which === "friends" ? contacts.filter((c) => c.states.includes("friend")) : a?.which === "following" ? contacts.filter((c) => c.states.includes("following")) : a?.which === "blocked" ? [] : contacts),
   people_search_local: (a) => contacts.filter((c) => c.username.includes(String(a?.q)) || c.display_name.toLowerCase().includes(String(a?.q).toLowerCase())),
-  people_profile: (a) => { const c = contacts.find((x) => x.address === a?.address); return { address: a?.address, username: c?.username ?? "", display_name: c?.display_name ?? "", bio: c ? "Building things on the Hashgram network." : "", avatar_cid: "", states: c?.states ?? [] }; },
+  people_profile: (a) => {
+    const who = String(a?.address);
+    const c = contacts.find((x) => x.address === who);
+    const mine = who === ME;
+    return {
+      address: who,
+      username: mine ? "me" : (c?.username ?? ""),
+      display_name: mine ? "Me" : (c?.display_name ?? ""),
+      bio: mine ? "Testing Hashgram One." : "Building things on the Hashgram network.",
+      avatar_cid: "",
+      banner_cid: "",
+      website: mine ? "https://hashgram.io" : "",
+      country: "GE",
+      updated_at: Math.floor(now / 1000) - 8000,
+      states: c?.states ?? [],
+    };
+  },
   people_resolve: (a) => ({ address: ALICE, username: String(a?.input).replace(/^@/, ""), display_name: "", mail_address: `${String(a?.input).replace(/^@/, "")}@hashgram.io`, has_identity: true, devices: 2 }),
   people_card_of: () => null,
   people_my_display_name: () => "Me",
   feed_author: () => [],
-  feed_friends: () => [{ id: "p1", kind: "POST_CREATE", author: ALICE, timestamp: Math.floor(now / 1000) - 3600, payload: { text: "Shipped the storage lease client model today. Verify-before-pay, memo payments, no escrow needed until v1.1.", hashtags: ["hashgram", "storage"] }, media: [], visibility: "public" }, { id: "p2", kind: "POST_CREATE", author: BOB, timestamp: Math.floor(now / 1000) - 86400, payload: { text: "Lighthouse restoration weekend is on. Bring gloves." }, media: [], visibility: "public" }],
-  feed_following: () => [],
-  feed_thread: (a) => ({ post: { id: a?.post, kind: "POST_CREATE", author: ALICE, timestamp: Math.floor(now / 1000) - 3600, payload: { text: "Shipped the storage lease client model today." }, media: [], visibility: "public" }, comments: [{ id: "c1", kind: "COMMENT_CREATE", author: BOB, timestamp: Math.floor(now / 1000) - 3000, payload: { text: "Nice." }, media: [], visibility: "public" }], reactions: { "❤": 3 } }),
+  feed_friends: () => [{ id: "p1", kind: "POST_CREATE", author: ALICE, timestamp: Math.floor(now / 1000) - 3600, payload: { text: "Shipped the storage lease client model today. Verify-before-pay, memo payments, no escrow needed until v1.1.", hashtags: ["hashgram", "storage"] }, media: [], visibility: "public", channel: "", reply_to: "" }, { id: "p2", kind: "POST_CREATE", author: BOB, timestamp: Math.floor(now / 1000) - 86400, payload: { text: "Lighthouse restoration weekend is on. Bring gloves." }, media: [], visibility: "public", channel: "", reply_to: "" }],
+  feed_following: () => handlers.feed_friends!({}),
+  feed_refresh: () => undefined,
+  feed_react: () => undefined,
+  feed_repost: () => "rp".repeat(32),
+  feed_thread: (a) => ({ post: { id: a?.post, kind: "POST_CREATE", author: ALICE, timestamp: Math.floor(now / 1000) - 3600, payload: { text: "Shipped the storage lease client model today." }, media: [], visibility: "public", channel: "", reply_to: "" }, comments: [{ id: "c1", kind: "COMMENT_CREATE", author: BOB, timestamp: Math.floor(now / 1000) - 3000, payload: { text: "Nice." }, media: [], visibility: "public", channel: "", reply_to: "" }], reactions: { "❤": 3 } }),
+  // Synthetic poster / preview frames for Reels / Stories screenshots.
+  // Real video bytes are not shipped in the shim; the same SVG fills the
+  // frame so screenshots look like a reel instead of an empty box.
+  feed_media_fetch: (a) => {
+    const cid = String(a?.cid ?? "poster");
+    const hue = (cid.charCodeAt(0) * 37) % 360;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280" viewBox="0 0 720 1280"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="hsl(${hue} 28% 18%)"/><stop offset="100%" stop-color="hsl(${(hue + 40) % 360} 22% 8%)"/></linearGradient></defs><rect width="720" height="1280" fill="url(#g)"/><circle cx="360" cy="520" r="86" fill="hsl(${hue} 40% 42%)" opacity="0.55"/><text x="360" y="700" text-anchor="middle" fill="#e8e8e8" font-family="system-ui,sans-serif" font-size="28">Hashgram</text><text x="360" y="740" text-anchor="middle" fill="#9a9a9a" font-family="system-ui,sans-serif" font-size="16">demo reel</text></svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  },
   // Hashwall / Explore / profile
-  hashwall_explore: (a) => ({ items: Number(a?.before ?? 0) ? [] : [{ id: "e1", kind: "POST_CREATE", author: BOB, timestamp: Math.floor(now / 1000) - 600, payload: { text: "Protest at Rustaveli on Saturday, 17:00. Bring water.", hashtags: ["tbilisi", "protest"] }, media: [], visibility: "public", channel: "ab".repeat(32), reply_to: "" }, { id: "e2", kind: "POST_CREATE", author: ALICE, timestamp: Math.floor(now / 1000) - 7200, payload: { text: "Looking for Rust developers for a P2P storage project.", hashtags: ["rust", "jobs"] }, media: [], visibility: "public", channel: "", reply_to: "" }], next_before: 0, source_peer: "12D3KooWDev", source_operator: "hash1operator", source_rtt_ms: 42, note: "" }),
-  hashwall_digest: () => ({ window_secs: 604800, events: 2, authors: 2, total_events: 40, total_authors: 9, top_authors: [{ author: ALICE, posts: 12, comments: 4, reactions_received: 30, comments_received: 6, last_active: Math.floor(now / 1000) - 7200 }, { author: BOB, posts: 5, comments: 9, reactions_received: 8, comments_received: 2, last_active: Math.floor(now / 1000) - 600 }], top_hashtags: [{ tag: "tbilisi", posts: 7, authors: 4, last_used: Math.floor(now / 1000) - 600 }, { tag: "rust", posts: 3, authors: 2, last_used: Math.floor(now / 1000) - 7200 }], walls: [{ id: "ab".repeat(32), name: "ArchevnebiSaqartveloshi", description: "Elections in Georgia — reports from polling stations.", creator: ALICE, open_posting: true, created_at: Math.floor(now / 1000) - 86400, posts: 7, authors: 4, last_post: Math.floor(now / 1000) - 600, pinned: true }], computed_at: Math.floor(now / 1000), source_peer: "12D3KooWDev", source_operator: "hash1operator", source_rtt_ms: 42, note: "" }),
+  hashwall_explore: (a) => ({
+    items: Number(a?.before ?? 0)
+      ? []
+      : [
+          {
+            id: "e0",
+            kind: "REEL_CREATE",
+            author: ALICE,
+            timestamp: Math.floor(now / 1000) - 300,
+            payload: { text: "Morning walk above Vake — first reel from this PC.", hashtags: ["tbilisi", "reels"] },
+            media: [{ cid: "reel1".padEnd(64, "0"), mime: "video/mp4", size: 4_200_000, kind: "video", width: 720, height: 1280, duration_ms: 12_000, poster_cid: "poster1".padEnd(64, "a") }],
+            visibility: "public",
+            channel: "",
+            reply_to: "",
+          },
+          {
+            id: "e1",
+            kind: "POST_CREATE",
+            author: BOB,
+            timestamp: Math.floor(now / 1000) - 600,
+            payload: { text: "Protest at Rustaveli on Saturday, 17:00. Bring water.", hashtags: ["tbilisi", "protest"] },
+            media: [],
+            visibility: "public",
+            channel: "ab".repeat(32),
+            reply_to: "",
+          },
+          {
+            id: "e2",
+            kind: "POST_CREATE",
+            author: ALICE,
+            timestamp: Math.floor(now / 1000) - 7200,
+            payload: { text: "Looking for Rust developers for a P2P storage project.", hashtags: ["rust", "jobs"] },
+            media: [{ cid: "img1".padEnd(64, "b"), mime: "image/jpeg", size: 220_000, kind: "image", width: 1200, height: 800, duration_ms: 0, poster_cid: "" }],
+            visibility: "public",
+            channel: "",
+            reply_to: "",
+          },
+          {
+            id: "e3",
+            kind: "POST_CREATE",
+            author: BOB,
+            timestamp: Math.floor(now / 1000) - 9000,
+            payload: { text: "Ridge trail before the weather turns.", hashtags: ["georgia", "outdoors"] },
+            media: [{ cid: "reel2".padEnd(64, "c"), mime: "video/mp4", size: 3_100_000, kind: "video", width: 720, height: 1280, duration_ms: 8_000, poster_cid: "poster2".padEnd(64, "d") }],
+            visibility: "public",
+            channel: "",
+            reply_to: "",
+          },
+        ],
+    next_before: 0,
+    source_peer: "12D3KooWDev",
+    source_operator: "hash1operator",
+    source_rtt_ms: 42,
+    note: "",
+  }),
+  hashwall_digest: () => ({ window_secs: 604800, events: 4, authors: 2, total_events: 40, total_authors: 9, top_authors: [{ author: ALICE, posts: 12, comments: 4, reactions_received: 30, comments_received: 6, last_active: Math.floor(now / 1000) - 7200 }, { author: BOB, posts: 5, comments: 9, reactions_received: 8, comments_received: 2, last_active: Math.floor(now / 1000) - 600 }], top_hashtags: [{ tag: "tbilisi", posts: 7, authors: 4, last_used: Math.floor(now / 1000) - 600 }, { tag: "rust", posts: 3, authors: 2, last_used: Math.floor(now / 1000) - 7200 }], walls: [{ id: "ab".repeat(32), name: "ArchevnebiSaqartveloshi", description: "Elections in Georgia — reports from polling stations.", creator: ALICE, open_posting: true, created_at: Math.floor(now / 1000) - 86400, posts: 7, authors: 4, last_post: Math.floor(now / 1000) - 600, pinned: true }], computed_at: Math.floor(now / 1000), source_peer: "12D3KooWDev", source_operator: "hash1operator", source_rtt_ms: 42, note: "" }),
   hashwall_thread: (a) => handlers.feed_thread!(a),
   walls_create: (a) => ({ id: "cd".repeat(32), name: a?.name, description: a?.description ?? "", creator: ME, open_posting: !!a?.openPosting, created_at: Math.floor(now / 1000), posts: 0, authors: 0, last_post: 0, pinned: true }),
   walls_info: (a) => ({ id: a?.wall, name: "ArchevnebiSaqartveloshi", description: "Elections in Georgia — reports from polling stations.", creator: ALICE, open_posting: true, created_at: Math.floor(now / 1000) - 86400, posts: 7, authors: 4, last_post: Math.floor(now / 1000) - 600, pinned: true }),
@@ -119,6 +201,10 @@ const handlers: Record<string, (a: Args) => unknown> = {
   walls_pinned: () => [{ id: "ab".repeat(32), name: "ArchevnebiSaqartveloshi", description: "Elections in Georgia — reports from polling stations.", creator: ALICE, open_posting: true, created_at: Math.floor(now / 1000) - 86400, posts: 7, authors: 4, last_post: Math.floor(now / 1000) - 600, pinned: true }],
   people_profile_cached: (a) => handlers.people_profile!(a),
   people_avatar: () => null,
+  spaces_directory: () => [
+    { listing: "l1", space: "sp1", name: "Project X", category: "Work", description: "the deal", owner: ALICE, posts: 12, authors: 3, last_post: Math.floor(now / 1000) - 3600, created_at: Math.floor(now / 1000) - 90_000 },
+    { listing: "l3", space: "sp3", name: "Tbilisi climbers", category: "Local", description: "weekend routes", owner: BOB, posts: 28, authors: 9, last_post: Math.floor(now / 1000) - 7200, created_at: Math.floor(now / 1000) - 40_000 },
+  ],
   profile_me: () => ({ address: ME, username: "me", display_name: "Me", bio: "Testing Hashgram One.", avatar_cid: "", balance: handlers.wallet_balance!({}), activity: { posts: 3, comments: 5, reactions: 12, reposts: 1, walls_created: 1, following: 2, events: 24, walls_posted: ["ab".repeat(32)], first_event: Math.floor(now / 1000) - 30 * 86400, last_event: Math.floor(now / 1000) - 600, reactions_received: 9, comments_received: 2, score: 3 * 10 + 5 * 3 + 2 + 15 + 12 + 18 + 8 }, refreshed: true, walls: handlers.walls_pinned!({}), friends: 2, following: 2 }),
   profile_my_events: () => [{ id: "m1", kind: "POST_CREATE", author: ME, timestamp: Math.floor(now / 1000) - 600, payload: { text: "Hello from my PC.", hashtags: [] }, media: [], visibility: "public", channel: "", reply_to: "" }, { id: "m2", kind: "REACTION", author: ME, timestamp: Math.floor(now / 1000) - 900, payload: { post_id: "p1", reaction: "❤" }, media: [], visibility: "public", channel: "", reply_to: "" }],
   network_holders: () => ({ holders: [{ rank: 1, address: ALICE, balance_uhash: "9000000000", share_bps: 6000, username: "alice" }, { rank: 2, address: BOB, balance_uhash: "4000000000", share_bps: 2666, username: "" }, { rank: 3, address: ME, balance_uhash: "2000000000", share_bps: 1333, username: "me" }], accounts_scanned: 3, complete: true, total_uhash: "15000000000", height: 12345 }),
@@ -186,7 +272,7 @@ const handlers: Record<string, (a: Args) => unknown> = {
       avatar_cid: "",
       banner_cid: "",
       website: mine ? "https://hashgram.io" : "",
-      country: mine ? "GE" : "",
+      country: "GE",
       updated_at: Math.floor(now / 1000) - 8000,
       states: c?.states ?? [],
       is_me: mine,
