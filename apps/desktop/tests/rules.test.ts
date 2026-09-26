@@ -70,8 +70,23 @@ describe("no mining", () => {
     const shell = readFileSync(join(DESKTOP, "src", "components", "Shell.tsx"), "utf8");
     const keys = [...shell.matchAll(/key:\s*"nav_([a-z]+)"/g)].map((m) => m[1]);
     // Social first, infrastructure second, the person last. Mail is no longer
-    // the home screen; Pulse is.
-    expect(keys).toEqual(["pulse", "chats", "mail", "drive", "spaces", "contacts", "wallet", "earn", "network", "profile", "settings"]);
+    // the home screen; Pulse is. Reels and Local sit next to Pulse because
+    // they are places to go, not filters of the timeline.
+    expect(keys).toEqual([
+      "pulse",
+      "reels",
+      "local",
+      "chats",
+      "mail",
+      "drive",
+      "spaces",
+      "contacts",
+      "wallet",
+      "earn",
+      "network",
+      "profile",
+      "settings",
+    ]);
   });
 });
 

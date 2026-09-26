@@ -1239,6 +1239,7 @@ export const ipc = {
   verifyRecord: (tx: string) => call<unknown>("verify_record", { tx }),
   spacesPublish: (space: string, category: string, description: string) => call<unknown>("spaces_publish", { space, category, description }),
   spacesDirectory: (category?: string, sort?: "popular" | "new") => call<SpaceListing[]>("spaces_directory", { category, sort }),
+  spacesIsListed: (space: string) => call<boolean>("spaces_is_listed", { space }),
   spacesCategories: () => call<string[]>("spaces_categories"),
   networkTransactions: (a: { address?: string; q?: string; limit?: number }) => call<unknown | null>("network_transactions", a),
   networkTransaction: (hash: string) => call<unknown | null>("network_transaction", { hash }),

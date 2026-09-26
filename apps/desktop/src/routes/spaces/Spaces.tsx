@@ -100,7 +100,13 @@ function CreateSpaceDialog(props: { open: boolean; onClose: () => void; onCreate
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   return (
-    <Dialog open={props.open} onClose={props.onClose} title={t("spaces_create")} description="You become the Owner. Invite people with a role from Members." width="max-w-md">
+    <Dialog
+      open={props.open}
+      onClose={props.onClose}
+      title={t("spaces_create")}
+      description="You become the Owner, and the Space starts private: nobody outside can read it and nobody outside knows it exists. Invite people with a role from Members. You can publish a public listing later so people can find it and ask to join — that never opens the group itself."
+      width="max-w-md"
+    >
       <div class="flex flex-col gap-3">
         <Field label="Name">
           <Input value={name()} onInput={(e) => setName(e.currentTarget.value)} maxLength={128} />

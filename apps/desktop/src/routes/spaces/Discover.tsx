@@ -11,7 +11,7 @@
 // that answered. It is not a global figure and the page does not pretend it
 // is one. Sorting by it is still useful, and it is honest about its source.
 import { For, Show, createMemo, createSignal } from "solid-js";
-import { Compass, Users, MessageSquarePlus, Megaphone } from "lucide-solid";
+import { Compass, Users, MessageSquarePlus, Megaphone, Lock } from "lucide-solid";
 import { Badge, Button, Empty, Skeleton, Select } from "~/components/ui";
 import { PersonAvatar, Who } from "~/components/identity";
 import { VerifiedBadge } from "~/components/social/Verified";
@@ -126,7 +126,7 @@ function ListingRow(props: { listing: SpaceListing }) {
         </div>
       </div>
       <div class="flex shrink-0 flex-col gap-1">
-        <Button size="sm" variant="secondary" onClick={() => go(`/pulse/topic/${l().listing}`)}>
+        <Button size="sm" variant="secondary" onClick={() => go(`/topics/${l().listing}`)}>
           Open listing
         </Button>
         <Show when={!mine()}>
@@ -139,7 +139,15 @@ function ListingRow(props: { listing: SpaceListing }) {
   );
 }
 
-/** Publishes a Space into the directory. Owner only. */
+/**
+ * A Space's visibility, and the control that changes it.
+ *
+ * Every Space is closed: membership is the only way in, and it is the
+ * owner's decision. What can change is whether the Space is *findable* —
+ * whether a listing exists saying it is there. The panel is written to make
+ * that distinction impossible to misread, because "public Space" sounds
+ * like "anyone can read it" and here it never means that.
+ */
 export function PublishSpace(props: { space: string; name: string; canPublish: boolean }) {
   const [open, setOpen] = createSignal(false);
   const [category, setCategory] = createSignal("Technology");
@@ -149,12 +157,18 @@ export function PublishSpace(props: { space: string; name: string; canPublish: b
     (locked) => (locked ? null : "space:categories"),
     (locked) => (locked ? Promise.resolve([]) : ipc.spacesCategories().catch(() => [])),
   );
+  const [listed, { refetch }] = cachedResource(
+    () => ({ id: props.space, tick: store.ticks().spaces, locked: store.locked() }),
+    (k) => (k.locked ? null : `space:listed:${k.id}`),
+    (k) => (k.locked ? Promise.resolve(false) : ipc.spacesIsListed(k.id).catch(() => false)),
+  );
   const publish = async () => {
     setBusy(true);
     try {
       await ipc.spacesPublish(props.space, category(), "");
-      store.toast("Published. The listing is now travelling the network.");
+      store.toast("Listed. The listing is now travelling the network.");
       store.bump("spaces");
+      void refetch();
       setOpen(false);
     } catch (e) {
       store.toast(errText(e), "error");
@@ -163,36 +177,62 @@ export function PublishSpace(props: { space: string; name: string; canPublish: b
     }
   };
   return (
-    <Show when={props.canPublish}>
-      <div class="flex flex-col gap-2 border-t border-border p-3">
-        <Show
-          when={open()}
-          fallback={
-            <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-              <Compass size={12} /> List this Space publicly
-            </Button>
-          }
-        >
-          <p class="text-xs text-muted">
-            This publishes the name, your address and a category as a public event anyone can read and nobody can take back. The Space's messages,
-            files and members stay private.
-          </p>
-          <div class="flex items-center gap-2">
-            <Select
-              value={category()}
-              onChange={setCategory}
-              aria-label="Category"
-              options={(categories() ?? []).map((c) => ({ value: c, label: c }))}
-            />
-            <Button size="sm" loading={busy()} onClick={() => void publish()}>
-              Publish
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-          </div>
+    <div class="card mb-3 p-3">
+      <div class="flex items-start gap-2">
+        <Show when={listed()} fallback={<Lock size={15} class="mt-0.5 shrink-0 text-muted" />}>
+          <Compass size={15} class="mt-0.5 shrink-0 text-brand" />
         </Show>
+        <div class="min-w-0 flex-1">
+          <p class="text-[13px] font-medium">{listed() ? "Listed, and still closed" : "Private and unlisted"}</p>
+          <p class="mt-0.5 text-xs text-muted">
+            <Show
+              when={listed()}
+              fallback={
+                <>
+                  Nobody outside can read this Space, and nobody outside knows it exists. Messages, posts, files and the member list travel inside
+                  the group's own encryption, so a node relaying them cannot read them either.
+                </>
+              }
+            >
+              <>
+                A public listing says this Space exists: its name, its category and your address. That is all. Messages, posts, files and the member
+                list are still readable only by members — being findable and being readable are different things, and joining is still your decision
+                alone.
+              </>
+            </Show>
+          </p>
+
+          <Show when={props.canPublish && !listed()}>
+            <Show
+              when={open()}
+              fallback={
+                <Button class="mt-2" size="sm" variant="ghost" onClick={() => setOpen(true)}>
+                  <Compass size={12} /> List it in the public directory
+                </Button>
+              }
+            >
+              <div class="mt-2 flex flex-col gap-2 border-t border-border pt-2">
+                <p class="text-xs text-muted">
+                  This signs a public event carrying the name <span class="font-medium">{props.name}</span>, a category and your address. It gossips
+                  across the network and cannot be taken back. Ask the members first: their membership becomes something outsiders can ask about.
+                </p>
+                <div class="flex items-center gap-2">
+                  <Select value={category()} onChange={setCategory} aria-label="Category" options={(categories() ?? []).map((c) => ({ value: c, label: c }))} />
+                  <Button size="sm" loading={busy()} onClick={() => void publish()}>
+                    Publish the listing
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </Show>
+          </Show>
+          <Show when={!props.canPublish && !listed()}>
+            <p class="mt-1 text-[11px] text-muted">Only the Owner can list a Space.</p>
+          </Show>
+        </div>
       </div>
-    </Show>
+    </div>
   );
 }

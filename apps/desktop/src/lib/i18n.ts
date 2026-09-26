@@ -17,6 +17,8 @@ const en = {
   app_name: "Hashgram One",
   tagline: "One identity. One inbox. One vault. One network.",
   nav_pulse: "Pulse",
+  nav_reels: "Reels",
+  nav_local: "Local",
   nav_chats: "Chats",
   nav_mail: "Mail",
   nav_drive: "Drive",

@@ -128,6 +128,14 @@ pub struct SocialSettings {
     /// Who may start a Chat: `everyone` | `nobody`.
     #[serde(default = "default_who_can_chat")]
     pub who_can_chat: String,
+    /// Hex ids of the Spaces this device has published a public listing
+    /// for, so a Space can be shown as listed without asking the network
+    /// and cannot be listed twice by mistake.
+    ///
+    /// Only listed Spaces appear here, and a listing is public already, so
+    /// this file learns nothing that is not.
+    #[serde(default)]
+    pub listed_spaces: Vec<String>,
 }
 
 fn default_who_can_chat() -> String {
@@ -145,6 +153,7 @@ impl Default for SocialSettings {
         Self {
             local_country: String::new(),
             who_can_chat: default_who_can_chat(),
+            listed_spaces: Vec::new(),
         }
     }
 }
@@ -284,10 +293,7 @@ impl Default for Settings {
             },
             appearance: AppearanceSettings::default(),
             notifications: NotificationSettings::default(),
-            social: SocialSettings {
-                local_country: String::new(),
-                who_can_chat: default_who_can_chat(),
-            },
+            social: SocialSettings::default(),
             mail: MailPrefs::default(),
             updates: UpdateSettings {
                 auto_check: true,

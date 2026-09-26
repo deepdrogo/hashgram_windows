@@ -11,8 +11,9 @@ import { join } from "node:path";
 const ROOT = join(__dirname, "..");
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), "utf8");
 // Prose is wrapped and prefixed with comment markers, so a sentence is
-// matched after the markers and the line breaks are taken back out.
-const flat = (s: string) => s.replace(/^\s*(\/\/!?|\/\/\/|\/\/)\s?/gm, "").replace(/\s+/g, " ");
+// matched after the markers and the line breaks are taken back out. Longest
+// marker first, or `///` would leave a stray slash mid-sentence.
+const flat = (s: string) => s.replace(/^[ \t]*(\/\/\/|\/\/!|\/\/)[ \t]?/gm, "").replace(/\s+/g, " ");
 
 describe("the badge is drawn from a chain check, not a profile field", () => {
   const badge = read("src", "components", "social", "Verified.tsx");

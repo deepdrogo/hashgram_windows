@@ -451,6 +451,7 @@ pub fn run() {
             cmd_verify::verify_purchase,
             cmd_verify::verify_record,
             cmd_spaces::spaces_publish,
+            cmd_spaces::spaces_is_listed,
             cmd_spaces::spaces_directory,
             cmd_spaces::spaces_categories,
             cmd_spaces::spaces_state,

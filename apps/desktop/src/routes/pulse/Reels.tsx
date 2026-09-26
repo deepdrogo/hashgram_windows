@@ -29,6 +29,22 @@ function videoOf(it: FeedItem): [string, string] | null {
   return v ? [v[0], v[1]] : null;
 }
 
+/** Reels as a section of its own: its own rail entry, the full pane. */
+export function ReelsPage() {
+  return (
+    <div class="flex h-full min-h-0 flex-col">
+      <div class="flex items-center gap-2 border-b border-border px-3 py-2">
+        <Film size={14} class="text-muted" />
+        <h1 class="flex-1 text-[13px] font-medium">Reels</h1>
+        <span class="text-[11px] text-muted">short video from the whole network, newest first</span>
+      </div>
+      <div class="min-h-0 flex-1 px-4 py-3">
+        <Reels />
+      </div>
+    </div>
+  );
+}
+
 export function Reels() {
   const navigate = useNavigate();
   const [index, setIndex] = createSignal(0);

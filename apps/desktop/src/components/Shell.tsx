@@ -1,10 +1,10 @@
-// The application frame: left rail (Pulse · Chats · Mail · Drive · Spaces ·
-// Contacts, then Wallet · Earn · Network, then My profile · Settings), top bar
-// with search, theme and sync state, toasts.
+// The application frame: left rail (Pulse · Reels · Local · Chats · Mail ·
+// Drive · Spaces · Contacts, then Wallet · Earn · Network, then My profile ·
+// Settings), top bar with search, theme and sync state, toasts.
 // Keyboard: Ctrl+K search, Ctrl+L lock, Alt+1..9 sections.
 import { For, Show, createEffect, createMemo, createSignal, onMount, onCleanup, type ParentProps } from "solid-js";
 import { A, useLocation, useNavigate } from "@solidjs/router";
-import { Mail, HardDrive, Users, LayoutGrid, Coins, Wallet, Network, Settings, CircleHelp, Search, Lock, Download, X, ShieldAlert, LogOut, UserCircle, Activity, MessageSquare, Sun, Moon } from "lucide-solid";
+import { Mail, HardDrive, Users, LayoutGrid, Coins, Wallet, Network, Settings, CircleHelp, Search, Lock, Download, X, ShieldAlert, LogOut, UserCircle, Activity, MessageSquare, Sun, Moon, Film, MapPin } from "lucide-solid";
 import { store } from "~/lib/store";
 import { updates } from "~/lib/updates";
 import { ipc } from "~/lib/ipc";
@@ -33,11 +33,16 @@ export interface NavItem {
 
 export const NAV: NavItem[] = [
   { to: "/pulse", key: "nav_pulse", icon: Activity, accel: "1", group: "social" },
-  { to: "/chats", key: "nav_chats", icon: MessageSquare, accel: "2", group: "social" },
-  { to: "/mail", key: "nav_mail", icon: Mail, accel: "3", group: "social" },
-  { to: "/drive", key: "nav_drive", icon: HardDrive, accel: "4", group: "social" },
-  { to: "/spaces", key: "nav_spaces", icon: LayoutGrid, accel: "5", group: "social" },
-  { to: "/contacts", key: "nav_contacts", icon: Users, accel: "6", group: "social" },
+  // Reels and Local were tabs inside Pulse. Both are destinations people go
+  // to on purpose rather than filters of the timeline, and a tab strip
+  // hides them behind whichever tab was open last.
+  { to: "/reels", key: "nav_reels", icon: Film, accel: "2", group: "social" },
+  { to: "/local", key: "nav_local", icon: MapPin, accel: "3", group: "social" },
+  { to: "/chats", key: "nav_chats", icon: MessageSquare, accel: "4", group: "social" },
+  { to: "/mail", key: "nav_mail", icon: Mail, accel: "5", group: "social" },
+  { to: "/drive", key: "nav_drive", icon: HardDrive, accel: "6", group: "social" },
+  { to: "/spaces", key: "nav_spaces", icon: LayoutGrid, accel: "", group: "social" },
+  { to: "/contacts", key: "nav_contacts", icon: Users, accel: "", group: "social" },
   { to: "/wallet", key: "nav_wallet", icon: Wallet, accel: "7", group: "assets" },
   { to: "/earn", key: "nav_earn", icon: Coins, accel: "8", group: "assets" },
   { to: "/network", key: "nav_network", icon: Network, accel: "9", group: "assets" },

@@ -119,11 +119,12 @@
   .btn-primary:not(:disabled):hover {
     opacity: 0.88;
   }
+  /* Same as .btn-primary: emphasis is contrast, not colour. */
   .btn-brand {
     @apply btn bg-brand text-bg;
   }
   .btn-brand:not(:disabled):hover {
-    opacity: 0.9;
+    opacity: 0.88;
   }
   .btn-secondary {
     @apply btn border border-border bg-surface-2 text-fg;

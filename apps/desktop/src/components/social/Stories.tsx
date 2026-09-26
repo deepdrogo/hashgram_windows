@@ -92,8 +92,13 @@ function Bubble(props: { label: unknown; onClick: () => void; children: unknown 
 function StoryAvatar(props: { address: string }) {
   const [src] = createResource(() => props.address, avatarSrc);
   return (
-    <span class="rounded-full p-0.5 ring-2 ring-brand">
-      <Avatar address={props.address} size={52} src={src() ?? null} />
+    // The ring is a circle, so what it frames has to be one too. The picture
+    // is clipped to the same shape and cropped to fill it, rather than laid
+    // inside the ring with its corners showing.
+    <span class="block rounded-full p-[3px] ring-2 ring-brand">
+      <span class="block h-[52px] w-[52px] overflow-hidden rounded-full">
+        <Avatar address={props.address} size={52} src={src() ?? null} round />
+      </span>
     </span>
   );
 }

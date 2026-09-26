@@ -10,6 +10,8 @@ import { MailRoute } from "./routes/mail/Mail";
 
 const Drive = lazy(() => import("./routes/drive/Drive").then((m) => ({ default: m.DriveRoute })));
 const Pulse = lazy(() => import("./routes/pulse/Pulse").then((m) => ({ default: m.PulseRoute })));
+const ReelsRoute = lazy(() => import("./routes/pulse/Reels").then((m) => ({ default: m.ReelsPage })));
+const LocalRoute = lazy(() => import("./routes/local/Local").then((m) => ({ default: m.LocalRoute })));
 const Topics = lazy(() => import("./routes/topics/Topics").then((m) => ({ default: m.TopicRoute })));
 const Circles = lazy(() => import("./routes/feed/Feed").then((m) => ({ default: m.CirclesRoute })));
 const Chats = lazy(() => import("./routes/chats/Chats").then((m) => ({ default: m.ChatsRoute })));
@@ -133,6 +135,8 @@ export function App() {
         >
           <Route path="/" component={() => <Navigate href="/pulse" />} />
           <Route path="/pulse/:tab?/:id?" component={Pulse} />
+          <Route path="/reels" component={ReelsRoute} />
+          <Route path="/local" component={LocalRoute} />
           <Route path="/topics/:id?" component={Topics} />
           <Route path="/chats/:id?" component={Chats} />
           <Route path="/circles" component={Circles} />
@@ -147,6 +151,10 @@ export function App() {
           <Route path="/network" component={Network} />
           <Route path="/settings/:tab?" component={Settings} />
           <Route path="/help/:slug?" component={Help} />
+          {/* Reels and Local were tabs of Pulse in 1.3.0; links to them,
+              including the ones in that release's own UI, still work. */}
+          <Route path="/pulse/reels" component={() => <Navigate href="/reels" />} />
+          <Route path="/pulse/local" component={() => <Navigate href="/local" />} />
           {/* Links, bookmarks and deep links minted before the rename. */}
           <Route path="/hashwall/:tab?/:id?" component={PulseRedirect} />
           <Route path="/feed/:tab?/:id?" component={PulseRedirect} />

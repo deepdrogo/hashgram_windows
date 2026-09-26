@@ -1,10 +1,10 @@
 /*
  * Hashgram One design tokens — the single source of every colour in the UI.
  *
- * Dark first. Black, near-blacks, greys, white and ONE accent (a desaturated
- * blue-grey). No gradients, no glass, no orange/gold. The light theme is
- * derived from the same roles. A test (tests/palette.test.ts) scans every
- * stylesheet and component for a colour outside this list and fails.
+ * Monochrome. Black, near-blacks, greys and white — no hue at all. No
+ * gradients, no glass. The light theme is derived from the same roles. A
+ * test (tests/palette.test.ts) scans every stylesheet and component for a
+ * colour outside this list and fails.
  *
  *   role        dark      light
  *   bg          #000000   #ffffff   window background
@@ -14,7 +14,18 @@
  *   accent      #404040   #b3b3b3   strong borders, focus, disabled text
  *   muted       #808080   #6b6b6b   secondary text, icons
  *   fg          #ffffff   #0d0d0d   primary text
- *   brand       #7a8fa6   #4f6479   the one accent: links, active nav, primary actions
+ *   brand       #ffffff   #0d0d0d   emphasis: primary actions, active nav
+ *
+ * There was a blue-grey accent in the `brand` role. It was the only hue in
+ * the app, and on the light theme it read as a stray blue button on a white
+ * page — the one thing that looked borrowed from somewhere else. Emphasis
+ * is now carried by contrast instead of colour: a primary action is the
+ * foreground colour, so it is black on white and white on black, which is
+ * the strongest signal either theme has.
+ *
+ * `brand` is kept as its own role rather than replaced everywhere with
+ * `fg`, because the distinction is real — these are the places that want
+ * emphasis — and it is the single knob to turn if an accent ever returns.
  */
 @theme inline {
   /* Wipe Tailwind's default palette so no other colour utility exists. */
@@ -53,7 +64,7 @@ html[data-theme="dark"] {
   --t-accent: #404040;
   --t-muted: #808080;
   --t-fg: #ffffff;
-  --t-brand: #7a8fa6;
+  --t-brand: #ffffff;
   color-scheme: dark;
 }
 
@@ -65,6 +76,6 @@ html[data-theme="light"] {
   --t-accent: #b3b3b3;
   --t-muted: #6b6b6b;
   --t-fg: #0d0d0d;
-  --t-brand: #4f6479;
+  --t-brand: #0d0d0d;
   color-scheme: light;
 }

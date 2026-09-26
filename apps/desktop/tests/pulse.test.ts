@@ -32,7 +32,15 @@ describe("Pulse", () => {
 
   it("offers exactly the feeds the product promises", () => {
     const tabs = [...pulse.matchAll(/\{ id: "(\w+)", label: "/g)].map((m) => m[1]);
-    expect(tabs).toEqual(["latest", "following", "reels", "topics", "local"]);
+    expect(tabs).toEqual(["latest", "following", "topics"]);
+  });
+
+  // They were tabs here first, and links to them exist in a shipped build.
+  it("the tabs that became sections still lead somewhere", () => {
+    expect(pulse).toMatch(/const MOVED: Record<string, string> = \{ reels: "\/reels", local: "\/local" \}/);
+    const app = read("src", "App.tsx");
+    expect(app).toMatch(/path="\/pulse\/reels"[\s\S]{0,80}href="\/reels"/);
+    expect(app).toMatch(/path="\/pulse\/local"[\s\S]{0,80}href="\/local"/);
   });
 
   it("each feed is chronological or set-filtered, never scored", () => {

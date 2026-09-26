@@ -257,9 +257,26 @@ begin with `Hashgram Space` is an ordinary Topic and is not listed.
   and nothing here pretends otherwise.
 * **Publishing is irreversible.** The event is signed and gossiped; the app
   says so before it publishes.
+* **Owner only**, and once. `spaces_publish` refuses a non-Owner and refuses
+  a Space that is already listed. Listed space ids are remembered in
+  `settings.social.listed_spaces`, so the app knows the answer offline and
+  cannot list the same Space twice because a network lookup failed.
 
-Commands: `spaces_publish`, `spaces_directory` (by `category` and
-`sort=popular|new`), `spaces_categories`.
+What the listing does **not** carry: members, message, file, or any count of
+them. There is no "open Space" in this protocol — every Space is closed, and
+listing one changes whether it can be *found*, never whether it can be
+*read*. `apps/desktop/tests/spaces-privacy.test.ts` enforces that boundary
+at the source level: Space content may leave the device only through
+`send_app` (the MLS path), the commands may touch `feed()` only to create or
+read a listing, and the UI copy must keep saying so.
+
+The space id in a listing is deliberate and is **not** a capability: nothing
+in the protocol grants access by id, and membership is the only gate. It is
+there so the Owner's app can say "already listed" and a member can confirm a
+listing is theirs.
+
+Commands: `spaces_publish`, `spaces_is_listed`, `spaces_directory` (by
+`category` and `sort=popular|new`), `spaces_categories`.
 
 ---
 

@@ -92,7 +92,7 @@ export function Who(props: { address: string; class?: string; me?: boolean; size
   );
 }
 
-export function Avatar(props: { address: string; size?: number; src?: string | null; name?: string }) {
+export function Avatar(props: { address: string; size?: number; src?: string | null; name?: string; round?: boolean }) {
   // Identicon: 5x5 symmetric grid from the address bytes, in the muted tone.
   const cells = () => {
     const s = props.address || "";
@@ -104,11 +104,17 @@ export function Avatar(props: { address: string; size?: number; src?: string | n
     return out;
   };
   const size = () => props.size ?? 28;
+  // `round` is for the places framed by a circle — a story ring. A picture
+  // of any proportion is forced into a square box and cropped to fill it,
+  // because an uncropped photo laid inside a round frame shows its corners
+  // sticking out of the ring.
+  const shape = () => (props.round ? "rounded-full" : "rounded-md");
+  const box = () => ({ width: `${size()}px`, height: `${size()}px` });
   return (
     <Show
       when={props.src}
       fallback={
-        <svg width={size()} height={size()} viewBox="0 0 5 5" class="shrink-0 rounded-md bg-surface-2 text-muted" aria-hidden="true" shape-rendering="crispEdges">
+        <svg width={size()} height={size()} viewBox="0 0 5 5" class={`shrink-0 ${shape()} bg-surface-2 text-muted`} aria-hidden="true" shape-rendering="crispEdges">
           {cells().map((on, i) => {
             const x = i % 3;
             const y = Math.floor(i / 3);
@@ -123,7 +129,7 @@ export function Avatar(props: { address: string; size?: number; src?: string | n
         </svg>
       }
     >
-      <img src={props.src ?? ""} width={size()} height={size()} class="shrink-0 rounded-md object-cover" alt="" />
+      <img src={props.src ?? ""} style={box()} class={`shrink-0 ${shape()} object-cover`} alt="" />
     </Show>
   );
 }

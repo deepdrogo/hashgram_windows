@@ -151,11 +151,40 @@ fn parse_listing(w: &hashgram_sdk::feed::WallInfo) -> Option<SpaceListing> {
     })
 }
 
+/// Whether this device has published a listing for a Space.
+///
+/// Read from local settings rather than from the network, so the answer is
+/// the same offline and a Space cannot be listed twice because a lookup
+/// failed.
+#[tauri::command]
+pub async fn spaces_is_listed(state: S<'_>, space: String) -> CmdResult<bool> {
+    let space = check_space_id(&space)?;
+    Ok(state
+        .settings
+        .read()
+        .await
+        .social
+        .listed_spaces
+        .iter()
+        .any(|s| s == &space))
+}
+
 /// Publishes a Space in the public directory.
 ///
 /// Only its owner should call this, and only the owner's listing is worth
 /// anything: the address that signed the channel event is the address people
 /// will message for an invitation.
+///
+/// What becomes public is exactly this: the Space's name, a category, the
+/// owner's address, the space id and whatever description is passed. Not the
+/// members, not a message, not a file, not a count of any of them. The group
+/// stays what it was — an MLS group nobody outside can read — because being
+/// findable and being readable are different things.
+///
+/// The space id is in there deliberately and it is not a secret: nothing in
+/// the protocol grants access by id. Membership is the only gate, so the id
+/// buys an outsider nothing, while it lets the owner's own app tell them the
+/// Space is already listed and lets a member confirm a listing is theirs.
 #[tauri::command]
 pub async fn spaces_publish(
     state: S<'_>,
@@ -164,6 +193,9 @@ pub async fn spaces_publish(
     description: String,
 ) -> CmdResult<SpaceListing> {
     let space = check_space_id(&space)?;
+    if spaces_is_listed(state.clone(), space.clone()).await? {
+        return Err(UiError::invalid("that Space is already listed"));
+    }
     let category = category.trim().to_owned();
     if !SPACE_CATEGORIES.contains(&category.as_str()) {
         return Err(UiError::invalid("pick one of the listed categories"));
@@ -188,10 +220,21 @@ pub async fn spaces_publish(
             description.trim()
         }
     );
+    // Only the Owner's listing means anything, and only the Owner can be
+    // sure the members agreed to be findable.
+    if summary.my_role != app::SpaceRole::Owner as i32 {
+        return Err(UiError::invalid("only the Owner may list a Space publicly"));
+    }
     // Closed posting: the listing is the owner's notice board, not a wall
     // anyone can write on. People who want in send a message.
     let wall = one.feed().create_wall(&summary.name, &body, false).await?;
     one.save()?;
+    drop(g);
+    {
+        let mut s = state.settings.write().await;
+        s.social.listed_spaces.push(space.clone());
+        let _ = s.save(&crate::paths::settings_path());
+    }
     Ok(parse_listing(&wall).unwrap_or(SpaceListing {
         listing: wall.id,
         space,

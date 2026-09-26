@@ -11,17 +11,20 @@ import { join } from "node:path";
 const ROOT = join(__dirname, "..");
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), "utf8");
 // Prose is wrapped and prefixed with comment markers, so a sentence is
-// matched after the markers and the line breaks are taken back out.
-const flat = (s: string) => s.replace(/^\s*(\/\/!?|\/\/\/|\/\/)\s?/gm, "").replace(/\s+/g, " ");
+// matched after the markers and the line breaks are taken back out. Longest
+// marker first, or `///` would leave a stray slash mid-sentence.
+const flat = (s: string) => s.replace(/^[ \t]*(\/\/\/|\/\/!|\/\/)[ \t]?/gm, "").replace(/\s+/g, " ");
 const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 describe("Reels", () => {
   const reels = read("src", "routes", "pulse", "Reels.tsx");
 
-  it("lives inside Pulse", () => {
-    const pulse = read("src", "routes", "pulse", "Pulse.tsx");
-    expect(pulse).toMatch(/id: "reels", label: "Reels"/);
-    expect(pulse).toMatch(/from "\.\/Reels"/);
+  it("has its own place in the rail", () => {
+    const shell = read("src", "components", "Shell.tsx");
+    expect(shell).toMatch(/to: "\/reels", key: "nav_reels"/);
+    const app = read("src", "App.tsx");
+    expect(app).toMatch(/path="\/reels" component=\{ReelsRoute\}/);
+    expect(reels).toMatch(/export function ReelsPage/);
   });
 
   it("takes video from ordinary posts too, not just REEL_CREATE", () => {
