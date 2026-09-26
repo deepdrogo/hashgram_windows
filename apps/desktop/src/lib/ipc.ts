@@ -463,6 +463,45 @@ export interface ChatMessage {
   text: string;
 }
 
+// Your node
+export type NodeState =
+  | "not_installed"
+  | "stopped"
+  | "starting"
+  | "connecting"
+  | "syncing"
+  | "running"
+  | "degraded"
+  | "stopping"
+  | "crashed"
+  | "error";
+/** What the app knows about the node it started. Spawned is not running. */
+export interface NodeStatus {
+  state: NodeState;
+  message: string;
+  pid: number | null;
+  uptime_secs: number;
+  version: string;
+  peer_id: string;
+  peers: number;
+  height: number;
+  storage_used: number;
+  storage_quota: number;
+  roles: string[];
+  restarts: number;
+  installed: boolean;
+  configured: boolean;
+  starts_at_logon: boolean;
+  home: string;
+}
+/** One condition checked before the node is launched. */
+export interface NodeCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+  blocking: boolean;
+}
+
 /** A story. `expires_at` is when active surfaces stop showing it. */
 export interface Story {
   id: string;
@@ -1113,8 +1152,12 @@ export const ipc = {
   nodeOverview: () => call<NodeOverview>("node_overview"),
   nodeConfigure: (setup: NodeSetup) => call<string>("node_configure", { setup }),
   nodeInstall: () => call<Registration>("node_install"),
-  nodeStart: () => call<void>("node_start"),
+  nodeStart: () => call<number>("node_start"),
   nodeStop: () => call<void>("node_stop"),
+  nodeStatus: () => call<NodeStatus>("node_status"),
+  nodePreflight: () => call<NodeCheck[]>("node_preflight"),
+  nodeLogs: () => call<string[]>("node_logs"),
+  nodeOpenFolder: () => call<void>("node_open_folder"),
   nodeUninstall: () => call<void>("node_uninstall"),
   nodeGenerateColdAddress: () => call<ColdAddress>("node_generate_cold_address"),
   nodeLogTail: (lines?: number) => call<string>("node_log_tail", { lines }),

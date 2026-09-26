@@ -339,22 +339,64 @@ pub async fn node_install() -> CmdResult<Registration> {
         .map_err(UiError::internal)
 }
 
-/// Starts the node.
+/// Starts the node as a child of this application.
+///
+/// No console window, no `schtasks /Run`, and the process id is kept so
+/// Stop stops this node rather than whatever else is called that.
 #[tauri::command]
-pub async fn node_start() -> CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(nm::start)
+pub async fn node_start(state: S<'_>) -> CmdResult<u32> {
+    let sup = state.node.clone();
+    tauri::async_runtime::spawn_blocking(move || sup.start())
         .await
         .map_err(|e| UiError::internal(e.to_string()))?
-        .map_err(UiError::internal)
+        .map_err(UiError::invalid)
 }
 
-/// Stops the node.
+/// Stops the node this app started. Also ends a logon task, if one is
+/// registered, so Stop means stopped.
 #[tauri::command]
-pub async fn node_stop() -> CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(nm::stop)
+pub async fn node_stop(state: S<'_>) -> CmdResult<()> {
+    let sup = state.node.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let r = sup.stop();
+        if nm::registration() != Registration::None {
+            let _ = nm::stop();
+        }
+        r
+    })
+    .await
+    .map_err(|e| UiError::internal(e.to_string()))?
+    .map_err(UiError::internal)
+}
+
+/// What the node is doing, from evidence rather than from a guess.
+#[tauri::command]
+pub async fn node_status(state: S<'_>) -> CmdResult<crate::node_supervisor::NodeStatus> {
+    Ok(state.node.status())
+}
+
+/// Everything that must be true before a node can start.
+#[tauri::command]
+pub async fn node_preflight(state: S<'_>) -> CmdResult<Vec<crate::node_supervisor::Check>> {
+    let sup = state.node.clone();
+    tauri::async_runtime::spawn_blocking(move || sup.preflight())
         .await
-        .map_err(|e| UiError::internal(e.to_string()))?
-        .map_err(UiError::internal)
+        .map_err(|e| UiError::internal(e.to_string()))
+}
+
+/// The node's own output, as the app captured it.
+#[tauri::command]
+pub async fn node_logs(state: S<'_>) -> CmdResult<Vec<String>> {
+    crate::node_supervisor::drain_output(&state.node);
+    Ok(state.node.logs())
+}
+
+/// Opens the node's data folder in Explorer.
+#[tauri::command]
+pub async fn node_open_folder(app: tauri::AppHandle) -> CmdResult<()> {
+    let home = nm::node_home();
+    std::fs::create_dir_all(&home)?;
+    crate::util::open_path(&app, &home)
 }
 
 /// Removes the registration (keeps data and keys).

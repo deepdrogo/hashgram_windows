@@ -44,6 +44,7 @@ pub mod error;
 pub mod help;
 pub mod media;
 pub mod node_manager;
+pub mod node_supervisor;
 pub mod notify;
 pub mod paths;
 pub mod perf;
@@ -150,6 +151,7 @@ fn build_state() -> Result<
             sync_task: tokio::sync::Mutex::new(None),
             pending_tx: tokio::sync::Mutex::new(Vec::new()),
             sync_wake: tokio::sync::Notify::new(),
+            node: Arc::new(node_supervisor::Supervisor::new()),
         }),
         guard,
     ))
@@ -469,6 +471,10 @@ pub fn run() {
             cmd_earn::node_install,
             cmd_earn::node_start,
             cmd_earn::node_stop,
+            cmd_earn::node_status,
+            cmd_earn::node_preflight,
+            cmd_earn::node_logs,
+            cmd_earn::node_open_folder,
             cmd_earn::node_uninstall,
             cmd_earn::node_generate_cold_address,
             cmd_earn::node_log_tail,
@@ -548,6 +554,7 @@ pub fn run() {
             let handle = app.handle().clone();
             session::spawn_link(handle.clone(), state.clone());
             session::spawn_housekeeping(handle, state.clone());
+            node_supervisor::spawn_watch(state.node.clone());
             tauri::async_runtime::spawn(chain_proxy::serve(state.clone()));
             #[cfg(debug_assertions)]
             if std::env::var("HASHGRAM_DEVTOOLS")

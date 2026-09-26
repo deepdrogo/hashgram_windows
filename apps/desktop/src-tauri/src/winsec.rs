@@ -215,6 +215,22 @@ mod imp {
             0
         }
     }
+
+    /// Free bytes on the volume holding `dir`, or `None` if Windows will
+    /// not say. Lives here because this is the module allowed to call the
+    /// Win32 API, not because it has anything to do with security.
+    pub fn free_space(dir: &std::path::Path) -> Option<u64> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+        let mut wide: Vec<u16> = dir.as_os_str().encode_wide().collect();
+        wide.push(0);
+        let mut free = 0u64;
+        // SAFETY: `wide` is a NUL-terminated buffer that outlives the call
+        // and `free` is a live, writable u64 the OS fills in.
+        let ok = unsafe { GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut free), None, None) };
+        ok.ok().map(|()| free)
+    }
 }
 
 #[cfg(not(windows))]
@@ -241,10 +257,14 @@ mod imp {
     pub fn working_set_bytes() -> u64 {
         0
     }
+    /// Free bytes on the volume holding `dir`.
+    pub fn free_space(_dir: &std::path::Path) -> Option<u64> {
+        None
+    }
 }
 
 pub use imp::{
-    dpapi_protect, dpapi_unprotect, hello_create_and_sign, hello_delete, hello_sign,
+    dpapi_protect, dpapi_unprotect, free_space, hello_create_and_sign, hello_delete, hello_sign,
     hello_supported, working_set_bytes,
 };
 
