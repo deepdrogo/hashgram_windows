@@ -528,6 +528,27 @@ impl<'a> Drive<'a> {
         self.download_object(&r).await
     }
 
+    /// Asks the providers this client can reach whether they still hold a
+    /// file's current content.
+    ///
+    /// This is the only honest answer available to a client: nodes that
+    /// answered, not a survey of the network. A UI must present it as
+    /// such — see [`crate::blob::Availability`].
+    pub async fn availability(
+        &mut self,
+        id_hex: &str,
+    ) -> Result<crate::blob::Availability, SdkError> {
+        let id = hex::decode(id_hex).map_err(|e| SdkError::Invalid(e.to_string()))?;
+        let r = self
+            .one
+            .drive_state
+            .manifest
+            .get(&id)
+            .and_then(|e| e.current.clone())
+            .ok_or_else(|| SdkError::NotFound("file content".into()))?;
+        Ok(crate::blob::availability(&self.one.link, &r.cid).await)
+    }
+
     /// Downloads and opens any object reference (verifies chunk hashes,
     /// AEAD tags and the plaintext hash).
     pub async fn download_object(&mut self, r: &app::DriveObjectRef) -> Result<Vec<u8>, SdkError> {

@@ -98,6 +98,21 @@ pub async fn drive_entry(state: S<'_>, id: String) -> CmdResult<Option<EntryView
     Ok(one.drive().entry(&id)?)
 }
 
+/// Where a file's current content actually is.
+///
+/// Asks the providers this client can reach, one round. The numbers are
+/// what answered, and the UI says so: a provider that is offline may hold
+/// a perfect copy and this cannot see it.
+#[tauri::command]
+pub async fn drive_availability(
+    state: S<'_>,
+    id: String,
+) -> CmdResult<hashgram_sdk::blob::Availability> {
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    Ok(one.drive().availability(id.trim()).await?)
+}
+
 /// Versions of a file, oldest first (the last one is current).
 #[tauri::command]
 pub async fn drive_versions(state: S<'_>, id: String) -> CmdResult<Vec<VersionView>> {

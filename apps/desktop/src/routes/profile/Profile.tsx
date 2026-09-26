@@ -20,6 +20,7 @@ import { PostCard } from "~/routes/feed/Feed";
 import { MediaTile } from "~/components/social/Media";
 import { ProfileEditor } from "./ProfileEdit";
 import { FollowList } from "./FollowList";
+import { UsernameCard } from "./Username";
 
 const TABS: { id: ProfileTab; label: string }[] = [
   { id: "posts", label: "Posts" },
@@ -222,6 +223,11 @@ export function ProfileRoute() {
             </div>
 
             <div class="p-4">
+              <Show when={p().is_me && tab() === "posts"}>
+                <div class="mb-4">
+                  <UsernameCard current={p().username} address={p().address} onRegistered={() => void refetch()} />
+                </div>
+              </Show>
               <Show when={items.loading && !items()}>
                 <Skeleton lines={4} />
               </Show>

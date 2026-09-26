@@ -348,6 +348,7 @@ pub fn run() {
             cmd_drive::drive_shared_download,
             cmd_drive::drive_shared_open,
             cmd_drive::drive_shared_save,
+            cmd_drive::drive_availability,
             cmd_drive::drive_shared_folder_list,
             cmd_drive::drive_shared_folder_download,
             // people

@@ -353,6 +353,17 @@ export interface MediaProgress {
   total: number;
   name: string;
 }
+/**
+ * What the nodes we could reach said about a blob. Not a survey of the
+ * network: a provider that is offline may hold a copy this never saw.
+ */
+export interface Availability {
+  complete: number;
+  partial: number;
+  asked: number;
+  answered: number;
+  target: number;
+}
 export interface DriveProgress {
   op: string;
   stage: "reading" | "encrypting" | "uploading" | "done" | "failed";
@@ -942,6 +953,7 @@ export const ipc = {
   driveSearch: (q: string, limit?: number) => call<EntryView[]>("drive_search", { q, limit }),
   driveEntry: (id: string) => call<EntryView | null>("drive_entry", { id }),
   driveVersions: (id: string) => call<VersionView[]>("drive_versions", { id }),
+  driveAvailability: (id: string) => call<Availability>("drive_availability", { id }),
   driveUsage: () => call<DriveUsage>("drive_usage"),
   driveResolvePath: (path: string) => call<string | null>("drive_resolve_path", { path }),
   driveMkdir: (parent: string, name: string) => call<string>("drive_mkdir", { parent, name }),

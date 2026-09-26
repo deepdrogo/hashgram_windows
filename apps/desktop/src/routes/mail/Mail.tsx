@@ -2,13 +2,15 @@
 // Home screen. Keyboard: c r a f e # s j k / and Ctrl+Enter in the composer.
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router";
-import { Inbox, Star, Send, FileText, Archive, ShieldAlert, Trash2, Tag, PenSquare, Search, UserPlus, Rows3, List, RefreshCw } from "lucide-solid";
+import { Inbox, Star, Send, FileText, Archive, ShieldAlert, Trash2, Tag, PenSquare, Search, UserPlus, Rows3, List, RefreshCw, Copy as CopyIcon } from "lucide-solid";
 import { Button, Input, Menu, useContextMenu, Kbd } from "~/components/ui";
 import { OfflineBanner, ErrorState } from "~/components/States";
 import { ipc, errText, type MailSummary, type DraftView } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { t, type Key } from "~/lib/i18n";
 import { shortWhen } from "~/lib/format";
+import { Mono } from "~/components/identity";
+import { copyText } from "~/lib/clipboard";
 import { MailList } from "./MailList";
 import { Reader } from "./Reader";
 import { Composer, type ComposerOpen } from "./Composer";
@@ -164,6 +166,7 @@ export function MailRoute() {
       <OfflineBanner />
       <div class="flex min-h-0 flex-1">
         <aside class="pane w-[188px] shrink-0">
+          <MailIdentity />
           <div class="p-2">
             <Button variant="brand" class="w-full" onClick={() => setComposer({})} title="c">
               <PenSquare size={14} /> {t("mail_compose")}
@@ -364,5 +367,47 @@ function DraftList(props: { drafts: DraftView[]; onOpen: (d: DraftView) => void;
         </For>
       </ul>
     </Show>
+  );
+}
+
+/**
+ * Your mail address, where a mail client puts it.
+ *
+ * With a username registered, that is `@name` and `name@hashgram.io`.
+ * Without one it is the hash1 address, which works but nobody can type,
+ * so the card offers the one thing that fixes it — and sends the user to
+ * My profile, not to the wallet, because a username is who you are.
+ */
+function MailIdentity() {
+  const navigate = useNavigate();
+  const id = () => store.identity();
+  const username = () => id()?.username ?? "";
+  const address = () => id()?.address ?? store.status()?.address ?? "";
+  return (
+    <div class="border-b border-border px-3 py-2.5">
+      <Show
+        when={username()}
+        fallback={
+          <>
+            <p class="text-[11px] uppercase tracking-wide text-muted">Your address</p>
+            <Mono text={address()} head={10} tail={6} copy class="mt-0.5 text-xs" />
+            <Button class="mt-2 w-full" size="sm" variant="secondary" onClick={() => navigate("/profile/me")}>
+              Choose a username
+            </Button>
+          </>
+        }
+      >
+        <p class="text-[13px] font-medium">@{username()}</p>
+        <button
+          type="button"
+          class="mt-0.5 flex w-full items-center gap-1 text-left text-xs text-muted hover:text-fg"
+          title="Copy"
+          onClick={() => void copyText(`${username()}@hashgram.io`)}
+        >
+          <span class="truncate">{username()}@hashgram.io</span>
+          <CopyIcon size={11} class="shrink-0" />
+        </button>
+      </Show>
+    </div>
   );
 }
