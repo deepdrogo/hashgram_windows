@@ -215,11 +215,19 @@ const handlers: Record<string, (a: Args) => unknown> = {
   chat_leave: () => undefined,
   spaces_chat_open: () => "dd".repeat(32),
   chat_open: () => "aa".repeat(32),
-  chat_history: (a) => [
-    { id: "c1", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 500_000, outgoing: false, state: "sent", text: "Are we still on for the ridge?" },
-    { id: "c2", group_id: String(a?.conversation), sender: ME, at_ms: now - 450_000, outgoing: true, state: "sent", text: "Yes — 7am at the car park." },
-    { id: "c3", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 400_000, outgoing: false, state: "sent", text: "See you Saturday then." },
-  ],
+  chat_history: (a) => ({
+    messages: [
+      { id: "c1", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 500_000, outgoing: false, state: "sent", text: "Are we still on for the ridge?" },
+      { id: "c2", group_id: String(a?.conversation), sender: ME, at_ms: now - 450_000, outgoing: true, state: "sent", text: "Yes — 7am at the car park." },
+      { id: "c3", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 400_000, outgoing: false, state: "sent", text: "See you Saturday then." },
+      { id: "c4", group_id: String(a?.conversation), sender: ALICE, at_ms: now - 300_000, outgoing: false, state: "sent", text: "Here is the route 📷" },
+    ],
+    attachments: [
+      { message_id: "c4", index: 0, name: "ridge.jpg", mime: "image/jpeg", size: 412_000, kind: "image", width: 1600, height: 1200, duration_ms: 0 },
+    ],
+  }),
+  chat_send_media: (a) => ({ id: `c${Date.now()}`, group_id: String(a?.conversation), sender: ME, at_ms: Date.now(), outgoing: true, state: "sent", text: String(a?.text ?? "") }),
+  chat_attachment_open: () => "C:\\tmp\\ridge.jpg",
   chat_send: (a) => ({ id: `c${Date.now()}`, group_id: String(a?.conversation), sender: ME, at_ms: Date.now(), outgoing: true, state: "queued", text: String(a?.text) }),
   chat_flush: () => 0,
   chat_mark_read: () => undefined,

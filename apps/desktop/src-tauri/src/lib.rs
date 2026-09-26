@@ -429,6 +429,8 @@ pub fn run() {
             cmd_chat::chat_leave,
             cmd_chat::chat_history,
             cmd_chat::chat_send,
+            cmd_chat::chat_send_media,
+            cmd_chat::chat_attachment_open,
             cmd_chat::chat_flush,
             cmd_chat::chat_mark_read,
             cmd_chat::chat_search,

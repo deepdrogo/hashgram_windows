@@ -29,6 +29,10 @@ type S<'a> = State<'a, Arc<AppState>>;
 /// Longest message the composer accepts.
 const MAX_TEXT: usize = 16 * 1024;
 
+/// Files in one message, and how large each may be.
+const MAX_ATTACHMENTS: usize = 10;
+const MAX_ATTACHMENT_BYTES: u64 = 64 * 1024 * 1024;
+
 /// People a group conversation may hold besides the creator.
 ///
 /// Every member's every device joins the MLS group, so the real cost is
@@ -247,21 +251,35 @@ pub async fn chat_leave(state: S<'_>, conversation: String) -> CmdResult<()> {
     Ok(())
 }
 
-/// One page of a conversation, oldest first.
+/// One page of a conversation, oldest first, with its attachments.
 #[tauri::command]
 pub async fn chat_history(
     state: S<'_>,
     conversation: String,
     before_ms: Option<u64>,
     limit: Option<usize>,
-) -> CmdResult<Vec<ChatRow>> {
+) -> CmdResult<ChatPage> {
     let key = state.db_key().await?;
-    Ok(state.db.chat_page(
+    let messages = state.db.chat_page(
         &key,
         conversation.trim(),
         before_ms.unwrap_or(0),
         limit.unwrap_or(100).clamp(1, 500),
-    )?)
+    )?;
+    let ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
+    Ok(ChatPage {
+        attachments: state.db.chat_attachments_of(&ids)?,
+        messages,
+    })
+}
+
+/// A page of messages with the attachments belonging to them.
+#[derive(Debug, Clone, Serialize)]
+pub struct ChatPage {
+    /// Messages, oldest first.
+    pub messages: Vec<ChatRow>,
+    /// Attachments, keyed by `message_id` and `index`.
+    pub attachments: Vec<crate::db::ChatAttachmentRow>,
 }
 
 /// Sends a message.
@@ -317,6 +335,168 @@ pub async fn chat_send(state: S<'_>, conversation: String, text: String) -> CmdR
             Ok(row)
         }
     }
+}
+
+/// Sends pictures, video or files into a conversation.
+///
+/// Each file is encrypted with its own key before it leaves, so a store
+/// node holds ciphertext it cannot open. The key travels inside the
+/// MLS-encrypted message and is kept here sealed under the vault key —
+/// the webview never sees it, only an index it can ask to open.
+#[tauri::command]
+pub async fn chat_send_media(
+    state: S<'_>,
+    conversation: String,
+    text: String,
+    files: Vec<crate::cmd_feed::MediaUpload>,
+) -> CmdResult<ChatRow> {
+    if files.is_empty() {
+        return Err(UiError::invalid("pick a file"));
+    }
+    if files.len() > MAX_ATTACHMENTS {
+        return Err(UiError::invalid(format!(
+            "{MAX_ATTACHMENTS} files at most in one message"
+        )));
+    }
+    let gid_hex = conversation.trim().to_ascii_lowercase();
+    let gid = hex::decode(&gid_hex).map_err(|_| UiError::invalid("conversation"))?;
+    let key = state.db_key().await?;
+
+    // Read and measure before anything is signed or uploaded.
+    let mut outgoing = Vec::with_capacity(files.len());
+    let mut rows = Vec::with_capacity(files.len());
+    for f in &files {
+        let path = std::path::Path::new(&f.path);
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "file".to_owned());
+        let meta = tokio::fs::metadata(path).await?;
+        if meta.len() > MAX_ATTACHMENT_BYTES {
+            return Err(UiError::invalid("a file over 64 MiB is too large to send"));
+        }
+        let mime = mime_guess::from_path(path)
+            .first_or_octet_stream()
+            .to_string();
+        let bytes = tokio::fs::read(path).await?;
+        let prepared = crate::media::prepare(bytes, mime.clone(), &f.client);
+        rows.push(crate::db::ChatAttachmentRow {
+            message_id: String::new(),
+            index: 0,
+            name: name.clone(),
+            mime: prepared.mime.clone(),
+            size: prepared.bytes.len() as u64,
+            kind: prepared.kind.clone(),
+            width: prepared.meta.width,
+            height: prepared.meta.height,
+            duration_ms: prepared.meta.duration_ms,
+        });
+        outgoing.push(hashgram_sdk::messaging::OutgoingAttachment {
+            bytes: prepared.bytes,
+            mime: prepared.mime,
+            name,
+            kind: prepared.kind,
+            width: prepared.meta.width,
+            height: prepared.meta.height,
+            duration_ms: prepared.meta.duration_ms,
+        });
+    }
+
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    let me = one.address().to_owned();
+    let (link, network) = (one.link.clone(), one.network.clone());
+    let device = one.account.device().map_err(UiError::from)?;
+    let (id, sent) = one
+        .messaging
+        .send_attachments(&link, &network, &device, &gid, text.trim(), &outgoing)
+        .await?;
+    one.save()?;
+
+    let message_id = hex::encode(&id);
+    let row = ChatRow {
+        id: message_id.clone(),
+        group_id: gid_hex,
+        sender: me,
+        at_ms: crate::util::now_ms(),
+        outgoing: true,
+        state: "sent".to_owned(),
+        text: text.trim().to_owned(),
+    };
+    state.db.chat_put(&key, &row)?;
+    // Store the references exactly as they were sent, so opening our own
+    // copy takes the same path a recipient's does and needs no second
+    // copy of the file on disk.
+    for (i, a) in sent.iter().enumerate() {
+        let Some(mut meta) = rows.get(i).cloned() else {
+            continue;
+        };
+        meta.message_id = message_id.clone();
+        meta.index = i as u32;
+        state
+            .db
+            .chat_attachment_put(&key, &message_id, i as u32, &meta, &reference_json(a))?;
+    }
+    Ok(row)
+}
+
+/// The CID, key and nonce that open an attachment, as sealed JSON.
+fn reference_json(a: &hashgram_sdk::messaging::Attachment) -> Vec<u8> {
+    serde_json::to_vec(&AttachmentRef {
+        cid: hex::encode(&a.cid),
+        key: hex::encode(&a.key),
+        nonce: hex::encode(&a.nonce),
+        mime: a.mime.clone(),
+    })
+    .unwrap_or_else(|_| b"{}".to_vec())
+}
+
+/// Fetches one attachment, decrypts it and returns a path the webview can
+/// show. The plaintext lands in the scratch folder, which is wiped on lock.
+#[tauri::command]
+pub async fn chat_attachment_open(state: S<'_>, message: String, index: u32) -> CmdResult<String> {
+    let key = state.db_key().await?;
+    let reference = state
+        .db
+        .chat_attachment_reference(&key, message.trim(), index)?
+        .ok_or_else(|| UiError::not_found("attachment"))?;
+    let r: AttachmentRef = serde_json::from_slice(&reference)
+        .map_err(|_| UiError::not_found("this attachment has not arrived yet"))?;
+    if r.cid.is_empty() {
+        return Err(UiError::not_found("this attachment has not arrived yet"));
+    }
+    let dir = crate::paths::tmp_dir().join("chat");
+    std::fs::create_dir_all(&dir)?;
+    let ext = mime_guess::get_mime_extensions_str(&r.mime)
+        .and_then(|e| e.first())
+        .copied()
+        .unwrap_or("bin");
+    let out = dir.join(format!("{}-{index}.{ext}", message.trim()));
+    if out.exists() {
+        return Ok(out.display().to_string());
+    }
+    let bytes = {
+        let mut g = state.one.lock().await;
+        let one = AppState::unlocked(&mut g)?;
+        let attachment = hashgram_sdk::messaging::Attachment {
+            cid: hex::decode(&r.cid).unwrap_or_default(),
+            key: hex::decode(&r.key).unwrap_or_default(),
+            nonce: hex::decode(&r.nonce).unwrap_or_default(),
+            ..Default::default()
+        };
+        hashgram_sdk::messaging::Messaging::open_attachment(&one.link, &attachment).await?
+    };
+    tokio::fs::write(&out, &bytes).await?;
+    Ok(out.display().to_string())
+}
+
+/// What opens one attachment. Sealed on disk, never serialised to the UI.
+#[derive(Debug, Serialize, serde::Deserialize)]
+struct AttachmentRef {
+    cid: String,
+    key: String,
+    nonce: String,
+    mime: String,
 }
 
 /// Retries everything still queued. Called after a sync round.

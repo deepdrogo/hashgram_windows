@@ -464,6 +464,25 @@ export interface ChatMessage {
   state: "sent" | "queued" | "failed";
   text: string;
 }
+/**
+ * A file in a message. What opens it — the CID, key and nonce — stays on
+ * the Rust side; the webview asks for an index and gets a decrypted path.
+ */
+export interface ChatAttachment {
+  message_id: string;
+  index: number;
+  name: string;
+  mime: string;
+  size: number;
+  kind: "image" | "video" | "audio" | "file";
+  width: number;
+  height: number;
+  duration_ms: number;
+}
+export interface ChatPage {
+  messages: ChatMessage[];
+  attachments: ChatAttachment[];
+}
 
 // Your node
 export type NodeState =
@@ -1062,8 +1081,10 @@ export const ipc = {
   chatCreateGroup: (name: string, members: string[]) => call<string>("chat_create_group", { name, members }),
   chatAddMember: (conversation: string, address: string) => call<void>("chat_add_member", { conversation, address }),
   chatLeave: (conversation: string) => call<void>("chat_leave", { conversation }),
-  chatHistory: (conversation: string, beforeMs?: number, limit?: number) => call<ChatMessage[]>("chat_history", { conversation, beforeMs, limit }),
+  chatHistory: (conversation: string, beforeMs?: number, limit?: number) => call<ChatPage>("chat_history", { conversation, beforeMs, limit }),
   chatSend: (conversation: string, text: string) => call<ChatMessage>("chat_send", { conversation, text }),
+  chatSendMedia: (conversation: string, text: string, files: MediaUpload[]) => call<ChatMessage>("chat_send_media", { conversation, text, files }),
+  chatAttachmentOpen: (message: string, index: number) => call<string>("chat_attachment_open", { message, index }),
   chatFlush: () => call<number>("chat_flush"),
   chatMarkRead: (conversation: string, atMs: number) => call<void>("chat_mark_read", { conversation, atMs }),
   chatSearch: (query: string, limit?: number) => call<ChatMessage[]>("chat_search", { query, limit }),

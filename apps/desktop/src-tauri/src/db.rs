@@ -65,6 +65,25 @@ CREATE TABLE IF NOT EXISTS chat_read (
 -- in Chats for people who never wrote and for groups that are not chats
 -- at all. A conversation is registered when the user opens one or starts
 -- a group, and when a message actually arrives — nothing else.
+-- Files attached to a chat message.
+--
+-- `sealed_ref` holds the CID, key and nonce, encrypted under the vault
+-- key: those three together open the file, so they are treated exactly
+-- like the message text and never leave the Rust side. The clear columns
+-- are what a bubble needs to lay itself out before the bytes arrive.
+CREATE TABLE IF NOT EXISTS chat_attachment (
+    message_id  TEXT NOT NULL,
+    idx         INTEGER NOT NULL,
+    name        TEXT NOT NULL,
+    mime        TEXT NOT NULL,
+    size        INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    width       INTEGER NOT NULL DEFAULT 0,
+    height      INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    sealed_ref  BLOB NOT NULL,
+    PRIMARY KEY (message_id, idx)
+);
 CREATE TABLE IF NOT EXISTS chat_conversation (
     group_id   TEXT PRIMARY KEY,
     kind       TEXT NOT NULL DEFAULT 'direct',
@@ -357,6 +376,96 @@ impl Db {
         Ok(messages)
     }
 
+    /// Stores one attachment of a message, sealing what opens the file.
+    pub fn chat_attachment_put(
+        &self,
+        db_key: &DbKey,
+        message_id: &str,
+        index: u32,
+        a: &ChatAttachmentRow,
+        reference_json: &[u8],
+    ) -> Result<(), String> {
+        let aad = format!("{message_id}/{index}");
+        let sealed = crate::crypto::seal(db_key, aad.as_bytes(), reference_json)?;
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO chat_attachment(message_id, idx, name, mime, size, kind, width, height, duration_ms, sealed_ref)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(message_id, idx) DO NOTHING",
+                params![
+                    message_id,
+                    index,
+                    a.name,
+                    a.mime,
+                    a.size as i64,
+                    a.kind,
+                    a.width,
+                    a.height,
+                    a.duration_ms,
+                    sealed
+                ],
+            )
+            .map(|_| ())
+        })
+    }
+
+    /// The attachments of the given messages, without what opens them.
+    pub fn chat_attachments_of(
+        &self,
+        message_ids: &[String],
+    ) -> Result<Vec<ChatAttachmentRow>, String> {
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let list = message_ids
+            .iter()
+            .map(|id| format!("'{}'", id.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(",");
+        self.with(|c| {
+            let mut st = c.prepare(&format!(
+                "SELECT message_id, idx, name, mime, size, kind, width, height, duration_ms
+                 FROM chat_attachment WHERE message_id IN ({list}) ORDER BY message_id, idx"
+            ))?;
+            let rows = st.query_map([], |r| {
+                Ok(ChatAttachmentRow {
+                    message_id: r.get(0)?,
+                    index: r.get(1)?,
+                    name: r.get(2)?,
+                    mime: r.get(3)?,
+                    size: r.get::<_, i64>(4)? as u64,
+                    kind: r.get(5)?,
+                    width: r.get(6)?,
+                    height: r.get(7)?,
+                    duration_ms: r.get(8)?,
+                })
+            })?;
+            rows.collect()
+        })
+    }
+
+    /// What opens one attachment: the CID, key and nonce, unsealed.
+    pub fn chat_attachment_reference(
+        &self,
+        db_key: &DbKey,
+        message_id: &str,
+        index: u32,
+    ) -> Result<Option<Vec<u8>>, String> {
+        let sealed: Option<Vec<u8>> = self.with(|c| {
+            c.query_row(
+                "SELECT sealed_ref FROM chat_attachment WHERE message_id = ?1 AND idx = ?2",
+                params![message_id, index],
+                |r| r.get(0),
+            )
+            .optional()
+        })?;
+        let aad = format!("{message_id}/{index}");
+        match sealed {
+            Some(s) => Ok(Some(crate::crypto::open(db_key, aad.as_bytes(), &s)?)),
+            None => Ok(None),
+        }
+    }
+
     /// Registers a group as a conversation Chats should list.
     ///
     /// Idempotent, and a later call may set a title the first one did not
@@ -463,6 +572,33 @@ pub struct ChatRow {
     pub state: String,
     /// The message.
     pub text: String,
+}
+
+/// A file attached to a chat message, as a bubble needs it.
+///
+/// Deliberately without the CID, key or nonce: those three open the file
+/// and stay on the Rust side. The webview asks for an index and gets a
+/// path to a decrypted copy.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChatAttachmentRow {
+    /// The message it belongs to.
+    pub message_id: String,
+    /// Its position in that message.
+    pub index: u32,
+    /// File name.
+    pub name: String,
+    /// MIME type.
+    pub mime: String,
+    /// Plaintext size.
+    pub size: u64,
+    /// `image`, `video`, `audio` or `file`.
+    pub kind: String,
+    /// Pixel width, 0 when unknown.
+    pub width: u32,
+    /// Pixel height, 0 when unknown.
+    pub height: u32,
+    /// Duration for audio and video.
+    pub duration_ms: u32,
 }
 
 /// One conversation's index entry.

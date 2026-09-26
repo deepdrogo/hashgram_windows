@@ -5,16 +5,19 @@
 // beside it is the truth: queued means this device still has it, sent means
 // a store node took it. Nothing here claims the other person read it.
 import { For, Show, createEffect, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { Portal } from "solid-js/web";
 import { useNavigate, useParams } from "@solidjs/router";
-import { Send, Search, RefreshCw, Clock, UserPlus, Users, LogOut, MessageSquare } from "lucide-solid";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { Send, Search, RefreshCw, Clock, UserPlus, Users, LogOut, MessageSquare, Paperclip, Play, X, File as FileIcon } from "lucide-solid";
 import { Button, Dialog, Empty, Field, Input, Notice, Skeleton } from "~/components/ui";
 import { OfflineBanner } from "~/components/States";
 import { PersonAvatar, Who } from "~/components/identity";
 import { EmojiPicker } from "~/components/social/EmojiPicker";
-import { ipc, on, errText, type ConversationView, type ChatMessage, type ContactRecord } from "~/lib/ipc";
+import { ipc, on, errText, type ConversationView, type ChatMessage, type ChatAttachment, type ChatPage, type ContactRecord } from "~/lib/ipc";
 import { store } from "~/lib/store";
-import { shortWhen } from "~/lib/format";
-import { confirm } from "~/lib/dialogs";
+import { shortWhen, formatBytes } from "~/lib/format";
+import { confirm, pickFile } from "~/lib/dialogs";
+import { measureVideo } from "~/lib/mediameta";
 import { rememberDraft, recallDraft } from "~/lib/uistate";
 
 export function ChatsRoute() {
@@ -209,10 +212,12 @@ export function ChatThread(props: { id: string; conversation?: ConversationView;
     onCleanup(() => void p.then((un) => un()));
   });
 
-  const [messages, { mutate }] = createResource(
+  const [page, { mutate }] = createResource(
     () => ({ id: props.id, t: tick() }),
-    (k) => ipc.chatHistory(k.id, 0, 200).catch(() => [] as ChatMessage[]),
+    (k) => ipc.chatHistory(k.id, 0, 200).catch(() => ({ messages: [], attachments: [] }) as ChatPage),
   );
+  const messages = () => page()?.messages;
+  const filesOf = (id: string) => (page()?.attachments ?? []).filter((a) => a.message_id === id);
 
   // Coming back to a conversation should land at the newest message.
   createEffect(() => {
@@ -236,7 +241,7 @@ export function ChatThread(props: { id: string; conversation?: ConversationView;
     setSending(true);
     try {
       const row = await ipc.chatSend(props.id, body);
-      mutate((prev) => [...(prev ?? []), row]);
+      mutate((prev) => ({ messages: [...(prev?.messages ?? []), row], attachments: prev?.attachments ?? [] }));
       setText("");
       rememberDraft(`chat:${props.id}`, "");
       props.onSent();
@@ -295,7 +300,7 @@ export function ChatThread(props: { id: string; conversation?: ConversationView;
       </Show>
 
       <div ref={scroller} class="min-h-0 flex-1 overflow-auto px-4 py-3">
-        <Show when={messages.loading && !messages()}>
+        <Show when={page.loading && !page()}>
           <Skeleton lines={5} />
         </Show>
         <Show when={messages() && !messages()!.length}>
@@ -311,7 +316,12 @@ export function ChatThread(props: { id: string; conversation?: ConversationView;
                 <Show when={!m.outgoing}>
                   <Who address={m.sender} size="sm" class="mb-0.5 text-muted" />
                 </Show>
-                <p class="whitespace-pre-wrap selectable">{m.text}</p>
+                <Show when={filesOf(m.id).length}>
+                  <ChatAttachments files={filesOf(m.id)} />
+                </Show>
+                <Show when={m.text}>
+                  <p class="whitespace-pre-wrap selectable">{m.text}</p>
+                </Show>
                 <p class="mt-1 flex items-center gap-1 text-[11px] text-muted">
                   <span>{shortWhen(m.at_ms)}</span>
                   <Show when={m.outgoing && m.state === "queued"}>
@@ -338,6 +348,36 @@ export function ChatThread(props: { id: string; conversation?: ConversationView;
         </div>
       </Show>
       <div class="flex items-end gap-2 border-t border-border px-4 py-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          title="Send a picture, a video or a file"
+          aria-label="Attach"
+          loading={sending()}
+          onClick={async () => {
+            const picked = await pickFile({
+              multiple: true,
+              filters: [{ name: "Pictures and video", extensions: ["png", "jpg", "jpeg", "gif", "webp", "mp4", "webm", "mov"] }],
+            });
+            if (!picked.length) return;
+            setSending(true);
+            try {
+              const files = [];
+              for (const path of picked.slice(0, 10)) files.push({ path, client: await measureVideo(path) });
+              await ipc.chatSendMedia(props.id, text().trim(), files);
+              setText("");
+              rememberDraft(`chat:${props.id}`, "");
+              setTick((n) => n + 1);
+              props.onSent();
+            } catch (e) {
+              store.toast(errText(e), "error");
+            } finally {
+              setSending(false);
+            }
+          }}
+        >
+          <Paperclip size={16} />
+        </Button>
         <Input
           ref={input}
           class="flex-1"
@@ -376,6 +416,115 @@ export function ChatThread(props: { id: string; conversation?: ConversationView;
         {(c) => <MembersDialog open={members()} onClose={() => setMembers(false)} conversation={c()} onChanged={props.onSent} />}
       </Show>
     </>
+  );
+}
+
+/**
+ * The files in one message.
+ *
+ * Each is fetched and decrypted by the Rust side on demand — the webview
+ * only ever holds a path to a decrypted copy in the scratch folder, which
+ * is wiped when the vault locks.
+ */
+function ChatAttachments(props: { files: ChatAttachment[] }) {
+  const [open, setOpen] = createSignal<ChatAttachment | null>(null);
+  return (
+    <>
+      <div class={`mb-1 grid gap-1 ${props.files.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+        <For each={props.files}>{(f) => <AttachmentTile file={f} onOpen={() => setOpen(f)} />}</For>
+      </div>
+      <Show when={open()}>
+        {(f) => <AttachmentViewer file={f()} onClose={() => setOpen(null)} />}
+      </Show>
+    </>
+  );
+}
+
+/** Decrypts one attachment and hands back a path, once. */
+function useAttachment(file: () => ChatAttachment) {
+  return createResource(
+    () => ({ id: file().message_id, i: file().index }),
+    async (k) => {
+      try {
+        return convertFileSrc(await ipc.chatAttachmentOpen(k.id, k.i));
+      } catch {
+        return null;
+      }
+    },
+  );
+}
+
+function AttachmentTile(props: { file: ChatAttachment; onOpen: () => void }) {
+  const [src] = useAttachment(() => props.file);
+  const visual = () => props.file.kind === "image" || props.file.kind === "video";
+  return (
+    <Show
+      when={visual()}
+      fallback={
+        <button type="button" class="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-left text-xs" onClick={props.onOpen}>
+          <FileIcon size={14} class="shrink-0 text-muted" />
+          <span class="min-w-0 flex-1 truncate">{props.file.name}</span>
+          <span class="shrink-0 text-muted">{formatBytes(props.file.size)}</span>
+        </button>
+      }
+    >
+      <button type="button" class="relative overflow-hidden rounded-md border border-border bg-surface-2" onClick={props.onOpen} title={props.file.name}>
+        <Show when={src()} fallback={<span class="block h-28 w-full" />}>
+          <img src={src() ?? ""} alt="" loading="lazy" class="max-h-56 w-full object-cover" />
+        </Show>
+        <Show when={props.file.kind === "video"}>
+          <span class="absolute inset-0 flex items-center justify-center">
+            <span class="flex h-9 w-9 items-center justify-center rounded-full bg-bg/70">
+              <Play size={16} />
+            </span>
+          </span>
+        </Show>
+      </button>
+    </Show>
+  );
+}
+
+function AttachmentViewer(props: { file: ChatAttachment; onClose: () => void }) {
+  const [src] = useAttachment(() => props.file);
+  onMount(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && props.onClose();
+    window.addEventListener("keydown", esc);
+    onCleanup(() => window.removeEventListener("keydown", esc));
+  });
+  return (
+    <Portal>
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-bg/95" role="dialog" aria-label={props.file.name} onClick={props.onClose}>
+        <button type="button" class="absolute right-3 top-3 btn-ghost btn-icon-sm" aria-label="Close" onClick={props.onClose}>
+          <X size={16} />
+        </button>
+        <div class="max-h-[88vh] max-w-[88vw]" onClick={(e) => e.stopPropagation()}>
+          <Show when={src()} fallback={<p class="text-sm text-muted">Fetching and decrypting…</p>}>
+            <Show
+              when={props.file.kind === "video"}
+              fallback={
+                <Show when={props.file.kind === "image"} fallback={<SaveFile file={props.file} src={src() ?? ""} />}>
+                  <img src={src() ?? ""} alt="" class="max-h-[88vh] max-w-[88vw] object-contain" />
+                </Show>
+              }
+            >
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video src={src() ?? ""} class="max-h-[88vh] max-w-[88vw]" controls autoplay />
+            </Show>
+          </Show>
+        </div>
+      </div>
+    </Portal>
+  );
+}
+
+function SaveFile(props: { file: ChatAttachment; src: string }) {
+  return (
+    <div class="card p-6 text-center">
+      <FileIcon size={28} class="mx-auto text-muted" />
+      <p class="mt-2 text-[13px] font-medium">{props.file.name}</p>
+      <p class="text-xs text-muted">{formatBytes(props.file.size)}</p>
+      <p class="mt-3 text-xs text-muted">Decrypted on this PC. Open the folder from Drive to keep a copy.</p>
+    </div>
   );
 }
 

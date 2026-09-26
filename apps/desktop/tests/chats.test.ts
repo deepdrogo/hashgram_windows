@@ -135,6 +135,40 @@ describe("emoji", () => {
   });
 });
 
+describe("pictures and video in a conversation", () => {
+  const rs = read("src-tauri", "src", "cmd_chat.rs");
+  const sdk = readFileSync(join(DESKTOP, "..", "..", "sdk", "rust", "hashgram-sdk", "src", "messaging.rs"), "utf8");
+
+  it("an attachment is encrypted with its own key before it leaves", () => {
+    // `true` is the `private` argument of blob::upload.
+    expect(sdk).toMatch(/crate::blob::upload\([^)]*true,\s*ATTACHMENT_REPLICAS/s);
+    const flat = sdk.split("\n").map((l) => l.replace(/^\s*\/\/\/?\s?/, "")).join(" ");
+    expect(flat).toMatch(/a store node holds ciphertext it cannot open/);
+  });
+
+  it("the key is sealed on this device and never reaches the webview", () => {
+    expect(rs).toMatch(/struct AttachmentRef/);
+    expect(read("src-tauri", "src", "db.rs")).toMatch(/sealed_ref/);
+    // The type the UI sees carries no cid, key or nonce.
+    const ipc = read("src", "lib", "ipc.ts");
+    const i = ipc.indexOf("export interface ChatAttachment");
+    const body = ipc.slice(i, ipc.indexOf("\n}", i));
+    expect(body).not.toMatch(/\b(cid|key|nonce)\b/);
+  });
+
+  it("opening one decrypts on the Rust side into the scratch folder", () => {
+    expect(rs).toMatch(/pub async fn chat_attachment_open/);
+    expect(rs).toContain("crate::paths::tmp_dir()");
+  });
+
+  it("the composer can attach and the bubble shows what arrived", () => {
+    const ui = read("src", "routes", "chats", "Chats.tsx");
+    expect(ui).toContain("ipc.chatSendMedia(");
+    expect(ui).toMatch(/function ChatAttachments/);
+    expect(ui).toContain("ipc.chatAttachmentOpen(");
+  });
+});
+
 describe("delivery state says only what is known", () => {
   it("queued means this device still has it; nothing claims it was read", () => {
     const ui = read("src", "routes", "chats", "Chats.tsx");
