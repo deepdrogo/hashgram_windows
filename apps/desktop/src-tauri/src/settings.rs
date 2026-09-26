@@ -87,7 +87,9 @@ pub struct AppearanceSettings {
     /// `comfortable` | `compact`.
     #[serde(default = "default_density")]
     pub density: String,
-    /// UI language: `en` | `ka`.
+    /// UI language. `en` is the only complete one, so it is the only one
+    /// accepted; see `src/lib/i18n.ts` for why a partial table is worse
+    /// than none.
     #[serde(default = "default_language")]
     pub language: String,
 }
@@ -307,13 +309,21 @@ impl Settings {
     /// A 0.1.x file is read too: unknown sections are ignored and new ones
     /// take their defaults.
     pub fn load(path: &Path) -> Self {
-        match std::fs::read(path) {
+        let mut s: Self = match std::fs::read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "settings unreadable; using defaults");
                 Self::default()
             }),
             Err(_) => Self::default(),
+        };
+        // A value this build no longer offers is corrected on the way in,
+        // not rejected. A stored choice that fails validation turns the next
+        // unrelated save — a theme toggle, say — into an error the user
+        // cannot explain or fix.
+        if s.appearance.language != "en" {
+            s.appearance.language = default_language();
         }
+        s
     }
 
     /// Writes settings atomically.
@@ -377,8 +387,8 @@ impl Settings {
         if !["dark", "light", "system"].contains(&self.appearance.theme.as_str()) {
             return Err("theme must be dark, light or system".into());
         }
-        if !["en", "ka"].contains(&self.appearance.language.as_str()) {
-            return Err("language must be en or ka".into());
+        if !self.appearance.language.is_empty() && self.appearance.language != "en" {
+            return Err("English is the only complete translation".into());
         }
         let country = self.social.local_country.trim();
         if !country.is_empty()
@@ -420,6 +430,22 @@ mod tests {
         // And switching the theme on it still validates.
         s.appearance.theme = "light".into();
         assert!(s.validate().is_ok());
+    }
+
+    /// A language this build dropped must not poison the file: the next
+    /// save of anything at all would fail validation otherwise.
+    #[test]
+    fn a_retired_language_is_corrected_on_load_not_rejected() {
+        let d = std::env::temp_dir().join(format!("hg-lang-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&d);
+        let p = d.join("settings.json");
+        let mut s = Settings::default();
+        s.appearance.language = "ka".into();
+        s.save(&p).unwrap();
+        let back = Settings::load(&p);
+        assert_eq!(back.appearance.language, "en");
+        assert!(back.validate().is_ok());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

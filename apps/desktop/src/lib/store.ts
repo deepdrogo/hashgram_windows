@@ -4,6 +4,8 @@ import { ipc, on, errText, type AppStatus, type Settings, type SyncStatus, type 
 import { setLocale } from "./i18n";
 import { go } from "./nav";
 import { clearOnLock } from "./uistate";
+import { forgetAll } from "./cache";
+import { resetPrefetch } from "./prefetch";
 
 export interface Toast {
   id: number;
@@ -55,7 +57,7 @@ function createStore() {
     html.dataset.density = s?.appearance.density ?? "comfortable";
     html.dataset.reducedMotion = s?.appearance.reduced_motion ? "true" : "false";
     setResolvedTheme(resolved);
-    setLocale(s?.appearance.language === "ka" ? "ka" : "en");
+    setLocale("en");
   };
 
   /** The header switch: applies immediately, then persists. */
@@ -217,6 +219,10 @@ function createStore() {
       registrationReadyNotified = false;
       setPhase("Offline");
       clearOnLock();
+      // Everything painted from memory goes with the session, and the
+      // decrypted files behind it are wiped with the scratch folder.
+      forgetAll();
+      resetPrefetch();
       void refreshStatus();
     });
     await on("session:unlocked", () => {

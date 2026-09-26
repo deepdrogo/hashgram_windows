@@ -58,6 +58,11 @@ pub struct Profile {
     /// Country the author chose to show. Self-declared, never inferred.
     #[serde(default)]
     pub country: String,
+    /// Hash of the on-chain payment the author claims backs a verified
+    /// badge. A claim only: it means nothing until the transaction has been
+    /// read off the chain and checked.
+    #[serde(default)]
+    pub verify_tx: String,
     /// Time of the profile event this was read from (s), 0 when unknown.
     #[serde(default)]
     pub updated_at: u64,
@@ -293,6 +298,11 @@ impl<'a> People<'a> {
                 prof.country = p
                     .attributes
                     .get(crate::feed::ATTR_COUNTRY)
+                    .cloned()
+                    .unwrap_or_default();
+                prof.verify_tx = p
+                    .attributes
+                    .get(crate::feed::ATTR_VERIFY_TX)
                     .cloned()
                     .unwrap_or_default();
                 prof.updated_at = ev.timestamp;

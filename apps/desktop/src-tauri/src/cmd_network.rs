@@ -198,6 +198,91 @@ pub async fn net_forget_peers(state: S<'_>, app: AppHandle) -> CmdResult<()> {
     Ok(())
 }
 
+/// The network's recent transactions, and a search across them.
+///
+/// `address` narrows to one account's activity — as a signer, a sender or
+/// a recipient — and `q` matches a hash prefix or a memo. Both go to the
+/// configured indexers in turn; an indexer is a read model over the same
+/// chain anyone can verify, so a second one is a fallback, not a second
+/// opinion.
+#[tauri::command]
+pub async fn network_transactions(
+    state: S<'_>,
+    address: Option<String>,
+    q: Option<String>,
+    limit: Option<u32>,
+) -> CmdResult<Option<serde_json::Value>> {
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    let mut path = format!("/v1/txs?limit={limit}");
+    if let Some(a) = address.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        if !a.starts_with("hash1") {
+            return Err(UiError::invalid("address"));
+        }
+        path.push_str(&format!("&address={a}"));
+    }
+    if let Some(term) = q.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        let safe: String = term
+            .chars()
+            .filter(|c| c.is_alphanumeric() || " -_.@".contains(*c))
+            .take(128)
+            .collect();
+        path.push_str(&format!("&q={safe}"));
+    }
+    ask_indexers(&state, &path).await
+}
+
+/// One transaction by hash.
+///
+/// Tries the indexers first and falls back to the chain itself through
+/// the P2P relay, so a hash can be looked up with no indexer configured.
+#[tauri::command]
+pub async fn network_transaction(
+    state: S<'_>,
+    hash: String,
+) -> CmdResult<Option<serde_json::Value>> {
+    let hash = hash.trim().to_ascii_uppercase();
+    if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(UiError::invalid("a transaction hash is 64 hex characters"));
+    }
+    if let Some(v) = ask_indexers(&state, &format!("/v1/txs/{hash}")).await? {
+        return Ok(Some(v));
+    }
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    Ok(one.chain.tx(&hash).await.ok().flatten().map(|t| {
+        serde_json::json!({
+            "hash": hash,
+            "height": t.height,
+            "code": t.code,
+            "raw_log": t.raw_log,
+            "source": "chain",
+        })
+    }))
+}
+
+/// Tries each configured indexer until one answers.
+async fn ask_indexers(state: &S<'_>, path: &str) -> CmdResult<Option<serde_json::Value>> {
+    let bases: Vec<String> = state
+        .settings
+        .read()
+        .await
+        .indexers()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    if bases.is_empty() {
+        return Ok(None);
+    }
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    for base in bases {
+        if let Ok(Some(v)) = one.network_api().indexer(Some(&base), path).await {
+            return Ok(Some(v));
+        }
+    }
+    Ok(None)
+}
+
 /// A diagnostics report: no IP addresses, no addresses of contacts, no
 /// subjects. Peer ids and roles only.
 #[tauri::command]

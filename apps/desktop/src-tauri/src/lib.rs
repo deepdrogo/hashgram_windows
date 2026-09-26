@@ -37,6 +37,7 @@ pub mod cmd_profile;
 pub mod cmd_settings;
 pub mod cmd_spaces;
 pub mod cmd_sync;
+pub mod cmd_verify;
 pub mod cmd_wallet;
 pub mod crypto;
 pub mod db;
@@ -445,6 +446,13 @@ pub fn run() {
             // spaces
             cmd_spaces::spaces_list,
             cmd_spaces::spaces_create,
+            cmd_verify::verify_terms,
+            cmd_verify::verify_status,
+            cmd_verify::verify_purchase,
+            cmd_verify::verify_record,
+            cmd_spaces::spaces_publish,
+            cmd_spaces::spaces_directory,
+            cmd_spaces::spaces_categories,
             cmd_spaces::spaces_state,
             cmd_spaces::spaces_members,
             cmd_spaces::spaces_content,
@@ -468,6 +476,7 @@ pub fn run() {
             cmd_earn::earn_status,
             cmd_earn::earn_earnings,
             cmd_earn::earn_providers,
+            cmd_earn::earn_operator,
             cmd_earn::earn_register,
             cmd_earn::earn_update,
             cmd_earn::earn_unbond,
@@ -514,6 +523,8 @@ pub fn run() {
             cmd_network::network_supply,
             cmd_network::network_top,
             cmd_network::network_stats,
+            cmd_network::network_transactions,
+            cmd_network::network_transaction,
             cmd_network::net_reconnect,
             cmd_network::net_forget_peers,
             cmd_network::diagnostics_export,

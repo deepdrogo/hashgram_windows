@@ -184,8 +184,8 @@ export function SettingsRoute() {
                       <Field label="Density">
                         <Select value={s().appearance.density} onChange={(v) => patch((x) => (x.appearance.density = v as "comfortable" | "compact"))} options={[{ value: "comfortable", label: "Comfortable" }, { value: "compact", label: "Compact" }]} />
                       </Field>
-                      <Field label="Language">
-                        <Select value={s().appearance.language} onChange={(v) => patch((x) => (x.appearance.language = v as "en" | "ka"))} options={LOCALES.map((l) => ({ value: l.id, label: l.label }))} />
+                      <Field label="Language" hint="Hashgram One ships in English. A language is added when its translation is complete, not before — a half-translated screen hides exactly the sentences that explain what a number means.">
+                        <Select value="en" onChange={() => {}} disabled options={LOCALES.map((l) => ({ value: l.id, label: l.label }))} />
                       </Field>
                       <Switch label="Reduce motion" checked={s().appearance.reduced_motion} onChange={(v) => patch((x) => (x.appearance.reduced_motion = v))} />
                       <Switch label="Start with Windows" hint="Starts minimised to the tray at logon." checked={s().start_with_windows} onChange={(v) => patch((x) => (x.start_with_windows = v))} />

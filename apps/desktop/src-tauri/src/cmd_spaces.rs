@@ -48,6 +48,207 @@ pub async fn spaces_create(state: S<'_>, name: String, description: String) -> C
     Ok(id)
 }
 
+// ---------------------------------------------------------------------------
+// The public directory
+// ---------------------------------------------------------------------------
+//
+// A Space itself is private: an MLS group whose messages nobody outside can
+// read. Making one "public" therefore cannot mean opening the group — it
+// means publishing a *listing* so people can find it and ask to be let in.
+//
+// The listing is an ordinary public channel event (`CHANNEL_CREATE`), which
+// already gossips network-wide and which every node already counts. So the
+// directory needs no new protocol, no server, and no permission from us: any
+// client reading the same events builds the same directory. The listing's
+// first lines are a plain, readable convention, documented in docs/SPACES.md:
+//
+//     Hashgram Space
+//     Category: Technology
+//     Space: <32 hex>
+//
+//     <free description>
+//
+// Nothing is hidden in there — a reader of the raw event sees exactly what
+// the app shows. Popularity is the public activity on the listing, counted
+// by the node that answered, and labelled that way.
+
+/// Categories a listing may declare. A fixed list, so the directory can be
+/// browsed; free-text categories would just be hashtags with extra steps.
+pub const SPACE_CATEGORIES: [&str; 10] = [
+    "Technology",
+    "Business",
+    "Education",
+    "Science",
+    "Art & Design",
+    "Gaming",
+    "Music",
+    "Sport",
+    "Local",
+    "Other",
+];
+
+const LISTING_MARKER: &str = "Hashgram Space";
+
+/// A listing as shown in the directory.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SpaceListing {
+    /// Hex id of the channel event that is the listing.
+    pub listing: String,
+    /// Hex id of the Space it points at, when it declares one.
+    pub space: String,
+    /// Space name.
+    pub name: String,
+    /// Declared category.
+    pub category: String,
+    /// Free description, marker lines removed.
+    pub description: String,
+    /// Who published it — the owner to ask for an invitation.
+    pub owner: String,
+    /// Public posts on the listing, as counted by the node that answered.
+    pub posts: u32,
+    /// Distinct posters, same caveat.
+    pub authors: u32,
+    /// Newest public post (s), same caveat.
+    pub last_post: u64,
+    /// When the listing was published (s).
+    pub created_at: u64,
+}
+
+/// Parses a listing out of a channel description. `None` when the channel is
+/// an ordinary Topic rather than a Space listing.
+fn parse_listing(w: &hashgram_sdk::feed::WallInfo) -> Option<SpaceListing> {
+    let mut lines = w.description.lines();
+    if lines.next()?.trim() != LISTING_MARKER {
+        return None;
+    }
+    let mut category = String::new();
+    let mut space = String::new();
+    let mut rest: Vec<&str> = Vec::new();
+    for line in lines {
+        let t = line.trim();
+        if let Some(v) = t.strip_prefix("Category:") {
+            category = v.trim().to_owned();
+        } else if let Some(v) = t.strip_prefix("Space:") {
+            space = v.trim().to_owned();
+        } else {
+            rest.push(line);
+        }
+    }
+    if !SPACE_CATEGORIES.contains(&category.as_str()) {
+        category = "Other".to_owned();
+    }
+    Some(SpaceListing {
+        listing: w.id.clone(),
+        space: space.chars().filter(char::is_ascii_hexdigit).collect(),
+        name: w.name.clone(),
+        category,
+        description: rest.join("\n").trim().to_owned(),
+        owner: w.creator.clone(),
+        posts: w.posts,
+        authors: w.authors,
+        last_post: w.last_post,
+        created_at: w.created_at,
+    })
+}
+
+/// Publishes a Space in the public directory.
+///
+/// Only its owner should call this, and only the owner's listing is worth
+/// anything: the address that signed the channel event is the address people
+/// will message for an invitation.
+#[tauri::command]
+pub async fn spaces_publish(
+    state: S<'_>,
+    space: String,
+    category: String,
+    description: String,
+) -> CmdResult<SpaceListing> {
+    let space = check_space_id(&space)?;
+    let category = category.trim().to_owned();
+    if !SPACE_CATEGORIES.contains(&category.as_str()) {
+        return Err(UiError::invalid("pick one of the listed categories"));
+    }
+    if description.len() > 1_500 {
+        return Err(UiError::invalid("a description is at most 1500 characters"));
+    }
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    let me = one.account.address().to_owned();
+    let summary = one
+        .spaces()
+        .list()?
+        .into_iter()
+        .find(|s| s.id == space)
+        .ok_or_else(|| UiError::invalid("that Space is not on this device"))?;
+    let body = format!(
+        "{LISTING_MARKER}\nCategory: {category}\nSpace: {space}\n\n{}",
+        if description.trim().is_empty() {
+            summary.description.trim()
+        } else {
+            description.trim()
+        }
+    );
+    // Closed posting: the listing is the owner's notice board, not a wall
+    // anyone can write on. People who want in send a message.
+    let wall = one.feed().create_wall(&summary.name, &body, false).await?;
+    one.save()?;
+    Ok(parse_listing(&wall).unwrap_or(SpaceListing {
+        listing: wall.id,
+        space,
+        name: summary.name,
+        category,
+        description,
+        owner: me,
+        posts: 0,
+        authors: 0,
+        last_post: 0,
+        created_at: wall.created_at,
+    }))
+}
+
+/// A space id is hex; the app never guesses at one, so a light check is
+/// enough to keep a typo out of a signed event.
+fn check_space_id(s: &str) -> CmdResult<String> {
+    let t = s.trim().to_ascii_lowercase();
+    if (16..=64).contains(&t.len()) && t.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(t)
+    } else {
+        Err(UiError::invalid("space"))
+    }
+}
+
+/// The public directory, by category and popularity.
+///
+/// `sort` is `popular` (public posts, then posters) or `new`. Popularity here
+/// is a count from one node, not a global truth, and the UI says so.
+#[tauri::command]
+pub async fn spaces_directory(
+    state: S<'_>,
+    category: Option<String>,
+    sort: Option<String>,
+) -> CmdResult<Vec<SpaceListing>> {
+    let mut g = state.one.lock().await;
+    let one = AppState::unlocked(&mut g)?;
+    // A wide window: a listing is published once and then just sits there,
+    // so a day-long window would show almost nothing.
+    let digest = one.feed().digest(90 * 24 * 3_600, 200).await?;
+    let mut out: Vec<SpaceListing> = digest.walls.iter().filter_map(parse_listing).collect();
+    if let Some(c) = category.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        out.retain(|l| l.category.eq_ignore_ascii_case(c));
+    }
+    match sort.as_deref().unwrap_or("popular") {
+        "new" => out.sort_by_key(|l| std::cmp::Reverse(l.created_at)),
+        _ => out.sort_by_key(|l| std::cmp::Reverse((l.posts, l.authors, l.last_post))),
+    }
+    Ok(out)
+}
+
+/// The category list, so the UI and the parser cannot drift apart.
+#[tauri::command]
+pub fn spaces_categories() -> Vec<String> {
+    SPACE_CATEGORIES.iter().map(|s| (*s).to_owned()).collect()
+}
+
 /// Replayed state.
 #[tauri::command]
 pub async fn spaces_state(state: S<'_>, space: String) -> CmdResult<SpaceStateView> {

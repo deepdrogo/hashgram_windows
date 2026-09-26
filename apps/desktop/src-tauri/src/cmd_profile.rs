@@ -115,7 +115,14 @@ pub async fn profile_of(state: S<'_>, address: String) -> CmdResult<ProfileView>
     let me = one.address().to_owned();
     // Their newest events first, so the profile and its timeline agree.
     let _ = one.feed().refresh_author(&address, 200).await;
-    let profile = one.people().profile_cached(&address, 300).await?;
+    // Our own profile is never served from the cache. Publishing a new
+    // avatar and then reading a five-minute-old copy is how a changed
+    // picture looked like it had not saved.
+    let profile = if address == me {
+        one.people().profile(&address).await?
+    } else {
+        one.people().profile_cached(&address, 300).await?
+    };
     let following = one.feed().follows().contains(&address);
     let stats = stats_of(&state, one, &address).await;
     Ok(ProfileView::new(profile, me, following, stats))
@@ -182,18 +189,33 @@ pub async fn profile_save(
     let banner = hex_or_empty(&banner_cid, "cover image")?;
     let mut g = state.one.lock().await;
     let one = AppState::unlocked(&mut g)?;
+    // A profile event replaces the whole profile, so an edit has to carry
+    // the verification claim forward. Editing a bio must not cost a badge.
+    let me_now = one.address().to_owned();
+    let verify_tx = one
+        .people()
+        .profile(&me_now)
+        .await
+        .map(|p| p.verify_tx)
+        .unwrap_or_default();
     let id = one
         .feed()
-        .update_profile_full(
-            display_name.trim(),
-            bio.trim(),
-            &avatar,
-            &banner,
-            &website,
-            &country,
-        )
+        .update_profile_full(&hashgram_sdk::feed::ProfileDraft {
+            display_name: display_name.trim().to_owned(),
+            bio: bio.trim().to_owned(),
+            avatar_cid_hex: avatar,
+            banner_cid_hex: banner,
+            website,
+            country,
+            verify_tx,
+        })
         .await?;
     one.save()?;
+    // Read our own profile straight back from the log we just wrote, so
+    // the cached copy other screens use is the new one rather than the
+    // one from before the change.
+    let me = one.address().to_owned();
+    let _ = one.people().profile(&me).await;
     Ok(id)
 }
 

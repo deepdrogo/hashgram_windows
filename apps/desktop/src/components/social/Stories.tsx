@@ -5,7 +5,7 @@
 // the story and indexes stop serving it. Nothing in this file, and nothing
 // in the strings it renders, promises that the bytes left the machines that
 // already had them.
-import { For, Show, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useNavigate } from "@solidjs/router";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -14,6 +14,8 @@ import { Button, Dialog, Field, Input, Notice, Select, Checkbox } from "~/compon
 import { Avatar, Who, avatarSrc } from "~/components/identity";
 import { ipc, errText, type Story } from "~/lib/ipc";
 import { store } from "~/lib/store";
+import { cachedResource } from "~/lib/cache";
+import { prefetchMedia } from "~/lib/prefetch";
 import { measureVideo } from "~/lib/mediameta";
 import { pickFile } from "~/lib/dialogs";
 
@@ -26,10 +28,20 @@ const CAPTION_MAX = 200;
 export function StoriesRow() {
   const [compose, setCompose] = createSignal(false);
   const [viewing, setViewing] = createSignal<string | null>(null);
-  const [stories, { refetch }] = createResource(
+  const [stories, { refetch }] = cachedResource(
     () => ({ tick: store.ticks().feed, locked: store.locked() }),
+    (k) => (k.locked ? null : "stories:active"),
     (k) => (k.locked ? Promise.resolve([] as Story[]) : ipc.storiesActive().catch(() => [] as Story[])),
   );
+
+  // Warm every story's first frame as soon as the row knows about it, so
+  // opening one is instant rather than a wait on a provider lookup.
+  createEffect(() => {
+    for (const s of stories() ?? []) {
+      const first = s.media[0];
+      if (first) prefetchMedia(first[0], first[1]);
+    }
+  });
 
   // One bubble per author, newest first, with our own always first.
   const me = () => store.status()?.address ?? "";

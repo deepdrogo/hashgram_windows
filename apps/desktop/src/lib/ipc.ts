@@ -104,7 +104,7 @@ export interface Settings {
     gateway_address: string;
   };
   security: { auto_lock_minutes: number; hello_enabled: boolean; clipboard_clear_secs: number };
-  appearance: { theme: "dark" | "light" | "system"; reduced_motion: boolean; density: "comfortable" | "compact"; language: "en" | "ka" };
+  appearance: { theme: "dark" | "light" | "system"; reduced_motion: boolean; density: "comfortable" | "compact"; language: "en" };
   notifications: { mail: boolean; requests: boolean; spaces: boolean; circles: boolean };
   /** Social preferences. The country is chosen by hand; nothing is inferred. */
   social: { local_country: string; who_can_chat: "everyone" | "nobody" };
@@ -692,6 +692,19 @@ export interface SpaceSummary {
   group_id: string;
   created_at_ms: number;
 }
+/** A public directory listing for a Space. */
+export interface SpaceListing {
+  listing: string;
+  space: string;
+  name: string;
+  category: string;
+  description: string;
+  owner: string;
+  posts: number;
+  authors: number;
+  last_post: number;
+  created_at: number;
+}
 export interface SpaceMember {
   address: string;
   role: number;
@@ -1220,6 +1233,15 @@ export const ipc = {
   networkSupply: () => call<Record<string, unknown>>("network_supply"),
   networkTop: (what: "holders" | "validators" | "providers" | "earners", limit?: number) => call<unknown | null>("network_top", { what, limit }),
   networkStats: () => call<unknown | null>("network_stats"),
+  verifyTerms: () => call<{ price_uhash: string; price_hash: string; destination: string | null; destination_label: string; memo: string }>("verify_terms"),
+  verifyStatus: (address: string) => call<unknown>("verify_status", { address }),
+  verifyPurchase: (confirm: string) => call<unknown>("verify_purchase", { confirm }),
+  verifyRecord: (tx: string) => call<unknown>("verify_record", { tx }),
+  spacesPublish: (space: string, category: string, description: string) => call<unknown>("spaces_publish", { space, category, description }),
+  spacesDirectory: (category?: string, sort?: "popular" | "new") => call<SpaceListing[]>("spaces_directory", { category, sort }),
+  spacesCategories: () => call<string[]>("spaces_categories"),
+  networkTransactions: (a: { address?: string; q?: string; limit?: number }) => call<unknown | null>("network_transactions", a),
+  networkTransaction: (hash: string) => call<unknown | null>("network_transaction", { hash }),
   netReconnect: () => call<void>("net_reconnect"),
   netForgetPeers: () => call<void>("net_forget_peers"),
   diagnosticsExport: () => call<string>("diagnostics_export"),

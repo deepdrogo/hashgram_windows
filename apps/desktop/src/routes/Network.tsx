@@ -8,6 +8,7 @@ import { ErrorState } from "~/components/States";
 import { Mono } from "~/components/identity";
 import { TopHolders, Providers } from "~/components/network/Registries";
 import { YourNode } from "~/components/network/YourNode";
+import { Transactions } from "~/components/network/Transactions";
 import { ipc, errText, type NetworkOverview } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { t } from "~/lib/i18n";
@@ -124,6 +125,7 @@ export function NetworkRoute() {
                   )}
                 </Show>
                 <YourNode />
+                <Transactions />
                 <div class="grid grid-cols-2 gap-4">
                   <TopHolders />
                   <Providers />

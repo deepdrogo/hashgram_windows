@@ -30,9 +30,9 @@ const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/
 describe("Pulse", () => {
   const pulse = read("src", "routes", "pulse", "Pulse.tsx");
 
-  it("offers exactly the four feeds the product promises", () => {
+  it("offers exactly the feeds the product promises", () => {
     const tabs = [...pulse.matchAll(/\{ id: "(\w+)", label: "/g)].map((m) => m[1]);
-    expect(tabs).toEqual(["latest", "following", "topics", "local"]);
+    expect(tabs).toEqual(["latest", "following", "reels", "topics", "local"]);
   });
 
   it("each feed is chronological or set-filtered, never scored", () => {

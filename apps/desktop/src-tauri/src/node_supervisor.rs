@@ -211,6 +211,9 @@ impl Supervisor {
             restarts: inner.restarts,
             installed,
             configured: node_manager::config_path().exists(),
+            // Cached in `node_manager`, so the three-second poll behind
+            // this does not launch `sc.exe` and `schtasks.exe` twenty
+            // times a minute.
             starts_at_logon: node_manager::registration() != node_manager::Registration::None,
             home: node_manager::node_home().display().to_string(),
         }

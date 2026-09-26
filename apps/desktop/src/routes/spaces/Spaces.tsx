@@ -15,6 +15,8 @@ import { t } from "~/lib/i18n";
 import { roleName, shortWhen, formatBytes, formatMs } from "~/lib/format";
 import { pickSavePath, confirm } from "~/lib/dialogs";
 
+import { SpacesDiscover, PublishSpace } from "./Discover";
+
 type Tab = "overview" | "chat" | "posts" | "drive" | "members" | "mail";
 
 /** Rule table from docs/SPACES.md, as predicates on my role. */
@@ -80,7 +82,9 @@ export function SpacesRoute() {
           </div>
         </aside>
         <section class="min-w-0 flex-1 overflow-hidden">
-          <Show when={params.id} fallback={<div class="flex h-full items-center justify-center text-sm text-muted">Pick a Space</div>}>
+          {/* No Space selected is the natural place for discovery, rather
+              than an empty panel telling people to pick something. */}
+          <Show when={params.id} fallback={<SpacesDiscover />}>
             {(id) => <SpaceView id={id()} tab={(params.tab as Tab) || "overview"} onTab={(tb) => navigate(`/spaces/${id()}/${tb}`)} />}
           </Show>
         </section>
@@ -222,6 +226,7 @@ function SpaceView(props: { id: string; tab: Tab; onTab: (t: Tab) => void }) {
                   <Show when={can.announce(role())} fallback={<p class="mb-3 text-[11px] text-muted">Announcements are written by Admins and the Owner.</p>}>
                     <AnnounceForm onSubmit={(title, text) => act(() => ipc.spacesAnnounce(props.id, title, text), "Announced")} />
                   </Show>
+                  <PublishSpace space={props.id} name={state()?.name ?? ""} canPublish={role() === ROLE.owner} />
                   <For each={announcements()} fallback={<Empty title="No announcements yet" icon={<Megaphone size={18} />} />}>
                     {(a) => (
                       <article class="card mb-2 p-3">

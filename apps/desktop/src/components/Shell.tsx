@@ -41,7 +41,10 @@ export const NAV: NavItem[] = [
   { to: "/wallet", key: "nav_wallet", icon: Wallet, accel: "7", group: "assets" },
   { to: "/earn", key: "nav_earn", icon: Coins, accel: "8", group: "assets" },
   { to: "/network", key: "nav_network", icon: Network, accel: "9", group: "assets" },
-  { to: "/profile/me", key: "nav_profile", icon: UserCircle, accel: "0", group: "you", match: "/profile" },
+  // `/profile/me` only: matching all of `/profile` lit this entry up while
+  // reading somebody else's profile, which read as "you were taken to your
+  // own page".
+  { to: "/profile/me", key: "nav_profile", icon: UserCircle, accel: "0", group: "you", match: "/profile/me" },
   { to: "/settings", key: "nav_settings", icon: Settings, accel: "", group: "you" },
 ];
 
@@ -117,7 +120,15 @@ export function Shell(props: ParentProps) {
     return (p === "available" && !updates.dismissed()) || p === "downloading" || p === "installing";
   };
 
-  const isActive = (to: string) => location.pathname.startsWith(to);
+  const isActive = (to: string) => {
+    const path = location.pathname;
+    // Viewing your own profile by address is still your own profile.
+    if (to === "/profile/me") {
+      const me = store.status()?.address;
+      return path === "/profile/me" || (!!me && path === `/profile/${me}`);
+    }
+    return path.startsWith(to);
+  };
   const badge = (to: string): number => {
     if (to === "/mail") return (store.counts()["inbox"]?.unread ?? 0) + (store.counts()["requests"]?.total ?? 0);
     if (to === "/contacts") return store.requestsIn();

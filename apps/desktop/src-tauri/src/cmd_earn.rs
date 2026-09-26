@@ -252,6 +252,9 @@ pub async fn node_overview(state: S<'_>) -> CmdResult<NodeOverview> {
         Some(s) => operator_address(&s).ok(),
         None => None,
     };
+    // Both are cached in `node_manager`; the first call pays for a process
+    // launch and the ones after it are free, which matters because this
+    // screen polls.
     let registration = tauri::async_runtime::spawn_blocking(nm::registration)
         .await
         .unwrap_or(Registration::None);
@@ -272,35 +275,18 @@ pub async fn node_overview(state: S<'_>) -> CmdResult<NodeOverview> {
         .unwrap_or("unknown")
         .to_owned();
     let node_id = if nm::config_path().exists() {
-        tauri::async_runtime::spawn_blocking(nm::node_id)
+        tauri::async_runtime::spawn_blocking(nm::node_id_cached)
             .await
             .ok()
-            .and_then(Result::ok)
+            .flatten()
     } else {
         None
     };
-    let (provider, balance) = match &operator {
-        Some(op) => {
-            let mut g = state.one.lock().await;
-            match g.as_mut() {
-                Some(one) => {
-                    let p = one
-                        .provider()
-                        .status(Some(op))
-                        .await
-                        .ok()
-                        .map(|status| EarnStatus {
-                            sentence: lifecycle_sentence(status.lifecycle),
-                            status,
-                        });
-                    let b = one.wallet().balance(Some(op)).await.ok().map(|b| b.uhash);
-                    (p, b)
-                }
-                None => (None, None),
-            }
-        }
-        None => (None, None),
-    };
+    // The provider record and the operator's balance are chain reads, and
+    // they used to happen with the SDK lock held — so every other screen
+    // waited behind this poll. They are their own command now
+    // (`earn_operator`), fetched once the overview has painted.
+    let (provider, balance) = (None, None);
     Ok(NodeOverview {
         bundled: bin.is_some(),
         configured: nm::config_path().exists(),
@@ -320,6 +306,52 @@ pub async fn node_overview(state: S<'_>) -> CmdResult<NodeOverview> {
     })
 }
 
+/// What the chain says about the node operator: its provider record and
+/// its balance.
+///
+/// Split out of [`node_overview`] because these are network round trips
+/// and that screen polls. Holding the SDK lock across them made every
+/// other screen wait, which is what "the whole app freezes" was.
+#[tauri::command]
+pub async fn earn_operator(state: S<'_>) -> CmdResult<OperatorFacts> {
+    let Some(secret) = operator_secret(&state).await? else {
+        return Ok(OperatorFacts::default());
+    };
+    let Ok(op) = operator_address(&secret) else {
+        return Ok(OperatorFacts::default());
+    };
+    let mut g = state.one.lock().await;
+    let Some(one) = g.as_mut() else {
+        return Ok(OperatorFacts::default());
+    };
+    let provider = one
+        .provider()
+        .status(Some(&op))
+        .await
+        .ok()
+        .map(|status| EarnStatus {
+            sentence: lifecycle_sentence(status.lifecycle),
+            status,
+        });
+    let balance = one.wallet().balance(Some(&op)).await.ok().map(|b| b.uhash);
+    Ok(OperatorFacts {
+        operator: Some(op),
+        provider,
+        balance_uhash: balance,
+    })
+}
+
+/// The operator's chain-side facts.
+#[derive(Debug, Default, Serialize)]
+pub struct OperatorFacts {
+    /// Operator address, when one exists.
+    pub operator: Option<String>,
+    /// Provider registration, when registered.
+    pub provider: Option<EarnStatus>,
+    /// Operator balance in uhash.
+    pub balance_uhash: Option<String>,
+}
+
 /// Writes the node configuration (creating the operator key in the vault).
 #[tauri::command]
 pub async fn node_configure(state: S<'_>, setup: NodeSetup) -> CmdResult<String> {
@@ -327,6 +359,8 @@ pub async fn node_configure(state: S<'_>, setup: NodeSetup) -> CmdResult<String>
     let identity = crate::session::network_identity(&settings)?;
     let secret = ensure_operator_secret(&state).await?;
     nm::write_config(&setup, &identity, &secret).map_err(UiError::invalid)?;
+    // A new configuration can mean a new key, so the cached peer id goes.
+    nm::forget_cached();
     operator_address(&secret)
 }
 

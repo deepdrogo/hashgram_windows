@@ -13,11 +13,14 @@ import { ErrorState } from "~/components/States";
 import { Avatar, Mono, forgetAvatar } from "~/components/identity";
 import { ipc, errText, type ProfileView, type ProfileTab, type FeedItem } from "~/lib/ipc";
 import { store } from "~/lib/store";
+import { cachedResource } from "~/lib/cache";
 import { copyText } from "~/lib/clipboard";
 import { formatTime } from "~/lib/format";
 import { rememberTab, recallTab, trackScroll } from "~/lib/uistate";
 import { PostCard } from "~/routes/feed/Feed";
 import { MediaTile } from "~/components/social/Media";
+import { VerifiedBadge } from "~/components/social/Verified";
+import { VerificationPanel } from "./Verification";
 import { ProfileEditor } from "./ProfileEdit";
 import { FollowList } from "./FollowList";
 import { UsernameCard } from "./Username";
@@ -47,8 +50,9 @@ export function ProfileRoute() {
   const [busy, setBusy] = createSignal(false);
 
   const target = () => (params.address ?? "me").trim();
-  const [profile, { refetch }] = createResource(
+  const [profile, { refetch }] = cachedResource(
     () => ({ who: target(), tick: store.ticks().feed, locked: store.locked() }),
+    (k) => (k.locked ? null : `profile:${k.who}`),
     async (k): Promise<ProfileView | null> => {
       if (k.locked) return null;
       return k.who === "me" ? ipc.profileMine() : ipc.profileOf(k.who);
@@ -62,8 +66,9 @@ export function ProfileRoute() {
     setTabSignal(t);
   };
 
-  const [items] = createResource(
+  const [items] = cachedResource(
     () => ({ who: profile()?.address, tab: tab(), tick: store.ticks().feed }),
+    (k) => (k.who ? `profile:timeline:${k.who}:${k.tab}` : null),
     async (k): Promise<FeedItem[]> => (k.who ? ipc.profileTimeline(k.who, k.tab, 0, 50) : []),
   );
 
@@ -75,6 +80,7 @@ export function ProfileRoute() {
     if (!p) return "";
     return p.username ? `@${p.username}` : "";
   };
+  const isMe = () => target() === "me" || profile()?.address === store.status()?.address;
 
   const follow = async (on: boolean) => {
     const p = profile();
@@ -156,7 +162,10 @@ export function ProfileRoute() {
                 </div>
 
                 <div class="mt-2">
-                  <h1 class="text-lg font-semibold leading-tight">{p().display_name || handle() || "Unnamed"}</h1>
+                  <h1 class="flex items-center gap-1.5 text-lg font-semibold leading-tight">
+                    {p().display_name || handle() || "Unnamed"}
+                    <VerifiedBadge address={p().address} size={16} />
+                  </h1>
                   <div class="mt-0.5 flex items-center gap-2 text-[13px] text-muted">
                     <Show when={handle()}>
                       <span class="mono">{handle()}</span>
@@ -189,6 +198,10 @@ export function ProfileRoute() {
                     </span>
                   </Show>
                 </div>
+
+                <Show when={isMe()}>
+                  <VerificationPanel />
+                </Show>
 
                 <div class="mt-3 flex flex-wrap items-center gap-4 text-[13px]">
                   <button type="button" class="hover:underline" onClick={() => setList("following")}>

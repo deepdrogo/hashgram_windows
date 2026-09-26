@@ -15,6 +15,8 @@ import { PersonAvatar, Who } from "~/components/identity";
 import { EmojiPicker } from "~/components/social/EmojiPicker";
 import { ipc, on, errText, type ConversationView, type ChatMessage, type ChatAttachment, type ChatPage, type ContactRecord } from "~/lib/ipc";
 import { store } from "~/lib/store";
+import { cachedResource } from "~/lib/cache";
+import { prefetchAttachment } from "~/lib/prefetch";
 import { shortWhen, formatBytes } from "~/lib/format";
 import { confirm, pickFile } from "~/lib/dialogs";
 import { measureVideo } from "~/lib/mediameta";
@@ -32,8 +34,9 @@ export function ChatsRoute() {
     onCleanup(() => void p.then((un) => un()));
   });
 
-  const [conversations, { refetch }] = createResource(
+  const [conversations, { refetch }] = cachedResource(
     () => ({ t: tick(), locked: store.locked(), sync: store.ticks().people }),
+    (k) => (k.locked ? null : "chats:list"),
     (k) => (k.locked ? Promise.resolve([] as ConversationView[]) : ipc.chatList().catch(() => [] as ConversationView[])),
   );
 
@@ -212,12 +215,21 @@ export function ChatThread(props: { id: string; conversation?: ConversationView;
     onCleanup(() => void p.then((un) => un()));
   });
 
-  const [page, { mutate }] = createResource(
+  const [page, { mutate }] = cachedResource(
     () => ({ id: props.id, t: tick() }),
+    (k) => `chat:history:${k.id}`,
     (k) => ipc.chatHistory(k.id, 0, 200).catch(() => ({ messages: [], attachments: [] }) as ChatPage),
   );
   const messages = () => page()?.messages;
   const filesOf = (id: string) => (page()?.attachments ?? []).filter((a) => a.message_id === id);
+
+  // Fetch and decrypt the pictures in view in the background, so scrolling
+  // a conversation does not wait on one blob at a time.
+  createEffect(() => {
+    for (const a of (page()?.attachments ?? []).slice(-12)) {
+      if (a.kind === "image") prefetchAttachment(a.message_id, a.index);
+    }
+  });
 
   // Coming back to a conversation should land at the newest message.
   createEffect(() => {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -60,6 +61,7 @@ func (a *API) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/accounts/{address}/transactions", a.transactions)
 	mux.HandleFunc("GET /v1/providers", a.providers)
 	mux.HandleFunc("GET /v1/blocks/latest", a.latestBlocks)
+	mux.HandleFunc("GET /v1/txs", a.recentTxs)
 	mux.HandleFunc("GET /v1/txs/{hash}", a.tx)
 	// Network: balances, validators, leaderboards (api_network.go).
 	mux.HandleFunc("GET /v1/leaderboards/holders", a.leaderboardHolders)
@@ -598,6 +600,62 @@ func (a *API) transactions(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var x t
 		if rows.Scan(&x.Hash, &x.Height, &x.Code, &x.GasUsed, &x.Fee, &x.Memo, &x.MsgTypes) == nil {
+			out = append(out, x)
+		}
+	}
+	writeJSON(w, 200, out)
+}
+
+// recentTxs serves the chain's transactions newest first, for a network
+// explorer. Optional filters: ?address= (signer, sender or recipient) and
+// ?q= (a hash prefix or a memo substring), so one search box can answer
+// "what happened", "what did this account do" and "where is my payment".
+func (a *API) recentTxs(w http.ResponseWriter, r *http.Request) {
+	limit := limitOf(r, 50, 500)
+	address := strings.TrimSpace(r.URL.Query().Get("address"))
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	sql := `SELECT t.hash, t.height, t.code, t.gas_used, t.fee_uhash::text, t.memo, t.msg_types, t.signers
+	        FROM transactions t`
+	where := []string{}
+	args := []any{}
+	if address != "" {
+		args = append(args, address)
+		n := len(args)
+		where = append(where, fmt.Sprintf(
+			`($%d = ANY(t.signers) OR EXISTS (SELECT 1 FROM transfers f WHERE f.txhash = t.hash AND (f.sender = $%d OR f.recipient = $%d)))`,
+			n, n, n))
+	}
+	if q != "" {
+		args = append(args, strings.ToUpper(q)+"%", "%"+q+"%")
+		where = append(where, fmt.Sprintf(`(t.hash LIKE $%d OR t.memo ILIKE $%d)`, len(args)-1, len(args)))
+	}
+	if len(where) > 0 {
+		sql += " WHERE " + strings.Join(where, " AND ")
+	}
+	args = append(args, limit)
+	sql += fmt.Sprintf(" ORDER BY t.height DESC, t.hash DESC LIMIT $%d", len(args))
+
+	rows, err := a.db.Query(r.Context(), sql, args...)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	type t struct {
+		Hash     string   `json:"hash"`
+		Height   int64    `json:"height"`
+		Code     int      `json:"code"`
+		GasUsed  int64    `json:"gas_used"`
+		Fee      string   `json:"fee_uhash"`
+		Memo     string   `json:"memo"`
+		MsgTypes []string `json:"msg_types"`
+		Signers  []string `json:"signers"`
+	}
+	out := []t{}
+	for rows.Next() {
+		var x t
+		if rows.Scan(&x.Hash, &x.Height, &x.Code, &x.GasUsed, &x.Fee, &x.Memo, &x.MsgTypes, &x.Signers) == nil {
 			out = append(out, x)
 		}
 	}

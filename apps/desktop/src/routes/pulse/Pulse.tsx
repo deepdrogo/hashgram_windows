@@ -20,10 +20,11 @@ import { rememberTab, recallTab, trackScroll } from "~/lib/uistate";
 import { PostCard, PostView, ComposeDialog, SourceLine, usePages } from "~/routes/feed/Feed";
 import { DiscoveryRail } from "~/components/social/DiscoveryRail";
 import { StoriesRow } from "~/components/social/Stories";
+import { Reels } from "./Reels";
 import { TopicsHome } from "~/routes/topics/Topics";
 
-type Tab = "latest" | "following" | "topics" | "local";
-const TAB_IDS: Tab[] = ["latest", "following", "topics", "local"];
+type Tab = "latest" | "following" | "reels" | "topics" | "local";
+const TAB_IDS: Tab[] = ["latest", "following", "reels", "topics", "local"];
 
 export function PulseRoute() {
   const params = useParams<{ tab?: string; id?: string }>();
@@ -73,6 +74,7 @@ function PulseBody(props: { tab: Tab; mode: { kind: string; tag?: string }; onCo
           tabs={[
             { id: "latest", label: "Latest" },
             { id: "following", label: "Following" },
+            { id: "reels", label: "Reels" },
             { id: "topics", label: "Topics" },
             { id: "local", label: "Local" },
           ]}
@@ -84,16 +86,26 @@ function PulseBody(props: { tab: Tab; mode: { kind: string; tag?: string }; onCo
           <Plus size={13} /> Post
         </Button>
       </div>
-      <div class="min-h-0 flex-1 overflow-auto" ref={(el) => onCleanup(trackScroll(`scroll:pulse:${tagged() || props.tab}`, el))}>
-        <div class="mx-auto max-w-2xl px-4 py-3">
-          <Show when={!tagged() && props.tab !== "topics"}>
-            <StoriesRow />
-          </Show>
-          <Show when={tagged()} fallback={<FeedFor tab={props.tab} />}>
-            <TagFeed tag={tagged()} />
-          </Show>
+      {/* Reels fill the pane; everything else is a column of cards. */}
+      <Show
+        when={props.tab !== "reels" || tagged()}
+        fallback={
+          <div class="min-h-0 flex-1 px-4 py-3">
+            <Reels />
+          </div>
+        }
+      >
+        <div class="min-h-0 flex-1 overflow-auto" ref={(el) => onCleanup(trackScroll(`scroll:pulse:${tagged() || props.tab}`, el))}>
+          <div class="mx-auto max-w-2xl px-4 py-3">
+            <Show when={!tagged() && props.tab !== "topics"}>
+              <StoriesRow />
+            </Show>
+            <Show when={tagged()} fallback={<FeedFor tab={props.tab} />}>
+              <TagFeed tag={tagged()} />
+            </Show>
+          </div>
         </div>
-      </div>
+      </Show>
     </>
   );
 }
@@ -109,6 +121,9 @@ function FeedFor(props: { tab: Tab }) {
       </Show>
       <Show when={props.tab === "topics"}>
         <TopicsHome />
+      </Show>
+      <Show when={props.tab === "reels"}>
+        <Reels />
       </Show>
       <Show when={props.tab === "local"}>
         <LocalFeed />

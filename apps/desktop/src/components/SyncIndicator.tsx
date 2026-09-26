@@ -1,11 +1,16 @@
-// The dot in the top bar: phase-driven, with a tooltip that says what is
-// true right now. Click runs a round.
+// The network state in the top bar.
+//
+// It used to be a dot and a sentence that grew and shrank as the phase
+// changed — "Syncing... Devices", "Syncing... Wallet" — so the whole
+// header jittered while the app worked, which made an ordinary sync look
+// like a fault. Now the width is fixed, the stage name is a quiet second
+// line inside a tooltip, and progress is shown as motion rather than as
+// changing text.
 import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { RefreshCw } from "lucide-solid";
+import { Check, Loader, Wifi, WifiOff } from "lucide-solid";
 import { store, phaseKind } from "~/lib/store";
 import { t } from "~/lib/i18n";
 import { ipc } from "~/lib/ipc";
-import { Dot } from "./identity";
 
 export function SyncIndicator() {
   const [now, setNow] = createSignal(Date.now());
@@ -13,44 +18,89 @@ export function SyncIndicator() {
     const id = setInterval(() => setNow(Date.now()), 1000);
     onCleanup(() => clearInterval(id));
   });
+
   const kind = createMemo(() => phaseKind(store.phase()));
-  const label = createMemo(() => {
+  const peers = () => store.sync()?.peers ?? 0;
+
+  /** One word. The detail lives in the tooltip, where it cannot jitter. */
+  const word = createMemo(() => {
+    switch (kind()) {
+      case "idle":
+        return "Synced";
+      case "syncing":
+        return "Syncing";
+      case "connecting":
+        return store.phase() === "Discovering" ? "Finding nodes" : "Connecting";
+      case "backoff":
+        return "Reconnecting";
+      default:
+        return "Offline";
+    }
+  });
+
+  /** Everything the one word leaves out. */
+  const detail = createMemo(() => {
     const p = store.phase();
     const s = store.sync();
+    const lines: string[] = [];
     switch (kind()) {
       case "idle": {
         const ago = s?.last_ok_ms ? Math.max(0, Math.round((now() - s.last_ok_ms) / 1000)) : null;
-        return ago === null ? t("sync_idle", { ago: "" }).trim() : t("sync_idle", { ago: ago < 5 ? "just now" : `${ago} s ago` });
+        lines.push(ago === null ? "Up to date" : ago < 5 ? "Up to date, just now" : `Up to date, ${humanAgo(ago)} ago`);
+        break;
       }
       case "syncing": {
         const stage = typeof p === "object" && "Syncing" in p ? p.Syncing : "";
-        return `${t("sync_syncing")} ${stage}`.trim();
+        lines.push(stage ? `Catching up on ${stage.toLowerCase()}` : "Catching up");
+        break;
       }
       case "connecting":
-        return p === "Discovering" ? t("sync_discovering") : t("sync_connecting");
+        lines.push("Looking for nodes to talk to");
+        break;
       case "backoff": {
         const w = typeof p === "object" && "Backoff" in p ? p.Backoff.wait_secs : 0;
-        return `${t("sync_offline")} · ${t("sync_backoff", { secs: w })}`;
+        lines.push(`No node answered. Trying again in ${w} s`);
+        break;
       }
       default:
-        return t("sync_offline");
+        lines.push(t("sync_offline"));
     }
+    lines.push(`${peers()} node${peers() === 1 ? "" : "s"} connected`);
+    if (s?.last_error) lines.push(s.last_error);
+    lines.push(t("sync_now"));
+    return lines.join("\n");
   });
-  const dot = () => (kind() === "idle" ? "ok" : kind() === "syncing" ? "ok" : kind() === "connecting" ? "warn" : "bad") as "ok" | "warn" | "bad";
-  const peers = () => store.sync()?.peers ?? 0;
+
+  const busy = () => kind() === "syncing" || kind() === "connecting";
+  const bad = () => kind() === "offline" || kind() === "backoff";
+
   return (
     <button
       type="button"
-      class="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-muted hover:bg-surface-2 hover:text-fg"
-      title={`${label()}\n${peers()} node${peers() === 1 ? "" : "s"}${store.sync()?.last_error ? `\n${store.sync()?.last_error}` : ""}\n${t("sync_now")}`}
+      class="group flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+      title={detail()}
       onClick={() => void ipc.syncNow().catch(() => undefined)}
-      aria-label={label()}
+      aria-label={`${word()}. ${detail().split("\n")[0]}`}
+      data-sync={kind()}
     >
-      <Dot state={dot()} class={kind() === "syncing" ? "animate-pulse" : ""} />
-      <span class="max-w-[260px] truncate">{label()}</span>
-      <Show when={kind() === "syncing"}>
-        <RefreshCw size={11} class="animate-spin" />
+      <span class="relative flex h-3.5 w-3.5 items-center justify-center">
+        <Show when={busy()} fallback={bad() ? <WifiOff size={12} /> : <Check size={12} class="text-brand" />}>
+          <Loader size={12} class="animate-spin" />
+        </Show>
+      </span>
+      {/* Fixed width: the label changes, the header does not move. */}
+      <span class="w-[86px] truncate text-left tabular-nums">{word()}</span>
+      <Show when={peers() > 0 && !busy()}>
+        <span class="flex items-center gap-1 text-[11px] opacity-0 transition-opacity group-hover:opacity-100">
+          <Wifi size={10} /> {peers()}
+        </span>
       </Show>
     </button>
   );
+}
+
+function humanAgo(secs: number): string {
+  if (secs < 60) return `${secs} s`;
+  if (secs < 3600) return `${Math.round(secs / 60)} min`;
+  return `${Math.round(secs / 3600)} h`;
 }

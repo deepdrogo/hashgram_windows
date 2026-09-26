@@ -28,6 +28,16 @@ const NS_WALLS: &str = "feed/walls";
 /// `ProfileUpdate.attributes` key for the country the user chose to show.
 pub const ATTR_COUNTRY: &str = "country";
 
+/// `ProfileUpdate.attributes` key holding the hash of the on-chain payment
+/// that backs a verified badge.
+///
+/// The attribute is a *claim*, not the badge. Anyone can write any hash
+/// here, so a reader has to look the transaction up on the chain and check
+/// the sender, the recipient and the amount before showing anything. That
+/// check lives in the app (`cmd_verify`), and it is the reason a badge here
+/// cannot be granted, sold or revoked by us.
+pub const ATTR_VERIFY_TX: &str = "verify_tx";
+
 /// Most nodes tried for one Explore page before giving up.
 const EXPLORE_ATTEMPTS: usize = 3;
 
@@ -174,6 +184,30 @@ pub struct WallInfo {
     pub last_post: u64,
     /// Whether this wall is pinned locally.
     pub pinned: bool,
+}
+
+/// Everything a `PROFILE_UPDATE` carries.
+///
+/// A profile event is a replacement, not a patch: whatever the draft leaves
+/// empty is erased from the profile. Passing the whole thing explicitly is
+/// what makes that impossible to forget.
+#[derive(Debug, Clone, Default)]
+pub struct ProfileDraft {
+    /// Display name. Self-declared, never identity.
+    pub display_name: String,
+    /// Bio.
+    pub bio: String,
+    /// Avatar CID (hex); empty clears it.
+    pub avatar_cid_hex: String,
+    /// Cover image CID (hex); empty clears it.
+    pub banner_cid_hex: String,
+    /// Website as the author typed it.
+    pub website: String,
+    /// Two-letter country the author chose to show, or empty.
+    pub country: String,
+    /// Hash of the payment backing a verified badge, or empty. A claim
+    /// only — readers check it against the chain.
+    pub verify_tx: String,
 }
 
 /// One author in a digest.
@@ -617,38 +651,43 @@ impl<'a> Feed<'a> {
         bio: &str,
         avatar_cid_hex: &str,
     ) -> Result<String, SdkError> {
-        self.update_profile_full(display_name, bio, avatar_cid_hex, "", "", "")
-            .await
+        self.update_profile_full(&ProfileDraft {
+            display_name: display_name.to_owned(),
+            bio: bio.to_owned(),
+            avatar_cid_hex: avatar_cid_hex.to_owned(),
+            ..Default::default()
+        })
+        .await
     }
 
     /// Updates our public profile with everything a social profile shows.
     ///
+    /// A profile event replaces the whole profile, so the draft must carry
+    /// every field the author wants to keep — including `verify_tx`, which
+    /// an edit would otherwise silently drop.
+    ///
     /// The country is a self-declared attribute the user may leave empty; it
     /// is never inferred from an address or a connection.
-    pub async fn update_profile_full(
-        &mut self,
-        display_name: &str,
-        bio: &str,
-        avatar_cid_hex: &str,
-        banner_cid_hex: &str,
-        website: &str,
-        country: &str,
-    ) -> Result<String, SdkError> {
-        let avatar_cid = hex::decode(avatar_cid_hex).unwrap_or_default();
-        let banner_cid = hex::decode(banner_cid_hex).unwrap_or_default();
+    pub async fn update_profile_full(&mut self, d: &ProfileDraft) -> Result<String, SdkError> {
+        let avatar_cid = hex::decode(&d.avatar_cid_hex).unwrap_or_default();
+        let banner_cid = hex::decode(&d.banner_cid_hex).unwrap_or_default();
         let mut attributes = std::collections::HashMap::new();
-        let country = country.trim();
+        let country = d.country.trim();
         if !country.is_empty() {
             attributes.insert(ATTR_COUNTRY.to_owned(), country.to_uppercase());
+        }
+        let verify_tx = d.verify_tx.trim();
+        if !verify_tx.is_empty() {
+            attributes.insert(ATTR_VERIFY_TX.to_owned(), verify_tx.to_uppercase());
         }
         self.publish(
             "PROFILE_UPDATE",
             &pb::ProfileUpdate {
-                display_name: display_name.to_owned(),
-                bio: bio.to_owned(),
+                display_name: d.display_name.clone(),
+                bio: d.bio.clone(),
                 avatar_cid,
                 banner_cid,
-                website: website.trim().to_owned(),
+                website: d.website.trim().to_owned(),
                 attributes,
             },
             vec![],
