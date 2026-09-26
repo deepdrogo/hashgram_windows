@@ -1,12 +1,15 @@
-// Ctrl+K: one box that searches Mail, Drive and People together, plus a
-// few commands (compose, sections). Results come from local indexes; a
-// typed @name or address is resolved on chain only when Enter is pressed
-// on the "look up" row.
+// Ctrl+K: one box, two clearly separated halves.
+//
+// "On this device" searches the private indexes — mail, files, contacts —
+// and the query never leaves the machine. "On the network" matches topics,
+// hashtags and Spaces against what a node already told us, and only when
+// the user presses Enter on a row does anything go out. A private search
+// term is never sent to a public indexer; that separation is the point.
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useNavigate } from "@solidjs/router";
-import { Mail, HardDrive, Users, Search, ArrowRight, PenSquare } from "lucide-solid";
-import { ipc, type MailSummary, type EntryView, type ContactRecord } from "~/lib/ipc";
+import { Mail, HardDrive, Users, Search, ArrowRight, PenSquare, Megaphone, Hash, LayoutGrid } from "lucide-solid";
+import { ipc, type MailSummary, type EntryView, type ContactRecord, type WallInfo, type SpaceSummary } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { t } from "~/lib/i18n";
 import { handle, shortWhen, formatBytes, isHashAddress } from "~/lib/format";
@@ -18,6 +21,9 @@ type Row =
   | { kind: "mail"; id: string; m: MailSummary }
   | { kind: "drive"; id: string; e: EntryView }
   | { kind: "person"; id: string; c: ContactRecord }
+  | { kind: "topic"; id: string; w: WallInfo }
+  | { kind: "tag"; id: string; tag: string; posts: number }
+  | { kind: "space"; id: string; s: SpaceSummary }
   | { kind: "lookup"; id: string; q: string };
 
 export function CommandPalette(props: { open: boolean; onClose: () => void }) {
@@ -34,6 +40,7 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
     }
   });
 
+  // Private: these indexes live on this PC and the query stays here.
   const [results] = createResource(
     () => (props.open ? q().trim() : null),
     async (query) => {
@@ -44,6 +51,19 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
         ipc.peopleSearchLocal(query).catch(() => []),
       ]);
       return { mail, drive, people: people.slice(0, 8) };
+    },
+  );
+
+  // Public: one digest a node already sent us, matched here. Typing does
+  // not send the words anywhere.
+  const [publicSide] = createResource(
+    () => (props.open && !store.locked() ? store.ticks().feed : null),
+    async () => {
+      const [digest, spaces] = await Promise.all([
+        ipc.hashwallDigest(7 * 24 * 3600, 30).catch(() => null),
+        ipc.spacesList().catch(() => [] as SpaceSummary[]),
+      ]);
+      return { walls: digest?.walls ?? [], tags: digest?.top_hashtags ?? [], spaces };
     },
   );
 
@@ -62,6 +82,12 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
     for (const m of r?.mail ?? []) out.push({ kind: "mail", id: m.id, m });
     for (const e of r?.drive ?? []) out.push({ kind: "drive", id: e.id, e });
     for (const c of r?.people ?? []) out.push({ kind: "person", id: c.address, c });
+    const bare = lower.replace(/^#/, "");
+    const p = publicSide();
+    for (const w of (p?.walls ?? []).filter((w) => w.name.toLowerCase().includes(lower)).slice(0, 5)) out.push({ kind: "topic", id: w.id, w });
+    for (const h of (p?.tags ?? []).filter((h) => h.tag.includes(bare)).slice(0, 5)) out.push({ kind: "tag", id: h.tag, tag: h.tag, posts: h.posts });
+    if (bare.length >= 2 && !(p?.tags ?? []).some((h) => h.tag === bare)) out.push({ kind: "tag", id: `search:${bare}`, tag: bare, posts: 0 });
+    for (const s of (p?.spaces ?? []).filter((s) => s.name.toLowerCase().includes(lower)).slice(0, 4)) out.push({ kind: "space", id: s.id, s });
     if (query.startsWith("@") || isHashAddress(query) || /^[a-z0-9._-]{2,32}(@hashgram\.io)?$/i.test(query)) out.push({ kind: "lookup", id: "lookup", q: query });
     return out;
   });
@@ -80,7 +106,16 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
         navigate(`/drive/${row.e.parent_id}?select=${row.e.id}`);
         break;
       case "person":
-        navigate(`/contacts/${row.c.address}`);
+        navigate(`/profile/${row.c.address}`);
+        break;
+      case "topic":
+        navigate(`/topics/${row.w.id}`);
+        break;
+      case "tag":
+        navigate(`/pulse/tag/${encodeURIComponent(row.tag)}`);
+        break;
+      case "space":
+        navigate(`/spaces/${row.s.id}`);
         break;
       case "lookup":
         navigate(`/contacts?q=${encodeURIComponent(row.q)}`);
@@ -122,6 +157,7 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
                 ref={input}
                 class="h-10 w-full bg-transparent text-sm outline-none placeholder:text-muted"
                 placeholder={t("search_placeholder")}
+                aria-describedby="search-scope"
                 value={q()}
                 onInput={(e) => setQ(e.currentTarget.value)}
                 autocomplete="off"
@@ -195,6 +231,42 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
                         );
                       }}
                     </Show>
+                    <Show when={row.kind === "topic"}>
+                      {(_) => {
+                        const r = row as Extract<Row, { kind: "topic" }>;
+                        return (
+                          <>
+                            <Megaphone size={13} class="text-muted" />
+                            <span class="min-w-0 flex-1 truncate">{r.w.name}</span>
+                            <span class="text-xs text-muted">topic · on the network</span>
+                          </>
+                        );
+                      }}
+                    </Show>
+                    <Show when={row.kind === "tag"}>
+                      {(_) => {
+                        const r = row as Extract<Row, { kind: "tag" }>;
+                        return (
+                          <>
+                            <Hash size={13} class="text-muted" />
+                            <span class="min-w-0 flex-1 truncate">#{r.tag}</span>
+                            <span class="text-xs text-muted">{r.posts ? `${r.posts} posts this week` : "search posts"}</span>
+                          </>
+                        );
+                      }}
+                    </Show>
+                    <Show when={row.kind === "space"}>
+                      {(_) => {
+                        const r = row as Extract<Row, { kind: "space" }>;
+                        return (
+                          <>
+                            <LayoutGrid size={13} class="text-muted" />
+                            <span class="min-w-0 flex-1 truncate">{r.s.name}</span>
+                            <span class="text-xs text-muted">Space</span>
+                          </>
+                        );
+                      }}
+                    </Show>
                     <Show when={row.kind === "lookup"}>
                       {(_) => {
                         const r = row as Extract<Row, { kind: "lookup" }>;
@@ -215,6 +287,9 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
                 <li class="px-3 py-6 text-center text-xs text-muted">{results.loading ? t("loading") : t("nothing_here")}</li>
               </Show>
             </ul>
+            <p id="search-scope" class="border-t border-border px-3 py-1.5 text-[11px] text-muted">
+              Mail, files and contacts are searched on this PC and the words never leave it. Topics, hashtags and Spaces are matched against what a node already told us.
+            </p>
           </div>
         </div>
       </Portal>

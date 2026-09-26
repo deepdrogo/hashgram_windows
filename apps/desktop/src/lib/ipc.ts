@@ -104,6 +104,8 @@ export interface Settings {
   security: { auto_lock_minutes: number; hello_enabled: boolean; clipboard_clear_secs: number };
   appearance: { theme: "dark" | "light" | "system"; reduced_motion: boolean; density: "comfortable" | "compact"; language: "en" | "ka" };
   notifications: { mail: boolean; requests: boolean; spaces: boolean; circles: boolean };
+  /** Social preferences. The country is chosen by hand; nothing is inferred. */
+  social: { local_country: string; who_can_chat: "everyone" | "nobody" };
   mail: { threaded: boolean; mark_read_after_secs: number };
   updates: { auto_check: boolean; channel: string };
   advanced: { log_level: string };

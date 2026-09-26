@@ -9,8 +9,9 @@ import { Lock } from "./routes/Lock";
 import { MailRoute } from "./routes/mail/Mail";
 
 const Drive = lazy(() => import("./routes/drive/Drive").then((m) => ({ default: m.DriveRoute })));
-const Feed = lazy(() => import("./routes/feed/Feed").then((m) => ({ default: m.FeedRoute })));
-const Explore = lazy(() => import("./routes/Explore").then((m) => ({ default: m.ExploreRoute })));
+const Pulse = lazy(() => import("./routes/pulse/Pulse").then((m) => ({ default: m.PulseRoute })));
+const Topics = lazy(() => import("./routes/topics/Topics").then((m) => ({ default: m.TopicRoute })));
+const Circles = lazy(() => import("./routes/feed/Feed").then((m) => ({ default: m.CirclesRoute })));
 const Me = lazy(() => import("./routes/Me").then((m) => ({ default: m.MeRoute })));
 const Profile = lazy(() => import("./routes/profile/Profile").then((m) => ({ default: m.ProfileRoute })));
 const People = lazy(() => import("./routes/People").then((m) => ({ default: m.PeopleRoute })));
@@ -130,10 +131,11 @@ export function App() {
           )}
         >
           <Route path="/" component={() => <Navigate href="/pulse" />} />
-          <Route path="/pulse/:tab?/:id?" component={Feed} />
+          <Route path="/pulse/:tab?/:id?" component={Pulse} />
+          <Route path="/topics/:id?" component={Topics} />
+          <Route path="/circles" component={Circles} />
           <Route path="/mail/:folder?/:id?" component={MailRoute} />
           <Route path="/drive/:parent?" component={Drive} />
-          <Route path="/explore/:section?/:arg?" component={Explore} />
           <Route path="/profile/:address?" component={Profile} />
           <Route path="/activity" component={Me} />
           <Route path="/contacts/:address?" component={People} />
@@ -146,6 +148,7 @@ export function App() {
           {/* Links, bookmarks and deep links minted before the rename. */}
           <Route path="/hashwall/:tab?/:id?" component={PulseRedirect} />
           <Route path="/feed/:tab?/:id?" component={PulseRedirect} />
+          <Route path="/explore/:section?/:arg?" component={ExploreRedirect} />
           <Route path="/people/:address?" component={ContactsRedirect} />
           <Route path="/me" component={() => <Navigate href="/profile/me" />} />
           <Route path="*" component={() => <Navigate href="/pulse" />} />
@@ -155,10 +158,40 @@ export function App() {
   );
 }
 
-/** `/feed/…` and `/hashwall/…` → `/pulse/…`, same tab and post. */
+/** `/feed/…` and `/hashwall/…` → `/pulse/…`, as close as the tab maps. */
 function PulseRedirect() {
   const params = useParams<{ tab?: string; id?: string }>();
-  const target = () => `/pulse${params.tab ? `/${params.tab}` : ""}${params.id ? `/${params.id}` : ""}`;
+  const tab = () => {
+    switch (params.tab) {
+      case "friends":
+      case "following":
+        return "following";
+      case "walls":
+        return params.id ? "" : "topics";
+      case "circles":
+        return "";
+      default:
+        return params.tab ?? "";
+    }
+  };
+  const target = () => {
+    if (params.tab === "walls" && params.id) return `/topics/${params.id}`;
+    if (params.tab === "circles") return "/circles";
+    if (params.id) return `/pulse/post/${params.id}`;
+    return `/pulse${tab() ? `/${tab()}` : ""}`;
+  };
+  return <Navigate href={target()} />;
+}
+
+/** Explore was split: posts and people into Pulse, the registries into Network. */
+function ExploreRedirect() {
+  const params = useParams<{ section?: string; arg?: string }>();
+  const target = () => {
+    if (params.section === "holders" || params.section === "providers") return "/network";
+    if (params.section === "walls") return "/pulse/topics";
+    if (params.arg) return `/pulse/tag/${params.arg}`;
+    return "/pulse/latest";
+  };
   return <Navigate href={target()} />;
 }
 

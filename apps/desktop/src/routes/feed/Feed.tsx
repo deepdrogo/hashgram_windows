@@ -126,90 +126,40 @@ function Media(props: { cid: string; mime: string; sensitive?: boolean }) {
   );
 }
 
-export function FeedRoute() {
-  const params = useParams<{ tab?: string; id?: string }>();
-  const navigate = useNavigate();
-  const tab = (): Tab => (params.tab as Tab) || "friends";
-  const [compose, setCompose] = createSignal<false | { wall?: string }>(false);
-  // Under /pulse/walls/<id> the id is a wall; anywhere else it is a post.
-  const wallId = () => (tab() === "walls" && params.id && WALL_ID.test(params.id) ? params.id : null);
-  const postId = () => (params.id && !wallId() ? params.id : null);
-
+/**
+ * Circles: posts inside a private MLS group, decrypted on this device and
+ * merged into one list. They are not part of Pulse because nothing here is
+ * public — Pulse is the network, a Circle is a room.
+ */
+export function CirclesRoute() {
+  const [compose, setCompose] = createSignal(false);
   const [items, { refetch }] = createResource(
-    () => ({ tab: tab(), tick: store.ticks().feed }),
-    async (k) => {
-      if (k.tab === "friends") return { kind: "public" as const, items: await ipc.feedFriends(0, 100) };
-      if (k.tab === "following") return { kind: "public" as const, items: await ipc.feedFollowing(0, 100) };
-      if (k.tab === "walls") return { kind: "walls" as const, items: await ipc.wallsPinned() };
-      if (k.tab === "circles") return { kind: "circles" as const, items: await ipc.circlesMerged(0, 100) };
-      return { kind: "public" as const, items: [] as FeedItem[] };
-    },
+    () => ({ tick: store.ticks().circles, locked: store.locked() }),
+    (k) => (k.locked ? Promise.resolve([] as MergedItem[]) : ipc.circlesMerged(0, 100)),
   );
-
   return (
     <div class="flex h-full flex-col">
       <OfflineBanner />
-      <Show when={postId()} fallback={
-        <Show when={wallId()} fallback={
-          <div class="flex min-h-0 flex-1 flex-col">
-            <div class="flex items-center gap-2 border-b border-border px-3">
-              <Tabs
-                class="flex-1 border-b-0"
-                value={tab()}
-                onChange={(v) => navigate(`/pulse/${v}`)}
-                tabs={[
-                  { id: "friends", label: t("feed_friends") },
-                  { id: "following", label: t("feed_following") },
-                  { id: "walls", label: t("feed_walls") },
-                  { id: "circles", label: t("feed_circles") },
-                ]}
-              />
-              <Button variant="ghost" size="sm" title="Discover posts, walls and people across the network" onClick={() => navigate("/explore")}>
-                <Hash size={13} /> {t("feed_explore")}
-              </Button>
-              <Button variant="ghost" size="icon-sm" title="Refresh" onClick={() => { void ipc.feedRefresh().catch(() => undefined); void refetch(); }}>
-                <RefreshCw size={13} />
-              </Button>
-              <Button variant="brand" size="sm" onClick={() => setCompose({})}>
-                <Plus size={13} /> {t("feed_post")}
-              </Button>
-            </div>
-            <div class="min-h-0 flex-1 overflow-auto">
-              <Show when={!items.error} fallback={<ErrorState error={items.error} onRetry={() => void refetch()} />}>
-                <div class="mx-auto max-w-2xl px-4 py-3">
-                  <Show when={tab() === "circles"}>
-                    <CirclesBar />
-                  </Show>
-                  <Show when={items()}>
-                    {(r) => (
-                      <>
-                        <Show when={r().kind === "public"}>
-                          <Show when={(r().items as FeedItem[]).length} fallback={<Empty title={t("nothing_here")}>{tab() === "friends" ? "Posts from your contacts appear here. Find people in Explore." : "Follow people from their profile to see their posts here."}</Empty>}>
-                            <For each={r().items as FeedItem[]}>{(it) => <PostCard it={it} onOpen={() => navigate(`/pulse/${tab()}/${it.id}`)} />}</For>
-                          </Show>
-                        </Show>
-                        <Show when={r().kind === "walls"}>
-                          <WallsHome walls={r().items as WallInfo[]} onChanged={() => void refetch()} />
-                        </Show>
-                        <Show when={r().kind === "circles"}>
-                          <Show when={(r().items as MergedItem[]).length} fallback={<Empty title="No circle posts yet">Create a Circle above, or wait for one you were added to.</Empty>}>
-                            <For each={r().items as MergedItem[]}>{(m) => <CirclePost circle={m.circle} item={m.item} />}</For>
-                          </Show>
-                        </Show>
-                      </>
-                    )}
-                  </Show>
-                </div>
-              </Show>
-            </div>
+      <div class="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        <h1 class="flex-1 text-sm font-semibold">{t("feed_circles")}</h1>
+        <Button variant="ghost" size="icon-sm" title="Refresh" onClick={() => void refetch()}>
+          <RefreshCw size={13} />
+        </Button>
+        <Button variant="brand" size="sm" onClick={() => setCompose(true)}>
+          <Plus size={13} /> {t("feed_post")}
+        </Button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto">
+        <Show when={!items.error} fallback={<ErrorState error={items.error} onRetry={() => void refetch()} />}>
+          <div class="mx-auto max-w-2xl px-4 py-3">
+            <CirclesBar />
+            <Show when={(items() ?? []).length} fallback={<Empty title="No circle posts yet">Create a Circle above, or wait for one you were added to.</Empty>}>
+              <For each={items() ?? []}>{(m) => <CirclePost circle={m.circle} item={m.item} />}</For>
+            </Show>
           </div>
-        }>
-          {(id) => <WallView id={id()} onBack={() => navigate("/pulse/walls")} onCompose={() => setCompose({ wall: id() })} />}
         </Show>
-      }>
-        {(id) => <PostView id={id()} onBack={() => (window.history.length > 1 ? window.history.back() : navigate(`/pulse/${tab() === "post" ? "friends" : tab()}`))} />}
-      </Show>
-      <ComposeDialog open={!!compose()} onClose={() => setCompose(false)} defaultCircle={tab() === "circles"} defaultWall={(compose() || {}).wall} />
+      </div>
+      <ComposeDialog open={compose()} onClose={() => setCompose(false)} defaultCircle />
     </div>
   );
 }
@@ -312,7 +262,7 @@ export function PostCard(props: { it: FeedItem; onOpen?: () => void; full?: bool
   );
 }
 
-function PostView(props: { id: string; onBack: () => void }) {
+export function PostView(props: { id: string; onBack: () => void }) {
   const [thread, { refetch }] = createResource(
     () => ({ id: props.id, tick: store.ticks().feed }),
     // The network's view: the post plus every comment and reaction a node
@@ -405,7 +355,7 @@ export function WallCard(props: { w: WallInfo; onOpen?: () => void }) {
   );
 }
 
-function WallsHome(props: { walls: WallInfo[]; onChanged: () => void }) {
+export function WallsHome(props: { walls: WallInfo[]; onChanged: () => void }) {
   const navigate = useNavigate();
   const [create, setCreate] = createSignal(false);
   const [open, setOpen] = createSignal("");
@@ -485,7 +435,7 @@ export function CreateWallDialog(props: { open: boolean; onClose: () => void; on
   );
 }
 
-function WallView(props: { id: string; onBack: () => void; onCompose: () => void }) {
+export function WallView(props: { id: string; onBack: () => void; onCompose: () => void }) {
   const navigate = useNavigate();
   const [info, { refetch: refetchInfo }] = createResource(
     () => props.id,
@@ -584,7 +534,7 @@ function WallView(props: { id: string; onBack: () => void; onCompose: () => void
 // Circles
 // ---------------------------------------------------------------------------
 
-function CirclesBar() {
+export function CirclesBar() {
   const [circles, { refetch }] = createResource(
     () => store.ticks().circles,
     () => ipc.circlesList().catch(() => [] as CircleInfo[]),
@@ -830,7 +780,7 @@ function CircleMedia(props: { circle: string; item: string; index: number; mime:
   );
 }
 
-function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircle?: boolean; defaultWall?: string }) {
+export function ComposeDialog(props: { open: boolean; onClose: () => void; defaultCircle?: boolean; defaultWall?: string }) {
   const [text, setText] = createSignal("");
   const [tags, setTags] = createSignal("");
   const [media, setMedia] = createSignal<string[]>([]);

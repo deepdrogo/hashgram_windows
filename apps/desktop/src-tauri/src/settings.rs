@@ -102,6 +102,25 @@ impl Default for AppearanceSettings {
     }
 }
 
+/// Social preferences.
+///
+/// `local_country` is what Pulse's Local tab filters on. It is a choice the
+/// user makes, never a guess from an address, a connection or a clock: the
+/// app has no geolocation of any kind.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SocialSettings {
+    /// Two-letter country code, or empty for no Local tab.
+    #[serde(default)]
+    pub local_country: String,
+    /// Who may start a Chat: `everyone` | `nobody`.
+    #[serde(default = "default_who_can_chat")]
+    pub who_can_chat: String,
+}
+
+fn default_who_can_chat() -> String {
+    "everyone".to_owned()
+}
+
 /// Notifications. Nothing leaves the device: these are OS toasts driven
 /// by sync events.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -197,6 +216,9 @@ pub struct Settings {
     /// Notifications.
     #[serde(default)]
     pub notifications: NotificationSettings,
+    /// Social.
+    #[serde(default)]
+    pub social: SocialSettings,
     /// Mail presentation.
     #[serde(default)]
     pub mail: MailPrefs,
@@ -233,6 +255,10 @@ impl Default for Settings {
             },
             appearance: AppearanceSettings::default(),
             notifications: NotificationSettings::default(),
+            social: SocialSettings {
+                local_country: String::new(),
+                who_can_chat: default_who_can_chat(),
+            },
             mail: MailPrefs::default(),
             updates: UpdateSettings {
                 auto_check: true,
@@ -306,6 +332,15 @@ impl Settings {
         }
         if !["en", "ka"].contains(&self.appearance.language.as_str()) {
             return Err("language must be en or ka".into());
+        }
+        let country = self.social.local_country.trim();
+        if !country.is_empty()
+            && (country.len() != 2 || !country.chars().all(|c| c.is_ascii_alphabetic()))
+        {
+            return Err("the local country is a two-letter code, or empty".into());
+        }
+        if !["everyone", "nobody"].contains(&self.social.who_can_chat.as_str()) {
+            return Err("who may chat must be everyone or nobody".into());
         }
         Ok(())
     }

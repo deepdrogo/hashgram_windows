@@ -6,6 +6,7 @@ import { RefreshCw, Download, Network as NetIcon, ShieldCheck, ShieldAlert } fro
 import { Button, Card, Notice, Stat, Badge, Skeleton, Tabs } from "~/components/ui";
 import { ErrorState } from "~/components/States";
 import { Mono } from "~/components/identity";
+import { TopHolders, Providers } from "~/components/network/Registries";
 import { ipc, errText, type NetworkOverview } from "~/lib/ipc";
 import { store } from "~/lib/store";
 import { t } from "~/lib/i18n";
@@ -121,6 +122,10 @@ export function NetworkRoute() {
                     </div>
                   )}
                 </Show>
+                <div class="grid grid-cols-2 gap-4">
+                  <TopHolders />
+                  <Providers />
+                </div>
                 <Card
                   title="Leaderboards"
                   actions={<span class="text-[11px] text-muted">{n().indexer_configured ? "from the indexer you configured" : "needs an indexer URL (Settings → Network)"}</span>}
